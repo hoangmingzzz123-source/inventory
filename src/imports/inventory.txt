@@ -1,0 +1,10784 @@
+# Reverse Engineering
+
+Version: 1.0
+
+---
+
+# 1. Product Architecture
+
+Hệ thống được chia thành 8 Domain chính
+
+Authentication
+
+↓
+
+Master Data
+
+↓
+
+Inventory
+
+↓
+
+Purchase
+
+↓
+
+Sales
+
+↓
+
+Finance
+
+↓
+
+Reporting
+
+↓
+
+Administration
+
+---
+
+# 2. Domain Map
+
++----------------------+
+| Authentication |
++----------+-----------+
+|
+v
++----------------------+
+| Master Data |
++----------+-----------+
+|
++-------------+--------------+
+| |
+v v
+Inventory Finance
+| |
++-------+------+ |
+| | |
+v v |
+Purchase Sales |
+| | |
++-------+------+ |
+|
+v
+Reporting
+
+---
+
+# 3. Module Dependencies
+
+Products
+│
+├── Purchase
+├── Sales
+├── Inventory
+├── Reports
+
+Customers
+│
+├── Sales
+├── Receivable
+
+Suppliers
+│
+├── Purchase
+├── Payable
+
+Warehouse
+│
+├── Inventory
+├── Purchase
+├── Sales
+
+---
+
+# 4. Data Flow
+
+Purchase
+
+↓
+
+Inventory Transaction (+)
+
+↓
+
+Stock Balance
+
+↓
+
+Average Cost
+
+↓
+
+Ledger
+
+↓
+
+Report
+
+Sales
+
+↓
+
+Inventory Transaction (-)
+
+↓
+
+Stock Balance
+
+↓
+
+Ledger
+
+↓
+
+Revenue
+
+↓
+
+Receivable
+
+---
+
+# 5. Event Flow
+
+Create Purchase
+
+↓
+
+Draft
+
+↓
+
+Approve
+
+↓
+
+Receive
+
+↓
+
+Increase Inventory
+
+↓
+
+Generate Payable
+
+↓
+
+Completed
+
+---
+
+# 6. Business Objects
+
+Product
+
+Warehouse
+
+Supplier
+
+Customer
+
+Employee
+
+Purchase Order
+
+Purchase Item
+
+Sales Order
+
+Sales Item
+
+Inventory Transaction
+
+Inventory Balance
+
+Payment
+
+Receipt
+
+Attachment
+
+Audit Log
+
+---
+
+# 7. Common UI Pattern
+
+Toolbar
+
+Search
+
+Filter
+
+Table
+
+Pagination
+
+Action Menu
+
+Create Button
+
+Import Button
+
+Export Button
+
+Print Button
+# Screen Catalog
+
+Total Screens (Estimated)
+
+45~70
+
+---
+
+Dashboard
+
+Product List
+
+Create Product
+
+Edit Product
+
+View Product
+
+Warehouse List
+
+Warehouse Detail
+
+Customer List
+
+Supplier List
+
+Purchase Order List
+
+Create Purchase Order
+
+Purchase Detail
+
+Goods Receipt
+
+Sales Order List
+
+Invoice
+
+Delivery Note
+
+Inventory Balance
+
+Inventory Ledger
+
+Stock Card
+
+Inventory Adjustment
+
+Inventory Transfer
+
+Cash In
+
+Cash Out
+
+Receivable
+
+Payable
+
+Reports
+
+Settings
+
+Users
+
+Roles
+
+Permissions
+
+Audit Logs
+Login
+
+↓
+
+Dashboard
+
+↓
+
+Select Module
+
+↓
+
+Search
+
+↓
+
+Open Detail
+
+↓
+
+Edit
+
+↓
+
+Save
+
+↓
+
+Confirmation
+
+↓
+
+Update Report
+
+↓
+
+Audit Log
+
+Layout
+
+Desktop First
+
+Sidebar
+
+280px
+
+Topbar
+
+64px
+
+Content
+
+Scrollable
+
+Cards
+
+Rounded XL
+
+Tables
+
+Sticky Header
+
+Sticky Toolbar
+
+Dialogs
+
+Centered
+
+Buttons
+
+Primary
+
+Secondary
+
+Danger
+
+Ghost
+
+Icons
+
+Lucide
+
+Typography
+
+Inter
+
+Spacing
+
+8px Grid
+
+Radius
+
+12px
+
+Shadow
+
+Soft
+Common Components
+
+Button
+
+Input
+
+Textarea
+
+Select
+
+Multi Select
+
+Combobox
+
+Calendar
+
+Date Picker
+
+Currency Input
+
+Barcode Scanner
+
+Table
+
+Data Grid
+
+Pagination
+
+Drawer
+
+Dialog
+
+Popover
+
+Toast
+
+Alert
+
+Tabs
+
+Accordion
+
+Charts
+
+Skeleton
+
+Avatar
+
+Badge
+
+Timeline
+
+Breadcrumb
+Dashboard
+
+Master Data
+
+├── Products
+
+├── Categories
+
+├── Brands
+
+├── Units
+
+├── Warehouses
+
+├── Customers
+
+├── Suppliers
+
+Inventory
+
+├── Stock Balance
+
+├── Stock Card
+
+├── Adjustment
+
+├── Transfer
+
+Purchase
+
+├── Purchase Orders
+
+├── Goods Receipt
+
+├── Returns
+
+Sales
+
+├── Quotations
+
+├── Orders
+
+├── Invoices
+
+├── Returns
+
+Finance
+
+├── Receipts
+
+├── Payments
+
+├── Receivable
+
+├── Payable
+
+Reports
+
+Administration
+
+Settings
+Product
+│
+├── Category
+├── Brand
+├── Unit
+└── Images
+
+Warehouse
+│
+└── Stock Balance
+       │
+       └── Inventory Transaction
+
+Supplier
+│
+└── Purchase Order
+      │
+      └── Purchase Item
+
+Customer
+│
+└── Sales Order
+      │
+      └── Sales Item
+
+Payment
+
+Receipt
+
+Audit Log
+# Figma Make Prompt
+
+Design a modern ERP web application for inventory management.
+
+Target users:
+- Retail stores
+- Warehouses
+- SMEs
+
+Style:
+- Clean
+- Professional
+- Enterprise
+- Similar to ERPNext, Odoo and SAP Business One
+- Desktop First
+
+Sidebar modules:
+
+Dashboard
+
+Master Data
+
+Inventory
+
+Purchase
+
+Sales
+
+Finance
+
+Reports
+
+Administration
+
+Settings
+
+Use:
+
+- shadcn/ui
+
+- Tailwind CSS
+
+- 8px spacing
+
+- Inter font
+
+- Sticky Toolbar
+
+- Sticky Table Header
+
+- Modern KPI Cards
+
+- Charts
+
+- Responsive
+
+Each module should contain
+
+List Screen
+
+Detail Screen
+
+Create Dialog
+
+Edit Dialog
+
+History
+
+Audit Timeline
+
+Attachment Panel
+
+Activity Log
+Product-Design-Bible.md
+
+1. Executive Summary
+2. Product Vision
+3. Personas
+4. Business Domains
+5. Product Principles
+6. Navigation Architecture
+7. Information Architecture
+8. Screen Catalog
+9. User Journeys
+10. Feature Specifications
+11. Business Rules
+12. Data Model
+13. UX Guidelines
+14. Design System
+15. Component Library
+16. API Philosophy
+17. Database Design
+18. Security & Permissions
+19. Reporting
+20. Import / Export
+21. Notifications
+22. Audit Log
+23. AI Features
+24. Non-functional Requirements
+25. Deployment Architecture
+26. Roadmap
+27. Figma Make Prompt
+28. AI Coding Prompt Pack
+# CHAPTER 2 — PRODUCT VISION & DESIGN PRINCIPLES
+
+---
+
+# 2.1 Vision
+
+WarehouseOS là một nền tảng quản lý kho và bán hàng trên nền Web dành cho cá nhân, hộ kinh doanh và doanh nghiệp vừa & nhỏ.
+
+Hệ thống tập trung vào:
+
+- tốc độ thao tác
+- giao diện hiện đại
+- quản lý dữ liệu tập trung
+- realtime
+- cloud-first
+- desktop-first
+- mở rộng dễ dàng
+
+Mục tiêu không phải tạo ERP lớn như SAP.
+
+Mục tiêu là tạo một ERP nhỏ nhưng cực kỳ nhanh.
+
+---
+
+# 2.2 Design Philosophy
+
+Mọi thao tác phải hoàn thành trong ≤3 click.
+
+Ví dụ
+
+Dashboard
+
+↓
+
+Products
+
+↓
+
+Create
+
+↓
+
+Save
+
+Không có wizard nhiều bước.
+
+Không popup liên tục.
+
+Không reload trang.
+
+Không refresh.
+
+---
+
+# 2.3 Product Principles
+
+Principle 1
+
+Data First
+
+Mọi màn hình đều xoay quanh dữ liệu.
+
+Không có animation dư thừa.
+
+---
+
+Principle 2
+
+Fast
+
+Tất cả thao tác:
+
+Create
+
+Update
+
+Delete
+
+Search
+
+Filter
+
+phải phản hồi gần như tức thì.
+
+---
+
+Principle 3
+
+Keyboard Friendly
+
+Ctrl+S
+
+Ctrl+F
+
+Ctrl+N
+
+ESC
+
+Enter
+
+Tab
+
+Shift+Tab
+
+được hỗ trợ.
+
+---
+
+Principle 4
+
+Single Source of Truth
+
+Không duplicate dữ liệu.
+
+Stock chỉ tính từ InventoryTransaction.
+
+Không lưu Stock nhiều nơi.
+
+---
+
+Principle 5
+
+Audit Everything
+
+Mọi thay đổi đều lưu.
+
+User
+
+Time
+
+Old Value
+
+New Value
+
+Reason
+
+IP
+
+Device
+
+---
+
+# 2.4 UX Goals
+
+Người dùng mới
+
+↓
+
+5 phút
+
+↓
+
+Biết dùng
+
+Người dùng cũ
+
+↓
+
+Không cần đọc hướng dẫn.
+
+---
+
+# 2.5 Navigation Philosophy
+
+Sidebar
+
+↓
+
+Module
+
+↓
+
+List
+
+↓
+
+Detail
+
+↓
+
+Save
+
+Luôn thống nhất.
+
+Không module nào khác biệt.
+
+---
+
+# 2.6 Layout Philosophy
+
++---------------------------------------------------------+
+
+Top Navigation
+
++---------+-----------------------------------------------+
+
+Sidebar | Toolbar
+
+|-----------------------------------------------|
+
+| |
+
+| Data Grid |
+
+| |
+
+| |
+
+|-----------------------------------------------|
+
+| Pagination |
+
++------------------------------------------------+
+
+Desktop:
+
+Sidebar luôn hiển thị.
+
+Tablet:
+
+Sidebar thu gọn.
+
+Mobile:
+
+Drawer.
+
+---
+
+# 2.7 Color Philosophy
+
+Primary
+
+Blue
+
+Success
+
+Green
+
+Warning
+
+Orange
+
+Danger
+
+Red
+
+Info
+
+Sky
+
+Background
+
+Neutral
+
+Không dùng quá nhiều màu.
+
+---
+
+# 2.8 Typography
+
+Heading
+
+32
+
+24
+
+20
+
+18
+
+Body
+
+16
+
+14
+
+Caption
+
+12
+
+Font
+
+Inter
+
+Không dùng quá 2 font.
+
+---
+
+# 2.9 Icon Philosophy
+
+Lucide
+
+Không dùng ảnh PNG.
+
+Không dùng icon nhiều màu.
+
+Tất cả SVG.
+
+---
+
+# 2.10 Animation
+
+150~250ms
+
+Ease Out
+
+Không animation khi nhập liệu.
+
+Không animation khi mở bảng lớn.
+
+---
+
+# 2.11 Performance Goal
+
+Dashboard
+
+<1 giây
+
+List
+
+<500ms
+
+Search
+
+<300ms
+
+Dialog
+
+<150ms
+
+Save
+
+<1 giây
+
+---
+
+# 2.12 Responsive
+
+Desktop
+
+1920
+
+1600
+
+1440
+
+1366
+
+Laptop
+
+1280
+
+Tablet
+
+1024
+
+768
+
+Mobile
+
+390
+
+Không ưu tiên Mobile.
+
+---
+
+# 2.13 Accessibility
+
+Keyboard Navigation
+
+Focus Ring
+
+ARIA Label
+
+Screen Reader
+
+High Contrast
+
+Dark Mode
+
+---
+
+# 2.14 Data Grid Philosophy
+
+Đây là thành phần quan trọng nhất.
+
+Một Data Grid chuẩn gồm:
+
+Toolbar
+
+↓
+
+Filter
+
+↓
+
+Table
+
+↓
+
+Summary
+
+↓
+
+Pagination
+
+Columns:
+
+Checkbox
+
+Code
+
+Name
+
+Status
+
+Warehouse
+
+Qty
+
+Price
+
+Updated At
+
+Updated By
+
+Actions
+
+---
+
+# 2.15 Dialog Philosophy
+
+Dialog chỉ dùng cho:
+
+Create
+
+Edit
+
+Delete
+
+Quick View
+
+Không dùng dialog cho quy trình dài.
+
+---
+
+# 2.16 Form Philosophy
+
+Form chia thành
+
+Basic Information
+
+Pricing
+
+Inventory
+
+Attachment
+
+History
+
+Audit
+
+Không quá 2 cột.
+
+---
+
+# 2.17 Dashboard Philosophy
+
+Dashboard chỉ hiển thị:
+
+Thông tin quan trọng.
+
+Không hiển thị mọi thứ.
+
+Ví dụ:
+
+Today's Revenue
+
+Today's Orders
+
+Today's Purchase
+
+Inventory Value
+
+Low Stock
+
+Receivable
+
+Payable
+
+Top Selling
+
+Recent Activities
+
+---
+
+# 2.18 Search Philosophy
+
+Global Search
+
+Ctrl + K
+
+Có thể tìm:
+
+Product
+
+Customer
+
+Supplier
+
+Invoice
+
+Purchase
+
+Warehouse
+
+User
+
+...
+
+---
+
+# 2.19 Notification
+
+Toast
+
+Success
+
+Error
+
+Warning
+
+Information
+
+Không popup.
+
+---
+
+# 2.20 Permission Philosophy
+
+Permission theo:
+
+Module
+
+↓
+
+Feature
+
+↓
+
+Action
+
+Ví dụ
+
+Inventory
+
+View
+
+Create
+
+Edit
+
+Delete
+
+Approve
+
+Export
+
+Print
+# Information Architecture
+
+WarehouseOS
+
+│
+
+├── Dashboard
+
+│
+
+├── Master Data
+
+│ ├── Products
+
+│ ├── Categories
+
+│ ├── Brands
+
+│ ├── Units
+
+│ ├── Warehouses
+
+│ ├── Warehouse Locations
+
+│ ├── Customers
+
+│ ├── Suppliers
+
+│ └── Employees
+
+│
+
+├── Inventory
+
+│ ├── Stock Balance
+
+│ ├── Stock Ledger
+
+│ ├── Stock Adjustment
+
+│ ├── Stock Transfer
+
+│ ├── Cycle Count
+
+│ ├── IMEI
+
+│ └── Serial Numbers
+
+│
+
+├── Purchase
+
+│ ├── Purchase Requests
+
+│ ├── Purchase Orders
+
+│ ├── Goods Receipt
+
+│ ├── Purchase Return
+
+│ └── Supplier Payment
+
+│
+
+├── Sales
+
+│ ├── Quotations
+
+│ ├── Sales Orders
+
+│ ├── Delivery Notes
+
+│ ├── Sales Invoices
+
+│ ├── Customer Returns
+
+│ └── Customer Receipts
+
+│
+
+├── Finance
+
+│ ├── Cash In
+
+│ ├── Cash Out
+
+│ ├── Receivables
+
+│ ├── Payables
+
+│ └── Daily Cash Book
+
+│
+
+├── Reports
+
+│
+
+├── Administration
+
+│
+
+└── Settings
+# CHAPTER 4 — SCREEN CATALOG
+
+Version 1.0
+
+---
+
+# Screen Design Standard
+
+Mỗi màn hình trong hệ thống phải tuân theo cùng một cấu trúc.
+
+Screen
+│
+├── Purpose
+├── Actors
+├── Entry Points
+├── Layout
+├── Components
+├── Actions
+├── Business Rules
+├── Empty State
+├── Loading State
+├── Error State
+├── Permissions
+├── API Dependencies
+└── Future Improvements
+
+---
+
+========================================================
+SCREEN 001
+========================================================
+
+Dashboard
+
+Purpose
+
+Trang chủ của hệ thống.
+
+Hiển thị toàn bộ KPI quan trọng.
+
+Actors
+
+Administrator
+
+Manager
+
+Warehouse Staff
+
+Sales
+
+Cashier
+
+Layout
+
++------------------------------------------------------+
+
+Top Navigation
+
++-----------+------------------------------------------+
+
+Sidebar | KPI Cards
+
+|------------------------------------------|
+
+| Revenue | Orders | Purchase | Stock |
+
+|------------------------------------------|
+
+| Revenue Chart |
+
+|------------------------------------------|
+
+| Low Stock | Recent Orders |
+
+|------------------------------------------|
+
+| Activities |
+
++------------------------------------------+
+
+Components
+
+Header
+
+Breadcrumb
+
+Quick Search
+
+Notification Bell
+
+User Menu
+
+Cards
+
+Today's Revenue
+
+Today's Orders
+
+Today's Purchase
+
+Inventory Value
+
+Receivable
+
+Payable
+
+Charts
+
+Revenue
+
+Purchase
+
+Sales
+
+Inventory
+
+Widgets
+
+Low Stock
+
+Pending Purchase
+
+Pending Delivery
+
+Activities
+
+Actions
+
+Open Product
+
+Open Purchase
+
+Open Sales
+
+Open Reports
+
+Create Product
+
+Create Purchase
+
+Create Invoice
+
+Business Rules
+
+Dashboard không sửa dữ liệu.
+
+Realtime refresh.
+
+Card click mở module tương ứng.
+
+API
+
+/dashboard
+
+/dashboard/chart
+
+/dashboard/activity
+
+/dashboard/kpi
+
+========================================================
+
+SCREEN 002
+
+Products List
+
+Purpose
+
+Quản lý toàn bộ sản phẩm.
+
+Layout
+
+Toolbar
+
+↓
+
+Search
+
+↓
+
+Advanced Filter
+
+↓
+
+Table
+
+↓
+
+Pagination
+
+Toolbar
+
+Create
+
+Import
+
+Export
+
+Print
+
+Delete
+
+Refresh
+
+Columns
+
+Checkbox
+
+Image
+
+SKU
+
+Barcode
+
+Product Name
+
+Category
+
+Brand
+
+Unit
+
+Selling Price
+
+Cost Price
+
+Available Qty
+
+Status
+
+Updated At
+
+Actions
+
+Filters
+
+Keyword
+
+Category
+
+Brand
+
+Warehouse
+
+Status
+
+Created Date
+
+Updated Date
+
+Quick Actions
+
+View
+
+Edit
+
+Duplicate
+
+Archive
+
+Delete
+
+History
+
+Business Rules
+
+Không xóa sản phẩm đã phát sinh giao dịch.
+
+Archive thay cho Delete.
+
+Search realtime.
+
+========================================================
+
+SCREEN 003
+
+Create Product
+
+Layout
+
++--------------------------------------------+
+
+Basic Information
+
+--------------------------------------------
+
+General
+
+Inventory
+
+Pricing
+
+Images
+
+Attachment
+
+History
+
++--------------------------------------------+
+
+Fields
+
+Product Code
+
+Product Name
+
+Barcode
+
+SKU
+
+Category
+
+Brand
+
+Unit
+
+Description
+
+Purchase Price
+
+Selling Price
+
+Tax
+
+Minimum Stock
+
+Maximum Stock
+
+Track Inventory
+
+Track Serial
+
+Track IMEI
+
+Track Batch
+
+Allow Negative Stock
+
+Image
+
+Attachments
+
+Buttons
+
+Save
+
+Save & New
+
+Cancel
+
+Business Rules
+
+Product Code unique.
+
+Barcode unique.
+
+Selling Price >= 0
+
+Purchase Price >= 0
+
+========================================================
+
+SCREEN 004
+
+Product Detail
+
+Tabs
+
+Overview
+
+Inventory
+
+Price History
+
+Purchase History
+
+Sales History
+
+Stock Ledger
+
+Attachments
+
+Audit Logs
+
+========================================================
+
+SCREEN 005
+
+Categories
+
+Purpose
+
+Quản lý danh mục.
+
+Fields
+
+Code
+
+Name
+
+Parent
+
+Description
+
+Status
+
+========================================================
+
+SCREEN 006
+
+Brands
+
+Purpose
+
+Quản lý thương hiệu.
+
+========================================================
+
+SCREEN 007
+
+Units
+
+Purpose
+
+Quản lý đơn vị tính.
+
+Ví dụ
+
+Piece
+
+Box
+
+Bottle
+
+Kg
+
+Meter
+
+Pack
+
+========================================================
+
+SCREEN 008
+
+Warehouses
+
+Layout
+
+Warehouse List
+
+↓
+
+Warehouse Detail
+
+Fields
+
+Warehouse Code
+
+Warehouse Name
+
+Address
+
+Manager
+
+Phone
+
+Description
+
+Status
+
+========================================================
+
+SCREEN 009
+
+Warehouse Locations
+
+Purpose
+
+Quản lý vị trí.
+
+Warehouse
+
+↓
+
+Zone
+
+↓
+
+Shelf
+
+↓
+
+Bin
+
+========================================================
+
+SCREEN 010
+
+Customers
+
+Fields
+
+Customer Code
+
+Customer Name
+
+Phone
+
+Email
+
+Tax Code
+
+Address
+
+Credit Limit
+
+Current Debt
+
+Status
+
+========================================================
+
+SCREEN 011
+
+Suppliers
+
+Fields
+
+Supplier Code
+
+Supplier Name
+
+Phone
+
+Email
+
+Tax Code
+
+Address
+
+Current Debt
+
+========================================================
+
+SCREEN 012
+
+Employees
+
+Fields
+
+Employee Code
+
+Full Name
+
+Department
+
+Role
+
+Email
+
+Phone
+
+Status
+
+========================================================
+
+SCREEN 013
+
+Purchase Orders
+
+Toolbar
+
+Create
+
+Approve
+
+Print
+
+Export
+
+Table
+
+PO Number
+
+Supplier
+
+Warehouse
+
+Status
+
+Total
+
+Created By
+
+Date
+
+========================================================
+
+SCREEN 014
+
+Purchase Detail
+
+Header
+
+Supplier
+
+Warehouse
+
+Currency
+
+Expected Date
+
+Items
+
+Qty
+
+Price
+
+Discount
+
+VAT
+
+Total
+
+Footer
+
+Subtotal
+
+Tax
+
+Discount
+
+Grand Total
+
+========================================================
+
+SCREEN 015
+
+Goods Receipt
+
+Purpose
+
+Nhập kho.
+
+Workflow
+
+Draft
+
+↓
+
+Receive
+
+↓
+
+Increase Inventory
+
+↓
+
+Completed
+
+========================================================
+
+SCREEN 016
+
+Purchase Return
+
+========================================================
+
+SCREEN 017
+
+Supplier Payment
+
+========================================================
+
+SCREEN 018
+
+Sales Orders
+
+========================================================
+
+SCREEN 019
+
+Sales Invoice
+
+========================================================
+
+SCREEN 020
+
+Delivery Note
+
+========================================================
+
+SCREEN 021
+
+Customer Receipt
+
+========================================================
+
+SCREEN 022
+
+Customer Return
+
+========================================================
+
+SCREEN 023
+
+Inventory Balance
+
+Purpose
+
+Hiển thị tồn hiện tại.
+
+Columns
+
+Warehouse
+
+Product
+
+Available
+
+Reserved
+
+Incoming
+
+Outgoing
+
+Average Cost
+
+Inventory Value
+
+========================================================
+
+SCREEN 024
+
+Inventory Ledger
+
+Columns
+
+Date
+
+Reference
+
+Type
+
+Warehouse
+
+Product
+
+Qty In
+
+Qty Out
+
+Balance
+
+Unit Cost
+
+Average Cost
+
+Created By
+
+========================================================
+
+SCREEN 025
+
+Inventory Adjustment
+
+========================================================
+
+SCREEN 026
+
+Inventory Transfer
+
+Workflow
+
+Create
+
+↓
+
+Approve
+
+↓
+
+Decrease Warehouse A
+
+↓
+
+Increase Warehouse B
+
+↓
+
+Done
+
+========================================================
+
+SCREEN 027
+
+Stock Count
+
+========================================================
+
+SCREEN 028
+
+Cash In
+
+========================================================
+
+SCREEN 029
+
+Cash Out
+
+========================================================
+
+SCREEN 030
+
+Receivable
+
+========================================================
+
+SCREEN 031
+
+Payable
+
+========================================================
+
+SCREEN 032
+
+Reports Home
+
+Categories
+
+Inventory
+
+Sales
+
+Purchase
+
+Finance
+
+Management
+
+========================================================
+
+SCREEN 033
+
+Audit Logs
+
+========================================================
+
+SCREEN 034
+
+Roles
+
+========================================================
+
+SCREEN 035
+
+Permissions
+
+========================================================
+
+SCREEN 036
+
+Users
+
+========================================================
+
+SCREEN 037
+
+Settings
+
+General
+
+Company
+
+Theme
+
+Currency
+
+Tax
+
+Email
+
+Storage
+
+Backup
+
+========================================================
+
+SCREEN 038
+
+Profile
+
+========================================================
+
+SCREEN 039
+
+Notification Center
+
+========================================================
+
+SCREEN 040
+
+Activity Timeline
+
+========================================================
+
+END OF SCREEN CATALOG V1
+# CHAPTER 5 — BUSINESS DOMAIN & BUSINESS WORKFLOWS
+
+Version 1.0
+
+---
+
+# Business Domain Overview
+
+WarehouseOS được chia thành 7 Business Domain độc lập.
+
+Master Data
+
+↓
+
+Procurement
+
+↓
+
+Inventory
+
+↓
+
+Sales
+
+↓
+
+Finance
+
+↓
+
+Reporting
+
+↓
+
+Administration
+
+Mỗi Domain có thể phát triển thành microservice trong tương lai.
+
+---
+
+# Domain Relationships
+
+Supplier
+        │
+        ▼
+ Purchase
+        │
+        ▼
+Inventory
+        │
+        ▼
+ Sales
+        │
+        ▼
+Customer
+
+Finance theo dõi Purchase và Sales.
+
+Reporting tổng hợp toàn bộ.
+
+---
+
+# MASTER DATA DOMAIN
+
+Master Data là nền tảng.
+
+Không phát sinh giao dịch.
+
+Chỉ lưu dữ liệu tham chiếu.
+
+Bao gồm
+
+Products
+
+Categories
+
+Brands
+
+Units
+
+Warehouses
+
+Warehouse Locations
+
+Customers
+
+Suppliers
+
+Employees
+
+Users
+
+Roles
+
+Permissions
+
+Currencies
+
+Taxes
+
+---
+
+Business Rule
+
+Không được xóa dữ liệu đã phát sinh giao dịch.
+
+Chỉ được Archive.
+
+---
+
+# PRODUCT LIFECYCLE
+
+Create Product
+
+↓
+
+Activate
+
+↓
+
+Purchase
+
+↓
+
+Inventory
+
+↓
+
+Sales
+
+↓
+
+Inactive
+
+↓
+
+Archive
+
+↓
+
+Restore (Optional)
+
+---
+
+Product State
+
+Draft
+
+Active
+
+Inactive
+
+Archived
+
+Deleted (System Only)
+
+---
+
+# PURCHASE DOMAIN
+
+Purchase gồm nhiều bước.
+
+Purchase Request (Optional)
+
+↓
+
+Purchase Order
+
+↓
+
+Approve
+
+↓
+
+Goods Receipt
+
+↓
+
+Supplier Invoice
+
+↓
+
+Supplier Payment
+
+↓
+
+Completed
+
+---
+
+Purchase Order State
+
+Draft
+
+Pending Approval
+
+Approved
+
+Partially Received
+
+Received
+
+Closed
+
+Cancelled
+
+---
+
+Purchase Rules
+
+PO Number phải duy nhất.
+
+Không được sửa sau khi Receive.
+
+Receive nhiều lần.
+
+Close tự động khi đủ hàng.
+
+---
+
+Goods Receipt
+
+Mỗi lần Receive sẽ sinh:
+
+Inventory Transaction
+
+Stock Ledger
+
+Average Cost
+
+Audit Log
+
+---
+
+Purchase Return
+
+Supplier Return
+
+↓
+
+Decrease Inventory
+
+↓
+
+Create Credit Note
+
+↓
+
+Update Supplier Debt
+
+---
+
+# SALES DOMAIN
+
+Sales Flow
+
+Quotation
+
+↓
+
+Sales Order
+
+↓
+
+Approve
+
+↓
+
+Delivery
+
+↓
+
+Invoice
+
+↓
+
+Customer Payment
+
+↓
+
+Completed
+
+---
+
+Sales Order State
+
+Draft
+
+Pending
+
+Approved
+
+Delivered
+
+Completed
+
+Cancelled
+
+---
+
+Sales Rules
+
+Không giao quá tồn.
+
+Có thể cho phép âm kho (Config).
+
+Giá bán ≥ 0.
+
+Discount không vượt mức quyền.
+
+---
+
+Delivery
+
+Delivery sẽ
+
+↓
+
+Decrease Inventory
+
+↓
+
+Create Stock Ledger
+
+↓
+
+Update Inventory Balance
+
+↓
+
+Generate Audit
+
+---
+
+Customer Return
+
+Customer Return
+
+↓
+
+Increase Inventory
+
+↓
+
+Reverse Revenue
+
+↓
+
+Reverse Inventory Cost
+
+↓
+
+Update Receivable
+
+---
+
+# INVENTORY DOMAIN
+
+Inventory chỉ có một nguồn dữ liệu.
+
+InventoryTransaction
+
+Không lưu tồn kho tại nhiều bảng.
+
+Stock Balance luôn được tính từ Transaction.
+
+---
+
+Inventory Transaction Types
+
+Purchase
+
+Sales
+
+Adjustment
+
+Transfer
+
+Return
+
+Production
+
+Opening Balance
+
+Cycle Count
+
+---
+
+Movement
+
+Inbound
+
+Outbound
+
+Transfer
+
+Adjustment
+
+Reserved
+
+Released
+
+---
+
+Stock Ledger
+
+Date
+
+Reference
+
+Warehouse
+
+Product
+
+Qty In
+
+Qty Out
+
+Balance
+
+Cost
+
+Running Average
+
+User
+
+---
+
+Inventory Balance
+
+Warehouse
+
+Product
+
+Available
+
+Reserved
+
+Incoming
+
+Outgoing
+
+Average Cost
+
+Inventory Value
+
+---
+
+Inventory Adjustment
+
+Increase
+
+Decrease
+
+Reason
+
+Approval
+
+Audit
+
+---
+
+Inventory Transfer
+
+Warehouse A
+
+↓
+
+Decrease
+
+↓
+
+Transfer
+
+↓
+
+Increase
+
+↓
+
+Warehouse B
+
+---
+
+Inventory Rules
+
+Không cho âm kho (Default)
+
+Có thể bật Allow Negative Stock.
+
+Inventory không bao giờ sửa trực tiếp.
+
+Mọi thay đổi đều tạo Transaction.
+
+---
+
+# COSTING STRATEGY
+
+System hỗ trợ
+
+FIFO
+
+Moving Average
+
+Specific Identification
+
+Weighted Average
+
+Config theo Company.
+
+---
+
+Moving Average
+
+Average Cost
+
+=
+
+(Current Value + New Value)
+
+/
+
+(Current Qty + New Qty)
+
+---
+
+FIFO
+
+Receive
+
+↓
+
+Queue
+
+↓
+
+Issue
+
+↓
+
+Consume Oldest Layer
+
+---
+
+Specific Identification
+
+IMEI
+
+↓
+
+Serial
+
+↓
+
+Exact Cost
+
+---
+
+# IMEI DOMAIN
+
+Track IMEI
+
+Track Serial
+
+Track Batch
+
+Mỗi sản phẩm có thể cấu hình.
+
+Không bắt buộc.
+
+---
+
+IMEI Workflow
+
+Receive
+
+↓
+
+Generate IMEI
+
+↓
+
+Assign
+
+↓
+
+Sales
+
+↓
+
+Warranty
+
+↓
+
+History
+
+---
+
+# FINANCE DOMAIN
+
+Cash
+
+Bank
+
+Receivable
+
+Payable
+
+Expense
+
+Income
+
+---
+
+Receivable
+
+Invoice
+
+↓
+
+Outstanding
+
+↓
+
+Receipt
+
+↓
+
+Paid
+
+---
+
+Payable
+
+Purchase
+
+↓
+
+Outstanding
+
+↓
+
+Payment
+
+↓
+
+Paid
+
+---
+
+Cash Book
+
+Opening
+
+↓
+
+Receipt
+
+↓
+
+Payment
+
+↓
+
+Closing
+
+---
+
+# REPORTING DOMAIN
+
+Report không ghi dữ liệu.
+
+Chỉ đọc.
+
+---
+
+Inventory Reports
+
+Stock Balance
+
+Stock Ledger
+
+Inventory Value
+
+Low Stock
+
+Dead Stock
+
+Fast Moving
+
+Slow Moving
+
+---
+
+Sales Reports
+
+Revenue
+
+Gross Profit
+
+Customer Ranking
+
+Product Ranking
+
+Sales By Employee
+
+---
+
+Purchase Reports
+
+Purchase Summary
+
+Supplier Ranking
+
+Purchase Trend
+
+---
+
+Finance Reports
+
+Cash Flow
+
+Receivable Aging
+
+Payable Aging
+
+Expense Summary
+
+---
+
+# AUDIT DOMAIN
+
+Audit được sinh tự động.
+
+Create
+
+Update
+
+Delete
+
+Approve
+
+Reject
+
+Login
+
+Logout
+
+Export
+
+Import
+
+---
+
+Audit Record
+
+Entity
+
+Action
+
+Old Value
+
+New Value
+
+User
+
+Time
+
+Device
+
+IP
+
+Reason
+
+---
+
+# IMPORT ENGINE
+
+Import Excel
+
+↓
+
+Validate
+
+↓
+
+Preview
+
+↓
+
+Error Report
+
+↓
+
+Import
+
+↓
+
+Audit
+
+---
+
+Import Rules
+
+Không import trực tiếp.
+
+Luôn Preview trước.
+
+Hiển thị lỗi theo từng dòng.
+
+Rollback nếu lỗi.
+
+---
+
+# EXPORT ENGINE
+
+CSV
+
+Excel
+
+PDF
+
+Print
+
+---
+
+# SEARCH ENGINE
+
+Global Search
+
+Ctrl + K
+
+Tìm
+
+Product
+
+Customer
+
+Supplier
+
+Invoice
+
+Purchase
+
+Warehouse
+
+Employee
+
+Report
+
+---
+
+# APPROVAL ENGINE
+
+Draft
+
+↓
+
+Submit
+
+↓
+
+Pending
+
+↓
+
+Approve
+
+↓
+
+Completed
+
+↓
+
+Locked
+
+Reject
+
+↓
+
+Back to Draft
+
+---
+
+Approval Levels
+
+Level 1
+
+Manager
+
+↓
+
+Level 2
+
+Director
+
+↓
+
+Level 3
+
+Finance
+
+Configurable.
+
+---
+
+# NOTIFICATION ENGINE
+
+Email
+
+In-app
+
+Push (Future)
+
+Event Trigger
+
+Purchase Approved
+
+Invoice Created
+
+Low Stock
+
+Payment Due
+
+Overdue
+
+---
+
+# BACKUP
+
+Daily
+
+Weekly
+
+Monthly
+
+Manual
+
+Cloud
+
+---
+
+# RESTORE
+
+Company
+
+Module
+
+Selected Records
+
+Point-in-time (Future)
+
+---
+
+# BUSINESS EVENT MATRIX
+
+Purchase Created
+→ Audit
+→ Notification
+
+Purchase Received
+→ Inventory
+→ Ledger
+→ Finance
+
+Sales Delivered
+→ Inventory
+→ Ledger
+
+Invoice Paid
+→ Finance
+
+Transfer Approved
+→ Inventory
+
+Adjustment Approved
+→ Inventory
+
+END OF CHAPTER 5
+# CHAPTER 6 — DATA ARCHITECTURE & DATABASE DESIGN
+
+Version 1.0
+
+---
+
+# 6.1 Database Philosophy
+
+System sử dụng PostgreSQL.
+
+Không lưu dữ liệu dư thừa.
+
+Không duplicate business data.
+
+Mọi thay đổi đều truy vết được.
+
+Audit by default.
+
+Soft Delete by default.
+
+UUID Primary Key.
+
+CreatedAt
+
+UpdatedAt
+
+CreatedBy
+
+UpdatedBy
+
+DeletedAt
+
+DeletedBy
+
+Version
+
+mọi bảng đều có.
+
+---
+
+# 6.2 Database Layers
+
+Master Data
+
+↓
+
+Transaction
+
+↓
+
+Ledger
+
+↓
+
+Reporting
+
+↓
+
+Audit
+
+Master Data không sinh số liệu.
+
+Transaction sinh nghiệp vụ.
+
+Ledger ghi lịch sử.
+
+Reporting chỉ đọc.
+
+Audit ghi mọi thay đổi.
+
+---
+
+# 6.3 Naming Convention
+
+table_name
+
+snake_case
+
+Column
+
+snake_case
+
+Primary Key
+
+id UUID
+
+Foreign Key
+
+xxx_id
+
+Timestamp
+
+created_at
+
+updated_at
+
+deleted_at
+
+---
+
+# 6.4 Core Domains
+
+Identity
+
+Master Data
+
+Inventory
+
+Purchase
+
+Sales
+
+Finance
+
+Reporting
+
+Administration
+
+---
+
+# 6.5 Master Data Tables
+
+companies
+
+branches
+
+warehouses
+
+warehouse_locations
+
+categories
+
+brands
+
+units
+
+products
+
+product_images
+
+customers
+
+suppliers
+
+employees
+
+taxes
+
+currencies
+
+payment_terms
+
+price_lists
+
+product_prices
+
+attachments
+
+tags
+
+notes
+
+---
+
+# Product Entity
+
+Product
+
+↓
+
+Category
+
+↓
+
+Brand
+
+↓
+
+Unit
+
+↓
+
+Price
+
+↓
+
+Inventory
+
+↓
+
+Ledger
+
+---
+
+products
+
+id
+
+sku
+
+barcode
+
+name
+
+description
+
+category_id
+
+brand_id
+
+base_unit_id
+
+track_inventory
+
+track_serial
+
+track_batch
+
+track_imei
+
+minimum_stock
+
+maximum_stock
+
+cost_method
+
+status
+
+created_at
+
+updated_at
+
+---
+
+# Categories
+
+Tree Structure
+
+Electronics
+
+└── Laptop
+
+└── Phone
+
+Home
+
+Office
+
+Food
+
+Fashion
+
+Unlimited nesting.
+
+---
+
+# Warehouses
+
+Warehouse
+
+↓
+
+Zone
+
+↓
+
+Shelf
+
+↓
+
+Bin
+
+Ví dụ
+
+HN01
+
+↓
+
+A
+
+↓
+
+03
+
+↓
+
+12
+
+---
+
+warehouse_locations
+
+warehouse_id
+
+zone
+
+shelf
+
+bin
+
+capacity
+
+status
+
+---
+
+# Customer
+
+id
+
+code
+
+name
+
+phone
+
+email
+
+tax_code
+
+credit_limit
+
+payment_term
+
+status
+
+---
+
+# Supplier
+
+id
+
+code
+
+name
+
+phone
+
+email
+
+tax_code
+
+payment_term
+
+status
+
+---
+
+# 6.6 Purchase Domain
+
+purchase_orders
+
+purchase_order_items
+
+goods_receipts
+
+goods_receipt_items
+
+purchase_returns
+
+supplier_payments
+
+supplier_credit_notes
+
+---
+
+Purchase Order
+
+Header
+
+↓
+
+Items
+
+↓
+
+Approval
+
+↓
+
+Receive
+
+↓
+
+Close
+
+---
+
+purchase_orders
+
+id
+
+number
+
+supplier_id
+
+warehouse_id
+
+status
+
+currency
+
+subtotal
+
+discount
+
+tax
+
+grand_total
+
+expected_date
+
+approved_by
+
+approved_at
+
+---
+
+purchase_order_items
+
+product_id
+
+qty
+
+received_qty
+
+unit_price
+
+discount
+
+tax
+
+line_total
+
+---
+
+# 6.7 Sales Domain
+
+sales_orders
+
+sales_order_items
+
+delivery_notes
+
+sales_invoices
+
+customer_receipts
+
+sales_returns
+
+---
+
+sales_orders
+
+id
+
+number
+
+customer_id
+
+warehouse_id
+
+status
+
+subtotal
+
+discount
+
+tax
+
+grand_total
+
+---
+
+sales_order_items
+
+product_id
+
+qty
+
+delivered_qty
+
+unit_price
+
+discount
+
+tax
+
+line_total
+
+---
+
+# 6.8 Inventory Domain
+
+inventory_transactions
+
+inventory_balances
+
+inventory_adjustments
+
+inventory_adjustment_items
+
+inventory_transfers
+
+inventory_transfer_items
+
+stock_counts
+
+stock_count_items
+
+inventory_reservations
+
+---
+
+Inventory Principle
+
+Không lưu tồn tại nhiều nơi.
+
+InventoryTransaction
+
+↓
+
+InventoryBalance
+
+↓
+
+Reports
+
+---
+
+inventory_transactions
+
+id
+
+transaction_type
+
+reference_type
+
+reference_id
+
+warehouse_id
+
+product_id
+
+location_id
+
+qty
+
+unit_cost
+
+running_cost
+
+batch_id
+
+serial_id
+
+imei_id
+
+created_at
+
+---
+
+Transaction Types
+
+Opening
+
+Purchase
+
+Sales
+
+Transfer In
+
+Transfer Out
+
+Adjustment
+
+Return
+
+Production
+
+Consumption
+
+Cycle Count
+
+---
+
+Inventory Balance
+
+warehouse_id
+
+product_id
+
+available_qty
+
+reserved_qty
+
+incoming_qty
+
+outgoing_qty
+
+average_cost
+
+inventory_value
+
+last_transaction_at
+
+---
+
+# 6.9 IMEI / Serial Domain
+
+serial_numbers
+
+batch_numbers
+
+imei_numbers
+
+product_warranties
+
+---
+
+imei_numbers
+
+product_id
+
+warehouse_id
+
+imei
+
+status
+
+received_date
+
+sold_date
+
+customer_id
+
+warranty_until
+
+---
+
+IMEI State
+
+Available
+
+Reserved
+
+Sold
+
+Returned
+
+Lost
+
+Disposed
+
+---
+
+# 6.10 Finance Domain
+
+cash_books
+
+cash_transactions
+
+receivables
+
+payables
+
+expenses
+
+income
+
+bank_accounts
+
+payment_transactions
+
+---
+
+Cash Transaction
+
+Receipt
+
+Payment
+
+Transfer
+
+Adjustment
+
+---
+
+Receivable
+
+Invoice
+
+↓
+
+Outstanding
+
+↓
+
+Paid
+
+↓
+
+Closed
+
+---
+
+# 6.11 Reporting Layer
+
+Không lưu dữ liệu.
+
+Chỉ đọc.
+
+Materialized View (Optional)
+
+inventory_summary
+
+sales_summary
+
+purchase_summary
+
+cash_summary
+
+customer_summary
+
+supplier_summary
+
+---
+
+# 6.12 Audit Layer
+
+audit_logs
+
+audit_details
+
+login_logs
+
+activity_logs
+
+---
+
+audit_logs
+
+entity
+
+entity_id
+
+action
+
+user_id
+
+old_value
+
+new_value
+
+device
+
+ip
+
+browser
+
+created_at
+
+---
+
+# 6.13 Notification
+
+notifications
+
+notification_templates
+
+notification_queue
+
+---
+
+# 6.14 Settings
+
+system_settings
+
+company_settings
+
+tax_settings
+
+currency_settings
+
+email_settings
+
+storage_settings
+
+backup_settings
+
+theme_settings
+
+---
+
+# 6.15 Identity
+
+users
+
+roles
+
+permissions
+
+role_permissions
+
+user_roles
+
+sessions
+
+refresh_tokens
+
+api_keys
+
+---
+
+Permission Model
+
+Module
+
+↓
+
+Feature
+
+↓
+
+Action
+
+Ví dụ
+
+Inventory
+
+View
+
+Create
+
+Edit
+
+Delete
+
+Approve
+
+Export
+
+Print
+
+---
+
+# 6.16 Attachment
+
+attachments
+
+id
+
+entity_type
+
+entity_id
+
+file_name
+
+mime_type
+
+storage_path
+
+uploaded_by
+
+uploaded_at
+
+---
+
+Storage
+
+Supabase Storage
+
+Không lưu binary trong PostgreSQL.
+
+---
+
+# 6.17 Soft Delete
+
+deleted_at
+
+deleted_by
+
+Không DELETE vật lý.
+
+---
+
+# 6.18 Multi Company
+
+Company
+
+↓
+
+Branch
+
+↓
+
+Warehouse
+
+↓
+
+Location
+
+---
+
+# 6.19 Multi Currency
+
+Company Currency
+
+↓
+
+Transaction Currency
+
+↓
+
+Exchange Rate
+
+↓
+
+Base Currency
+
+---
+
+# 6.20 Event Driven Model
+
+Purchase Approved
+
+↓
+
+Inventory Updated
+
+↓
+
+Ledger Created
+
+↓
+
+Notification Sent
+
+↓
+
+Audit Logged
+
+↓
+
+Realtime Refresh
+
+---
+
+# 6.21 Row Level Security (Supabase)
+
+Every table must support RLS.
+
+Company Scope
+
+↓
+
+Branch Scope
+
+↓
+
+Warehouse Scope
+
+↓
+
+Role Scope
+
+---
+
+Example
+
+Warehouse Staff
+
+↓
+
+Only own warehouse
+
+Sales
+
+↓
+
+Only sales module
+
+Manager
+
+↓
+
+All branch
+
+Admin
+
+↓
+
+All company
+
+---
+
+END OF CHAPTER 6
+# CHAPTER 7 — BACKEND & API ARCHITECTURE
+
+Version 1.0
+
+---
+
+# 7.1 Backend Philosophy
+
+Backend phải là:
+
+Stateless
+
+RESTful
+
+Event-driven
+
+Realtime
+
+Cloud Native
+
+Serverless Friendly
+
+Idempotent
+
+Audit First
+
+---
+
+# 7.2 High Level Architecture
+
+                    Browser
+                        │
+                React + Vite SPA
+                        │
+        ┌───────────────┴───────────────┐
+        │                               │
+ TanStack Query                 Supabase Auth
+        │                               │
+        └───────────────┬───────────────┘
+                        │
+                  Edge Functions
+                        │
+                 PostgreSQL Database
+                        │
+       Storage ───── Realtime ───── Cron
+
+---
+
+# 7.3 Bounded Context
+
+Identity
+
+Master Data
+
+Purchase
+
+Inventory
+
+Sales
+
+Finance
+
+Reporting
+
+Administration
+
+Notification
+
+Integration
+
+Mỗi context độc lập.
+
+---
+
+# 7.4 API Convention
+
+GET
+
+POST
+
+PATCH
+
+DELETE
+
+Không dùng PUT.
+
+PATCH chỉ update field thay đổi.
+
+---
+
+# 7.5 REST Convention
+
+/api/v1/products
+
+/api/v1/customers
+
+/api/v1/purchase-orders
+
+/api/v1/sales-orders
+
+/api/v1/inventory
+
+/api/v1/reports
+
+/api/v1/settings
+
+---
+
+# 7.6 Standard Response
+
+Success
+
+{
+  success,
+  data,
+  meta
+}
+
+Error
+
+{
+  success,
+  error,
+  code,
+  message,
+  traceId
+}
+
+---
+
+# 7.7 Pagination
+
+page
+
+pageSize
+
+sort
+
+order
+
+keyword
+
+filter
+
+Ví dụ
+
+GET
+
+/products
+
+?page=1
+
+&pageSize=20
+
+&sort=name
+
+&order=asc
+
+---
+
+# 7.8 Filtering
+
+Category
+
+Brand
+
+Warehouse
+
+Status
+
+Date
+
+Price
+
+Qty
+
+Hỗ trợ nhiều điều kiện.
+
+---
+
+# 7.9 Search
+
+Global Search
+
+Tìm theo:
+
+SKU
+
+Barcode
+
+Product Name
+
+Customer
+
+Supplier
+
+Invoice
+
+PO
+
+SO
+
+IMEI
+
+Serial
+
+---
+
+# 7.10 Sorting
+
+Single
+
+Multi Column
+
+Asc
+
+Desc
+
+---
+
+# 7.11 Product API
+
+GET
+
+/products
+
+GET
+
+/products/{id}
+
+POST
+
+/products
+
+PATCH
+
+/products/{id}
+
+DELETE
+
+/products/{id}
+
+POST
+
+/products/import
+
+GET
+
+/products/export
+
+POST
+
+/products/archive
+
+GET
+
+/products/history
+
+---
+
+# 7.12 Warehouse API
+
+GET
+
+/warehouses
+
+POST
+
+/warehouses
+
+PATCH
+
+/warehouses/{id}
+
+GET
+
+/warehouse-locations
+
+POST
+
+/warehouse-locations
+
+---
+
+# 7.13 Customer API
+
+GET
+
+/customers
+
+POST
+
+/customers
+
+PATCH
+
+/customers/{id}
+
+Archive
+
+Merge
+
+Export
+
+Import
+
+---
+
+# 7.14 Supplier API
+
+GET
+
+/suppliers
+
+POST
+
+/suppliers
+
+PATCH
+
+/suppliers/{id}
+
+Payment History
+
+Purchase History
+
+---
+
+# 7.15 Purchase API
+
+GET
+
+/purchase-orders
+
+POST
+
+/purchase-orders
+
+PATCH
+
+/purchase-orders/{id}
+
+POST
+
+/purchase-orders/{id}/submit
+
+POST
+
+/purchase-orders/{id}/approve
+
+POST
+
+/purchase-orders/{id}/cancel
+
+POST
+
+/purchase-orders/{id}/receive
+
+---
+
+# 7.16 Sales API
+
+GET
+
+/sales-orders
+
+POST
+
+/sales-orders
+
+PATCH
+
+/sales-orders/{id}
+
+Approve
+
+Invoice
+
+Delivery
+
+Payment
+
+Cancel
+
+---
+
+# 7.17 Inventory API
+
+GET
+
+/inventory/balance
+
+GET
+
+/inventory/ledger
+
+POST
+
+/inventory/adjustment
+
+POST
+
+/inventory/transfer
+
+POST
+
+/inventory/count
+
+GET
+
+/inventory/history
+
+---
+
+# 7.18 Finance API
+
+Receivable
+
+Payable
+
+Receipt
+
+Payment
+
+Cash Book
+
+Bank
+
+Expense
+
+Income
+
+---
+
+# 7.19 Report API
+
+Inventory
+
+Sales
+
+Purchase
+
+Finance
+
+Dashboard
+
+Analytics
+
+Download
+
+Export
+
+---
+
+# 7.20 Authentication
+
+Supabase Auth
+
+Email
+
+Password
+
+Magic Link
+
+Google
+
+GitHub
+
+MFA (Future)
+
+---
+
+# 7.21 Authorization
+
+Role
+
+↓
+
+Permission
+
+↓
+
+Feature
+
+↓
+
+Action
+
+Ví dụ
+
+Inventory
+
+↓
+
+Transfer
+
+↓
+
+Approve
+
+---
+
+# 7.22 Validation
+
+Server Side
+
++
+
+Client Side
+
+Zod
+
+Không tin dữ liệu client.
+
+---
+
+# 7.23 Transaction
+
+Một nghiệp vụ
+
+↓
+
+Một transaction
+
+Ví dụ
+
+Receive Purchase
+
+↓
+
+Create Goods Receipt
+
+↓
+
+Inventory Transaction
+
+↓
+
+Update Balance
+
+↓
+
+Audit
+
+↓
+
+Notification
+
+↓
+
+Commit
+
+Rollback nếu lỗi.
+
+---
+
+# 7.24 Realtime Events
+
+Inventory Updated
+
+Product Updated
+
+Purchase Approved
+
+Sales Delivered
+
+Notification Created
+
+Dashboard Updated
+
+---
+
+# 7.25 Error Codes
+
+VALIDATION_ERROR
+
+NOT_FOUND
+
+FORBIDDEN
+
+CONFLICT
+
+OUT_OF_STOCK
+
+INVALID_STATUS
+
+DUPLICATE_CODE
+
+UNKNOWN_ERROR
+
+---
+
+# 7.26 Background Jobs
+
+Daily Backup
+
+Daily Summary
+
+Inventory Snapshot
+
+Email Queue
+
+Notification Queue
+
+Cleanup
+
+---
+
+# 7.27 Audit
+
+Every API
+
+↓
+
+Audit
+
+Every Login
+
+↓
+
+Audit
+
+Every Export
+
+↓
+
+Audit
+
+---
+
+# 7.28 File Upload
+
+Supabase Storage
+
+Avatar
+
+Product Images
+
+Attachments
+
+Invoices
+
+PDF
+
+Excel
+
+Không lưu file trong DB.
+
+---
+
+# 7.29 API Versioning
+
+/api/v1
+
+/api/v2
+
+Không breaking change.
+
+---
+
+# 7.30 Integration (Future)
+
+Accounting
+
+POS
+
+Shopee
+
+Lazada
+
+TikTok Shop
+
+Barcode Scanner
+
+QR Scanner
+
+Webhook
+
+Open API
+
+END OF CHAPTER 7
+# CHAPTER 8 — FRONTEND ARCHITECTURE
+
+Version 1.0
+
+---
+
+# 8.1 Frontend Philosophy
+
+Frontend phải đáp ứng:
+
+- Fast First
+- Offline Friendly (Future)
+- Desktop First
+- Component Driven
+- Feature Driven
+- Type Safe
+- Responsive
+- Accessible
+- AI Maintainable
+
+Không được phụ thuộc vào backend implementation.
+
+UI chỉ biết API Contract.
+
+---
+
+# 8.2 Technology Stack
+
+Framework
+
+React 19
+
+Build Tool
+
+Vite
+
+Language
+
+TypeScript
+
+Styling
+
+TailwindCSS
+
+Component Library
+
+shadcn/ui
+
+State Management
+
+TanStack Query
+
+Zustand
+
+Forms
+
+React Hook Form
+
+Validation
+
+Zod
+
+Table
+
+TanStack Table
+
+Charts
+
+Recharts
+
+Icons
+
+Lucide
+
+Date
+
+date-fns
+
+PDF
+
+jsPDF
+
+Excel
+
+SheetJS
+
+Barcode
+
+ZXing
+
+Realtime
+
+Supabase Realtime
+
+Authentication
+
+Supabase Auth
+
+Deployment
+
+Vercel
+
+---
+
+# 8.3 Folder Structure
+
+src/
+
+app/
+
+assets/
+
+components/
+
+features/
+
+hooks/
+
+layouts/
+
+lib/
+
+providers/
+
+routes/
+
+services/
+
+stores/
+
+types/
+
+utils/
+
+styles/
+
+---
+
+# 8.4 Feature Based Architecture
+
+features/
+
+auth/
+
+dashboard/
+
+products/
+
+customers/
+
+suppliers/
+
+purchase/
+
+inventory/
+
+sales/
+
+finance/
+
+reports/
+
+settings/
+
+administration/
+
+Mỗi feature độc lập.
+
+---
+
+# 8.5 Feature Structure
+
+products/
+
+api/
+
+components/
+
+hooks/
+
+pages/
+
+schemas/
+
+services/
+
+store/
+
+types/
+
+utils/
+
+constants/
+
+index.ts
+
+---
+
+# 8.6 Pages
+
+DashboardPage
+
+ProductListPage
+
+CreateProductPage
+
+EditProductPage
+
+CustomerPage
+
+PurchasePage
+
+InventoryPage
+
+SalesPage
+
+ReportsPage
+
+SettingsPage
+
+---
+
+# 8.7 Layout Structure
+
+<AppLayout>
+
+Sidebar
+
+Topbar
+
+Breadcrumb
+
+Content
+
+Footer
+
+Toast
+
+Dialogs
+
+Command Palette
+
+</AppLayout>
+
+---
+
+# 8.8 Routing
+
+/
+
+dashboard
+
+/products
+
+/products/new
+
+/products/:id
+
+/customers
+
+/purchase
+
+/sales
+
+/inventory
+
+/reports
+
+/settings
+
+---
+
+# 8.9 Route Guards
+
+Guest
+
+Authenticated
+
+Admin
+
+Manager
+
+Warehouse
+
+Sales
+
+Permission Based
+
+---
+
+# 8.10 State Management
+
+Server State
+
+↓
+
+TanStack Query
+
+Client State
+
+↓
+
+Zustand
+
+Form State
+
+↓
+
+React Hook Form
+
+UI State
+
+↓
+
+Local Component
+
+---
+
+# 8.11 Query Strategy
+
+Không fetch thủ công.
+
+Mọi dữ liệu
+
+↓
+
+Query Hook
+
+↓
+
+Cache
+
+↓
+
+Invalidation
+
+↓
+
+Refetch
+
+Ví dụ
+
+useProducts()
+
+useCustomers()
+
+useInventory()
+
+---
+
+# 8.12 Cache Strategy
+
+Products
+
+10 phút
+
+Customers
+
+10 phút
+
+Reports
+
+1 phút
+
+Dashboard
+
+30 giây
+
+Settings
+
+30 phút
+
+---
+
+# 8.13 Component Hierarchy
+
+Page
+
+↓
+
+Feature
+
+↓
+
+Section
+
+↓
+
+Card
+
+↓
+
+Form
+
+↓
+
+Input
+
+Không import chéo feature.
+
+---
+
+# 8.14 Shared Components
+
+Button
+
+Input
+
+Textarea
+
+Select
+
+Date Picker
+
+Dialog
+
+Drawer
+
+Alert
+
+Badge
+
+Avatar
+
+Breadcrumb
+
+Card
+
+Tabs
+
+Accordion
+
+Table
+
+Data Grid
+
+Chart
+
+Empty State
+
+Loading
+
+Error State
+
+---
+
+# 8.15 Smart vs Dumb Components
+
+Smart
+
+Fetch data
+
+Handle business logic
+
+Dumb
+
+Render UI only
+
+Receive Props
+
+Emit Events
+
+---
+
+# 8.16 Forms
+
+React Hook Form
+
++
+
+Zod
+
+↓
+
+Validation
+
+↓
+
+Submit
+
+↓
+
+Toast
+
+↓
+
+Invalidate Query
+
+---
+
+# 8.17 Form Sections
+
+General
+
+Inventory
+
+Pricing
+
+Images
+
+Attachments
+
+History
+
+Audit
+
+---
+
+# 8.18 Data Grid
+
+Sticky Header
+
+Resizable Columns
+
+Column Visibility
+
+Sorting
+
+Filtering
+
+Pagination
+
+Export
+
+Selection
+
+Keyboard Navigation
+
+Density
+
+---
+
+# 8.19 Search
+
+Quick Search
+
+Module Search
+
+Global Search
+
+Ctrl + K
+
+Debounce
+
+300ms
+
+---
+
+# 8.20 Theme
+
+Light
+
+Dark
+
+System
+
+Brand Color
+
+Configurable
+
+---
+
+# 8.21 Notification
+
+Toast
+
+Success
+
+Error
+
+Warning
+
+Info
+
+Không dùng alert()
+
+---
+
+# 8.22 Dialog
+
+Create
+
+Edit
+
+Delete
+
+Preview
+
+Quick View
+
+---
+
+# 8.23 Drawer
+
+Mobile
+
+Filters
+
+History
+
+Audit
+
+Attachments
+
+---
+
+# 8.24 Empty State
+
+Không có dữ liệu
+
+↓
+
+Illustration
+
+↓
+
+Description
+
+↓
+
+CTA Button
+
+---
+
+# 8.25 Loading State
+
+Skeleton
+
+Spinner
+
+Progress
+
+Không dùng loading text.
+
+---
+
+# 8.26 Error State
+
+Friendly
+
+Retry Button
+
+Support Code
+
+Copy Error
+
+---
+
+# 8.27 Responsive Breakpoints
+
+1920
+
+1600
+
+1440
+
+1366
+
+1280
+
+1024
+
+768
+
+390
+
+Desktop ưu tiên.
+
+---
+
+# 8.28 Accessibility
+
+Keyboard Navigation
+
+ARIA
+
+Focus Ring
+
+Contrast
+
+Screen Reader
+
+Reduced Motion
+
+---
+
+# 8.29 Internationalization
+
+Default
+
+English
+
+Future
+
+Vietnamese
+
+Japanese
+
+Korean
+
+Chinese
+
+---
+
+# 8.30 Security
+
+Không lưu JWT trong LocalStorage.
+
+Supabase Session
+
+HttpOnly Cookie (Future)
+
+Escape HTML
+
+Sanitize Input
+
+Permission Check
+
+---
+
+# 8.31 Realtime
+
+Inventory Updated
+
+↓
+
+Refresh Inventory
+
+Purchase Approved
+
+↓
+
+Refresh Dashboard
+
+Sales Created
+
+↓
+
+Refresh Revenue
+
+Notification
+
+↓
+
+Toast
+
+↓
+
+Bell Badge
+
+---
+
+# 8.32 Error Boundary
+
+Global
+
+Feature
+
+Page
+
+Component
+
+---
+
+# 8.33 Offline Strategy (Future)
+
+IndexedDB
+
+↓
+
+Sync Queue
+
+↓
+
+Reconnect
+
+↓
+
+Replay
+
+---
+
+# 8.34 Performance
+
+Lazy Route
+
+Lazy Component
+
+Code Split
+
+Virtual Table
+
+Memo
+
+React Compiler Ready
+
+---
+
+# 8.35 Logging
+
+Frontend Error
+
+↓
+
+Sentry (Future)
+
+Console chỉ dùng Development.
+
+---
+
+# 8.36 Design Tokens
+
+Colors
+
+Typography
+
+Spacing
+
+Radius
+
+Shadow
+
+Animation
+
+Border
+
+Icon Size
+
+---
+
+# 8.37 Folder Naming
+
+kebab-case
+
+Component
+
+PascalCase
+
+Hook
+
+camelCase
+
+Type
+
+PascalCase
+
+File
+
+kebab-case
+
+---
+
+# 8.38 AI Friendly Rules
+
+Một component
+
+↓
+
+Một trách nhiệm.
+
+Không component >300 dòng.
+
+Không page >500 dòng.
+
+Hook <150 dòng.
+
+Function <50 dòng.
+
+---
+
+# 8.39 Definition of Done
+
+✓ Build thành công
+
+✓ TypeScript không lỗi
+
+✓ ESLint pass
+
+✓ Responsive
+
+✓ Keyboard Navigation
+
+✓ Dark Mode
+
+✓ Loading
+
+✓ Empty
+
+✓ Error State
+
+✓ Unit Test
+
+✓ Storybook (Future)
+
+---
+
+END OF CHAPTER 8
+# CHAPTER 9
+
+Business Rule Bible
+
+Version 1.0
+
+---
+
+# 9.1 Philosophy
+
+Business Rule
+
+≠
+
+Validation
+
+Validation
+
+chỉ kiểm tra dữ liệu.
+
+Business Rule
+
+quy định hệ thống được phép làm gì.
+
+Ví dụ
+
+Qty > 0
+
+↓
+
+Validation
+
+Không cho xuất vượt tồn
+
+↓
+
+Business Rule
+
+---
+
+# 9.2 Rule Categories
+
+Master Data
+
+Inventory
+
+Purchase
+
+Sales
+
+Finance
+
+Reporting
+
+Security
+
+Approval
+
+Import
+
+Export
+
+System
+
+---
+
+#############################################################
+
+MASTER DATA
+
+#############################################################
+
+MR-001
+
+Product Code
+
+Must be unique.
+
+---
+
+MR-002
+
+Barcode
+
+Must be unique.
+
+---
+
+MR-003
+
+SKU
+
+Must be unique.
+
+---
+
+MR-004
+
+Deleted Product
+
+Cannot be deleted if referenced.
+
+Archive instead.
+
+---
+
+MR-005
+
+Inactive Product
+
+Cannot create new transaction.
+
+---
+
+MR-006
+
+Warehouse
+
+Cannot delete warehouse with stock.
+
+---
+
+MR-007
+
+Customer
+
+Cannot delete customer with invoice.
+
+---
+
+MR-008
+
+Supplier
+
+Cannot delete supplier with PO.
+
+---
+
+#############################################################
+
+PURCHASE
+
+#############################################################
+
+PU-001
+
+PO Number
+
+Generated automatically.
+
+Pattern
+
+PO-YYYYMM-000001
+
+---
+
+PU-002
+
+PO Status
+
+Draft
+
+↓
+
+Submitted
+
+↓
+
+Approved
+
+↓
+
+Receiving
+
+↓
+
+Completed
+
+↓
+
+Closed
+
+---
+
+PU-003
+
+Only Draft
+
+can edit.
+
+---
+
+PU-004
+
+Only Approved
+
+can Receive.
+
+---
+
+PU-005
+
+Cannot Receive
+
+Cancelled PO.
+
+---
+
+PU-006
+
+Receive
+
+supports multiple times.
+
+---
+
+PU-007
+
+Received Qty
+
+<= Ordered Qty
+
+---
+
+PU-008
+
+Close automatically
+
+when all received.
+
+---
+
+PU-009
+
+Cancel
+
+only before receiving.
+
+---
+
+PU-010
+
+Receive
+
+creates Inventory Transaction.
+
+---
+
+#############################################################
+
+INVENTORY
+
+#############################################################
+
+IV-001
+
+Inventory
+
+cannot edit directly.
+
+---
+
+IV-002
+
+Every stock change
+
+creates Inventory Transaction.
+
+---
+
+IV-003
+
+Inventory Balance
+
+calculated.
+
+Never edited.
+
+---
+
+IV-004
+
+No Negative Stock
+
+Default.
+
+---
+
+IV-005
+
+Negative Stock
+
+Optional.
+
+Configurable.
+
+---
+
+IV-006
+
+Transfer
+
+must have
+
+Source Warehouse
+
+Destination Warehouse
+
+---
+
+IV-007
+
+Transfer Qty
+
+>
+
+0
+
+---
+
+IV-008
+
+Adjustment
+
+requires Reason.
+
+---
+
+IV-009
+
+Cycle Count
+
+creates Adjustment.
+
+---
+
+IV-010
+
+Reserved Qty
+
+cannot sell.
+
+---
+
+IV-011
+
+Available
+
+=
+
+On Hand
+
+-
+
+Reserved
+
+---
+
+IV-012
+
+Inventory Value
+
+=
+
+Available Qty
+
+×
+
+Average Cost
+
+---
+
+#############################################################
+
+SALES
+
+#############################################################
+
+SA-001
+
+SO Number
+
+Auto Generate
+
+---
+
+SA-002
+
+Invoice
+
+requires Customer.
+
+---
+
+SA-003
+
+Delivery
+
+requires Approved SO.
+
+---
+
+SA-004
+
+Delivered Qty
+
+<= Ordered Qty
+
+---
+
+SA-005
+
+Cancel
+
+before delivery only.
+
+---
+
+SA-006
+
+Return
+
+increases stock.
+
+---
+
+SA-007
+
+Invoice
+
+creates Receivable.
+
+---
+
+SA-008
+
+Receipt
+
+reduces Receivable.
+
+---
+
+#############################################################
+
+PRICING
+
+#############################################################
+
+PR-001
+
+Price
+
+>=0
+
+---
+
+PR-002
+
+Discount
+
+>=0
+
+---
+
+PR-003
+
+Discount
+
+cannot exceed permission.
+
+---
+
+PR-004
+
+Negative Price
+
+not allowed.
+
+---
+
+PR-005
+
+Tax
+
+calculated after discount.
+
+---
+
+#############################################################
+
+FINANCE
+
+#############################################################
+
+FI-001
+
+Receipt
+
+reduces Receivable.
+
+---
+
+FI-002
+
+Payment
+
+reduces Payable.
+
+---
+
+FI-003
+
+Cash Book
+
+cannot delete confirmed transaction.
+
+---
+
+FI-004
+
+Currency
+
+must exist.
+
+---
+
+FI-005
+
+Exchange Rate
+
+must exist.
+
+---
+
+#############################################################
+
+IMEI
+
+#############################################################
+
+IM-001
+
+IMEI
+
+unique.
+
+---
+
+IM-002
+
+Sold IMEI
+
+cannot sell again.
+
+---
+
+IM-003
+
+Warranty
+
+starts after delivery.
+
+---
+
+#############################################################
+
+SECURITY
+
+#############################################################
+
+SE-001
+
+Permission
+
+checked
+
+Server
+
++
+
+Client
+
+---
+
+SE-002
+
+UI Hide
+
+≠ Permission
+
+---
+
+SE-003
+
+Every API
+
+validates permission.
+
+---
+
+#############################################################
+
+AUDIT
+
+#############################################################
+
+AU-001
+
+Create
+
+Audit
+
+---
+
+AU-002
+
+Update
+
+Audit
+
+---
+
+AU-003
+
+Delete
+
+Audit
+
+---
+
+AU-004
+
+Approve
+
+Audit
+
+---
+
+AU-005
+
+Export
+
+Audit
+
+---
+
+#############################################################
+
+IMPORT
+
+#############################################################
+
+IMPT-001
+
+Preview
+
+before import.
+
+---
+
+IMPT-002
+
+Import
+
+atomic.
+
+Rollback if error.
+
+---
+
+IMPT-003
+
+Show line errors.
+
+---
+
+#############################################################
+
+EXPORT
+
+#############################################################
+
+EX-001
+
+Respect permission.
+
+---
+
+EX-002
+
+Only filtered data.
+
+---
+
+#############################################################
+
+REPORT
+
+#############################################################
+
+RP-001
+
+Reports
+
+Read Only.
+
+---
+
+RP-002
+
+Realtime.
+
+---
+
+RP-003
+
+No duplicate data.
+
+---
+
+#############################################################
+
+SYSTEM
+
+#############################################################
+
+SYS-001
+
+Soft Delete
+
+Default.
+
+---
+
+SYS-002
+
+UUID
+
+Default.
+
+---
+
+SYS-003
+
+Timezone
+
+UTC.
+
+Display Local.
+
+---
+
+SYS-004
+
+CreatedAt
+
+required.
+
+---
+
+SYS-005
+
+UpdatedAt
+
+required.
+
+---
+
+SYS-006
+
+Audit
+
+Always On.
+
+---
+
+END OF CHAPTER 9
+# CHAPTER 10 — DATABASE BIBLE
+
+Version 1.0
+
+---
+
+# 10.1 Database Design Philosophy
+
+WarehouseOS sử dụng PostgreSQL làm nguồn dữ liệu duy nhất.
+
+Thiết kế phải tuân thủ các nguyên tắc:
+
+- Normalize First
+- Read Optimized
+- Audit Ready
+- Event Friendly
+- Multi Warehouse
+- Multi Company Ready
+- Soft Delete
+- UUID Primary Key
+- Zero Duplicate Business Data
+
+---
+
+# 10.2 Database Layers
+
+Presentation
+
+↓
+
+API
+
+↓
+
+Application
+
+↓
+
+Domain
+
+↓
+
+Repository
+
+↓
+
+PostgreSQL
+
+Không business logic trong Database.
+
+Database chỉ lưu dữ liệu.
+
+---
+
+# 10.3 Domain Breakdown
+
+Identity
+
+Master Data
+
+Inventory
+
+Purchase
+
+Sales
+
+Finance
+
+Reporting
+
+Notification
+
+System
+
+Audit
+
+---
+
+# 10.4 Entity Count
+
+Identity
+
+12 Tables
+
+Master Data
+
+18 Tables
+
+Purchase
+
+12 Tables
+
+Sales
+
+12 Tables
+
+Inventory
+
+20 Tables
+
+Finance
+
+15 Tables
+
+Reporting
+
+10 Views
+
+Audit
+
+5 Tables
+
+System
+
+8 Tables
+
+Estimated
+
+90~110 Tables
+
+---
+
+######################################################
+
+IDENTITY DOMAIN
+
+######################################################
+
+users
+
+roles
+
+permissions
+
+role_permissions
+
+user_roles
+
+sessions
+
+refresh_tokens
+
+login_logs
+
+api_keys
+
+organizations
+
+companies
+
+branches
+
+---
+
+users
+
+id UUID PK
+
+employee_code
+
+email
+
+phone
+
+password_hash
+
+full_name
+
+avatar_url
+
+status
+
+last_login_at
+
+created_at
+
+updated_at
+
+deleted_at
+
+---
+
+roles
+
+id
+
+code
+
+name
+
+description
+
+is_system
+
+---
+
+permissions
+
+module
+
+feature
+
+action
+
+Ví dụ
+
+Inventory
+
+Transfer
+
+Approve
+
+---
+
+######################################################
+
+MASTER DATA DOMAIN
+
+######################################################
+
+products
+
+product_categories
+
+brands
+
+units
+
+product_prices
+
+price_lists
+
+product_images
+
+customers
+
+suppliers
+
+employees
+
+taxes
+
+currencies
+
+exchange_rates
+
+warehouses
+
+warehouse_locations
+
+storage_bins
+
+tags
+
+attachments
+
+notes
+
+custom_fields
+
+---
+
+products
+
+id
+
+sku
+
+barcode
+
+name
+
+description
+
+category_id
+
+brand_id
+
+base_unit_id
+
+purchase_unit_id
+
+sales_unit_id
+
+track_inventory
+
+track_serial
+
+track_batch
+
+track_imei
+
+allow_negative_stock
+
+minimum_stock
+
+maximum_stock
+
+costing_method
+
+weight
+
+volume
+
+status
+
+created_at
+
+updated_at
+
+deleted_at
+
+---
+
+######################################################
+
+PRODUCT UNIT CONVERSION
+
+######################################################
+
+product_unit_conversions
+
+product_id
+
+from_unit
+
+to_unit
+
+conversion_rate
+
+Ví dụ
+
+1 Box
+
+=
+
+12 Piece
+
+---
+
+######################################################
+
+PRICE LIST
+
+######################################################
+
+price_lists
+
+Retail
+
+Wholesale
+
+VIP
+
+Distributor
+
+Employee
+
+---
+
+product_prices
+
+product_id
+
+price_list_id
+
+price
+
+effective_from
+
+effective_to
+
+---
+
+######################################################
+
+WAREHOUSE
+
+######################################################
+
+warehouses
+
+warehouse_locations
+
+warehouse_zones
+
+warehouse_bins
+
+warehouse_managers
+
+warehouse_settings
+
+Warehouse
+
+↓
+
+Zone
+
+↓
+
+Shelf
+
+↓
+
+Bin
+
+↓
+
+Position
+
+---
+
+######################################################
+
+PURCHASE DOMAIN
+
+######################################################
+
+purchase_requests
+
+purchase_orders
+
+purchase_order_items
+
+goods_receipts
+
+goods_receipt_items
+
+supplier_returns
+
+supplier_return_items
+
+purchase_invoices
+
+supplier_payments
+
+supplier_credit_notes
+
+purchase_attachments
+
+purchase_comments
+
+---
+
+######################################################
+
+SALES DOMAIN
+
+######################################################
+
+quotations
+
+quotation_items
+
+sales_orders
+
+sales_order_items
+
+delivery_notes
+
+delivery_items
+
+sales_invoices
+
+invoice_items
+
+customer_returns
+
+customer_receipts
+
+sales_comments
+
+sales_attachments
+
+---
+
+######################################################
+
+INVENTORY DOMAIN
+
+######################################################
+
+inventory_transactions
+
+inventory_balances
+
+inventory_snapshots
+
+inventory_adjustments
+
+inventory_adjustment_items
+
+inventory_transfers
+
+inventory_transfer_items
+
+inventory_reservations
+
+inventory_allocations
+
+inventory_movements
+
+stock_counts
+
+stock_count_items
+
+serial_numbers
+
+batch_numbers
+
+imei_numbers
+
+product_lots
+
+warehouse_stock
+
+stock_ledgers
+
+inventory_events
+
+inventory_cost_layers
+
+---
+
+Inventory chỉ có
+
+Inventory Transaction
+
+là nguồn dữ liệu gốc.
+
+Balance
+
+Ledger
+
+Value
+
+đều sinh từ Transaction.
+
+---
+
+######################################################
+
+Inventory Transaction
+
+######################################################
+
+transaction_type
+
+reference_type
+
+reference_id
+
+warehouse_id
+
+location_id
+
+product_id
+
+batch_id
+
+serial_id
+
+imei_id
+
+qty
+
+unit_cost
+
+total_cost
+
+running_cost
+
+created_by
+
+created_at
+
+---
+
+Transaction Types
+
+Opening
+
+Purchase
+
+Purchase Return
+
+Sales
+
+Sales Return
+
+Transfer In
+
+Transfer Out
+
+Adjustment
+
+Cycle Count
+
+Manufacturing
+
+Consumption
+
+Scrap
+
+---
+
+######################################################
+
+INVENTORY BALANCE
+
+######################################################
+
+warehouse_id
+
+product_id
+
+available_qty
+
+reserved_qty
+
+incoming_qty
+
+outgoing_qty
+
+average_cost
+
+inventory_value
+
+last_transaction_at
+
+---
+
+######################################################
+
+COST LAYER
+
+######################################################
+
+FIFO Layer
+
+Receipt
+
+↓
+
+Cost Layer
+
+↓
+
+Sales
+
+↓
+
+Consume Layer
+
+Moving Average
+
+↓
+
+Running Cost
+
+---
+
+inventory_cost_layers
+
+product_id
+
+warehouse_id
+
+receipt_reference
+
+remaining_qty
+
+unit_cost
+
+received_at
+
+---
+
+######################################################
+
+IMEI DOMAIN
+
+######################################################
+
+imei_numbers
+
+imei_histories
+
+imei_warranties
+
+imei_events
+
+imei_movements
+
+State
+
+Available
+
+Reserved
+
+Sold
+
+Returned
+
+Disposed
+
+Lost
+
+---
+
+######################################################
+
+SERIAL DOMAIN
+
+######################################################
+
+serial_numbers
+
+serial_histories
+
+serial_movements
+
+---
+
+######################################################
+
+BATCH DOMAIN
+
+######################################################
+
+batch_numbers
+
+expiry_date
+
+manufacture_date
+
+received_date
+
+---
+
+######################################################
+
+FINANCE DOMAIN
+
+######################################################
+
+cash_books
+
+cash_transactions
+
+bank_accounts
+
+bank_transactions
+
+receivables
+
+payables
+
+expenses
+
+expense_categories
+
+income
+
+income_categories
+
+payment_methods
+
+payment_transactions
+
+journals
+
+journal_entries
+
+---
+
+######################################################
+
+REPORTING
+
+######################################################
+
+Materialized Views
+
+inventory_summary
+
+inventory_value
+
+inventory_turnover
+
+sales_summary
+
+purchase_summary
+
+finance_summary
+
+dashboard_summary
+
+customer_summary
+
+supplier_summary
+
+---
+
+######################################################
+
+AUDIT DOMAIN
+
+######################################################
+
+audit_logs
+
+audit_details
+
+activity_logs
+
+entity_histories
+
+change_requests
+
+---
+
+Audit
+
+Old Value
+
+↓
+
+New Value
+
+↓
+
+Diff
+
+↓
+
+JSONB
+
+---
+
+######################################################
+
+NOTIFICATION DOMAIN
+
+######################################################
+
+notifications
+
+notification_templates
+
+notification_queue
+
+email_queue
+
+push_queue
+
+---
+
+######################################################
+
+SYSTEM DOMAIN
+
+######################################################
+
+settings
+
+company_settings
+
+system_settings
+
+backup_jobs
+
+background_jobs
+
+scheduled_tasks
+
+feature_flags
+
+themes
+
+---
+
+######################################################
+
+COMMON COLUMNS
+
+######################################################
+
+Every Table
+
+id UUID
+
+created_at
+
+created_by
+
+updated_at
+
+updated_by
+
+deleted_at
+
+deleted_by
+
+version
+
+tenant_id
+
+company_id
+
+branch_id
+
+---
+
+######################################################
+
+INDEX STRATEGY
+
+######################################################
+
+Primary
+
+UUID
+
+Unique
+
+Code
+
+Barcode
+
+SKU
+
+Composite
+
+Warehouse + Product
+
+Product + Status
+
+Customer + Status
+
+Supplier + Status
+
+Date + Status
+
+GIN
+
+JSONB
+
+GIN
+
+Full Text Search
+
+---
+
+######################################################
+
+SOFT DELETE
+
+######################################################
+
+Không xóa vật lý.
+
+deleted_at != NULL
+
+↓
+
+Ẩn khỏi UI.
+
+---
+
+######################################################
+
+PARTITION STRATEGY
+
+######################################################
+
+inventory_transactions
+
+Theo năm
+
+sales_invoices
+
+Theo năm
+
+audit_logs
+
+Theo tháng
+
+notification_logs
+
+Theo tháng
+
+---
+
+######################################################
+
+JSONB USAGE
+
+######################################################
+
+Audit
+
+Settings
+
+Custom Fields
+
+Webhook Payload
+
+Integration Payload
+
+Không dùng JSONB cho dữ liệu nghiệp vụ chính.
+
+---
+
+######################################################
+
+SUPABASE FEATURES
+
+######################################################
+
+Row Level Security
+
+Realtime
+
+Storage
+
+Edge Functions
+
+Database Functions
+
+Cron Jobs
+
+Logical Replication (Future)
+
+---
+
+######################################################
+
+DATABASE TARGET
+
+######################################################
+
+100+ Tables
+
+200+ Indexes
+
+50+ Foreign Keys
+
+30+ Materialized Views
+
+100% UUID
+
+100% Soft Delete
+
+100% Audit
+
+100% Multi Warehouse Ready
+
+100% Multi Company Ready
+
+END OF CHAPTER 10
+# CHAPTER 11 — API CONTRACT BIBLE
+
+Version 1.0
+
+---
+
+# 11.1 API Design Philosophy
+
+API phải đáp ứng:
+
+- RESTful
+- Stateless
+- Idempotent
+- Predictable
+- Versioned
+- Documented
+- Secure
+- Cache Friendly
+- AI Friendly
+
+---
+
+# 11.2 Base URL
+
+/api/v1
+
+Future
+
+/api/v2
+
+Không breaking change trong cùng version.
+
+---
+
+# 11.3 Authentication
+
+Authorization
+
+Bearer <access_token>
+
+Authentication
+
+Supabase Auth JWT
+
+Refresh Token
+
+Supabase Managed
+
+---
+
+# 11.4 Content Type
+
+Request
+
+application/json
+
+Upload
+
+multipart/form-data
+
+Export
+
+application/octet-stream
+
+---
+
+# 11.5 Standard Success Response
+
+{
+  "success": true,
+  "data": {},
+  "meta": {
+    "requestId": "...",
+    "timestamp": "...",
+    "durationMs": 42
+  }
+}
+
+---
+
+# 11.6 Standard Error Response
+
+{
+  "success": false,
+  "error": {
+    "code": "OUT_OF_STOCK",
+    "message": "Requested quantity exceeds available stock.",
+    "details": []
+  },
+  "meta": {
+    "requestId": "...",
+    "timestamp": "..."
+  }
+}
+
+---
+
+# 11.7 HTTP Status Codes
+
+200 OK
+
+201 Created
+
+204 No Content
+
+400 Bad Request
+
+401 Unauthorized
+
+403 Forbidden
+
+404 Not Found
+
+409 Conflict
+
+422 Validation Error
+
+429 Too Many Requests
+
+500 Internal Server Error
+
+---
+
+# 11.8 Pagination
+
+Request
+
+?page=1&pageSize=20
+
+Response
+
+meta
+
+page
+
+pageSize
+
+total
+
+totalPages
+
+hasNext
+
+hasPrevious
+
+---
+
+# 11.9 Sorting
+
+?sort=name
+
+?order=asc
+
+Multi-sort
+
+?sort=name,-createdAt
+
+---
+
+# 11.10 Filtering
+
+status=ACTIVE
+
+warehouseId=...
+
+categoryId=...
+
+fromDate=...
+
+toDate=...
+
+keyword=...
+
+Support nhiều điều kiện đồng thời.
+
+---
+
+# 11.11 Search
+
+GET
+
+/products/search?q=laptop
+
+Global Search
+
+/search?q=iphone
+
+Search theo:
+
+SKU
+
+Barcode
+
+Name
+
+Customer
+
+Supplier
+
+PO
+
+SO
+
+Invoice
+
+IMEI
+
+Serial
+
+---
+
+######################################################
+
+MASTER DATA
+
+######################################################
+
+Products
+
+GET     /products
+GET     /products/{id}
+POST    /products
+PATCH   /products/{id}
+DELETE  /products/{id}
+POST    /products/archive
+POST    /products/restore
+POST    /products/import
+GET     /products/export
+GET     /products/history
+
+Categories
+
+GET
+POST
+PATCH
+DELETE
+
+Brands
+
+GET
+POST
+PATCH
+
+Units
+
+GET
+POST
+PATCH
+
+Warehouses
+
+GET
+POST
+PATCH
+DELETE
+
+Warehouse Locations
+
+GET
+POST
+PATCH
+
+Customers
+
+GET
+GET/{id}
+POST
+PATCH
+DELETE
+POST/import
+GET/export
+GET/history
+
+Suppliers
+
+GET
+POST
+PATCH
+DELETE
+
+Employees
+
+GET
+POST
+PATCH
+
+---
+
+######################################################
+
+PURCHASE
+
+######################################################
+
+Purchase Orders
+
+GET /purchase-orders
+
+GET /purchase-orders/{id}
+
+POST /purchase-orders
+
+PATCH /purchase-orders/{id}
+
+POST /purchase-orders/{id}/submit
+
+POST /purchase-orders/{id}/approve
+
+POST /purchase-orders/{id}/reject
+
+POST /purchase-orders/{id}/cancel
+
+POST /purchase-orders/{id}/close
+
+POST /purchase-orders/{id}/receive
+
+---
+
+Goods Receipt
+
+GET
+
+POST
+
+PATCH
+
+DELETE
+
+Approve
+
+Complete
+
+---
+
+Purchase Return
+
+GET
+
+POST
+
+Approve
+
+Complete
+
+---
+
+Supplier Payment
+
+GET
+
+POST
+
+Cancel
+
+Export
+
+---
+
+######################################################
+
+SALES
+
+######################################################
+
+Quotation
+
+GET
+
+POST
+
+Approve
+
+Reject
+
+Convert
+
+---
+
+Sales Order
+
+GET
+
+POST
+
+PATCH
+
+Approve
+
+Reject
+
+Cancel
+
+---
+
+Delivery
+
+GET
+
+POST
+
+Complete
+
+Cancel
+
+---
+
+Invoice
+
+GET
+
+POST
+
+PATCH
+
+Void
+
+Export
+
+Print
+
+---
+
+Customer Receipt
+
+GET
+
+POST
+
+Cancel
+
+---
+
+Sales Return
+
+GET
+
+POST
+
+Approve
+
+Receive
+
+---
+
+######################################################
+
+INVENTORY
+
+######################################################
+
+Inventory Balance
+
+GET
+
+/inventory/balance
+
+---
+
+Inventory Ledger
+
+GET
+
+/inventory/ledger
+
+---
+
+Adjustment
+
+POST
+
+/inventory/adjustments
+
+Approve
+
+Reject
+
+---
+
+Transfer
+
+POST
+
+/inventory/transfers
+
+Approve
+
+Ship
+
+Receive
+
+Complete
+
+---
+
+Cycle Count
+
+POST
+
+/inventory/counts
+
+Approve
+
+Complete
+
+---
+
+Reservation
+
+POST
+
+/inventory/reservations
+
+Release
+
+Complete
+
+---
+
+######################################################
+
+IMEI
+
+######################################################
+
+GET
+
+/imei
+
+GET
+
+/imei/{id}
+
+GET
+
+/imei/history
+
+POST
+
+/imei/reserve
+
+POST
+
+/imei/release
+
+POST
+
+/imei/assign
+
+---
+
+######################################################
+
+REPORTS
+
+######################################################
+
+Inventory Summary
+
+Inventory Value
+
+Inventory Aging
+
+Stock Movement
+
+Sales Summary
+
+Purchase Summary
+
+Profit
+
+Customer Ranking
+
+Supplier Ranking
+
+Cash Flow
+
+Dashboard
+
+All reports
+
+GET only.
+
+---
+
+######################################################
+
+FINANCE
+
+######################################################
+
+Receivable
+
+GET
+
+POST
+
+PATCH
+
+---
+
+Payable
+
+GET
+
+POST
+
+PATCH
+
+---
+
+Cash Book
+
+GET
+
+POST
+
+---
+
+Expense
+
+GET
+
+POST
+
+PATCH
+
+---
+
+Income
+
+GET
+
+POST
+
+PATCH
+
+---
+
+######################################################
+
+AUTH
+
+######################################################
+
+POST
+
+/auth/login
+
+POST
+
+/auth/logout
+
+POST
+
+/auth/refresh
+
+GET
+
+/auth/me
+
+PATCH
+
+/auth/profile
+
+PATCH
+
+/auth/password
+
+---
+
+######################################################
+
+USERS
+
+######################################################
+
+GET
+
+/users
+
+POST
+
+/users
+
+PATCH
+
+/users/{id}
+
+DELETE
+
+/users/{id}
+
+Assign Role
+
+Reset Password
+
+Lock
+
+Unlock
+
+---
+
+######################################################
+
+ROLES
+
+######################################################
+
+GET
+
+POST
+
+PATCH
+
+DELETE
+
+Assign Permission
+
+Clone Role
+
+---
+
+######################################################
+
+NOTIFICATIONS
+
+######################################################
+
+GET
+
+/notifications
+
+PATCH
+
+/notifications/read
+
+PATCH
+
+/notifications/read-all
+
+DELETE
+
+/notifications
+
+---
+
+######################################################
+
+ATTACHMENTS
+
+######################################################
+
+POST
+
+/files/upload
+
+GET
+
+/files/{id}
+
+DELETE
+
+/files/{id}
+
+Signed URL
+
+Preview
+
+Download
+
+---
+
+######################################################
+
+AUDIT
+
+######################################################
+
+GET
+
+/audit
+
+GET
+
+/audit/{entity}
+
+GET
+
+/activity
+
+Read only.
+
+---
+
+######################################################
+
+SETTINGS
+
+######################################################
+
+GET
+
+/settings
+
+PATCH
+
+/settings
+
+---
+
+######################################################
+
+BULK OPERATIONS
+
+######################################################
+
+POST
+
+/products/bulk-update
+
+POST
+
+/products/bulk-delete
+
+POST
+
+/products/bulk-archive
+
+POST
+
+/customers/bulk-import
+
+POST
+
+/inventory/bulk-adjust
+
+---
+
+######################################################
+
+IMPORT
+
+######################################################
+
+Workflow
+
+Upload
+
+↓
+
+Validate
+
+↓
+
+Preview
+
+↓
+
+Import
+
+↓
+
+Audit
+
+↓
+
+Result
+
+API
+
+POST /imports
+
+GET /imports/{id}
+
+POST /imports/{id}/preview
+
+POST /imports/{id}/execute
+
+GET /imports/{id}/errors
+
+---
+
+######################################################
+
+EXPORT
+
+######################################################
+
+CSV
+
+Excel
+
+PDF
+
+Print
+
+API
+
+GET /exports
+
+POST /exports
+
+GET /exports/{id}
+
+---
+
+######################################################
+
+REALTIME EVENTS
+
+######################################################
+
+product.created
+
+product.updated
+
+product.deleted
+
+inventory.changed
+
+purchase.approved
+
+purchase.received
+
+sales.created
+
+sales.completed
+
+invoice.paid
+
+notification.created
+
+dashboard.updated
+
+---
+
+######################################################
+
+IDEMPOTENCY
+
+######################################################
+
+Support header
+
+Idempotency-Key
+
+Áp dụng cho
+
+Purchase
+
+Payment
+
+Receipt
+
+Transfer
+
+Import
+
+---
+
+######################################################
+
+RATE LIMIT
+
+######################################################
+
+Authenticated
+
+1000 req/hour
+
+Anonymous
+
+100 req/hour
+
+Upload
+
+20 req/min
+
+---
+
+######################################################
+
+OPENAPI CONVENTION
+
+######################################################
+
+OperationId
+
+Unique
+
+Tags
+
+Theo Domain
+
+Schemas
+
+Shared
+
+Components
+
+Reusable
+
+Examples
+
+Required
+
+---
+
+######################################################
+
+API MATURITY
+
+######################################################
+
+~230 Endpoints
+
+100% REST
+
+100% JWT Protected
+
+100% Versioned
+
+100% OpenAPI Ready
+
+100% Supabase Compatible
+
+100% Vercel Ready
+
+END OF CHAPTER 11
+# CHAPTER 12 — ENTERPRISE UI/UX DESIGN SYSTEM
+
+Version 1.0
+
+---
+
+# 12.1 Design Philosophy
+
+WarehouseOS follows a functional-first design philosophy.
+
+Primary goals:
+
+- Fast
+- Consistent
+- Predictable
+- Accessible
+- Scalable
+- Desktop First
+
+Every screen should feel familiar.
+
+Users should never need to learn a new interaction
+pattern when navigating between modules.
+
+---
+
+# 12.2 Design Principles
+
+Consistency
+
+Every CRUD screen follows the same layout.
+
+---
+
+Hierarchy
+
+Important information first.
+
+Secondary information collapsible.
+
+---
+
+Visibility
+
+Always show current state.
+
+Never hide important actions.
+
+---
+
+Feedback
+
+Every action provides feedback.
+
+Success
+
+Warning
+
+Error
+
+Loading
+
+---
+
+Efficiency
+
+Keyboard shortcuts supported.
+
+Minimal clicks.
+
+Maximum information density.
+
+---
+
+# 12.3 Design Tokens
+
+Primary
+
+Blue
+
+Secondary
+
+Slate
+
+Success
+
+Green
+
+Warning
+
+Amber
+
+Danger
+
+Red
+
+Info
+
+Sky
+
+Neutral
+
+Gray
+
+---
+
+# 12.4 Typography
+
+Display
+
+40
+
+Heading 1
+
+32
+
+Heading 2
+
+28
+
+Heading 3
+
+24
+
+Heading 4
+
+20
+
+Body Large
+
+16
+
+Body
+
+14
+
+Caption
+
+12
+
+Small
+
+11
+
+Font
+
+Inter
+
+Fallback
+
+System UI
+
+---
+
+# 12.5 Spacing Scale
+
+4
+
+8
+
+12
+
+16
+
+20
+
+24
+
+32
+
+40
+
+48
+
+64
+
+96
+
+---
+
+# 12.6 Border Radius
+
+Small
+
+6
+
+Medium
+
+10
+
+Large
+
+16
+
+Dialog
+
+20
+
+Card
+
+16
+
+Button
+
+10
+
+Input
+
+10
+
+---
+
+# 12.7 Shadow Levels
+
+None
+
+XS
+
+SM
+
+MD
+
+LG
+
+XL
+
+Only dialogs and dropdowns use heavy shadows.
+
+---
+
+# 12.8 Icon System
+
+Library
+
+Lucide
+
+Default
+
+20px
+
+Toolbar
+
+18px
+
+Button
+
+16px
+
+Dashboard
+
+24px
+
+No colorful icons.
+
+SVG only.
+
+---
+
+###########################################################
+
+BUTTONS
+
+###########################################################
+
+Primary
+
+Secondary
+
+Outline
+
+Ghost
+
+Danger
+
+Success
+
+Link
+
+Icon Button
+
+Loading Button
+
+Split Button
+
+Dropdown Button
+
+FAB (Future)
+
+---
+
+Button States
+
+Default
+
+Hover
+
+Pressed
+
+Focused
+
+Disabled
+
+Loading
+
+Success
+
+Danger
+
+---
+
+###########################################################
+
+INPUT COMPONENTS
+
+###########################################################
+
+Text Input
+
+Textarea
+
+Password
+
+Search
+
+Currency
+
+Percentage
+
+Phone
+
+Email
+
+Barcode
+
+Quantity
+
+Date
+
+Time
+
+DateTime
+
+Color
+
+URL
+
+Number
+
+ReadOnly
+
+Disabled
+
+Masked
+
+---
+
+Validation
+
+Required
+
+Invalid
+
+Warning
+
+Success
+
+Helper Text
+
+---
+
+###########################################################
+
+SELECT COMPONENTS
+
+###########################################################
+
+Single Select
+
+Multi Select
+
+Tree Select
+
+Async Select
+
+Searchable Select
+
+Tag Select
+
+Combobox
+
+---
+
+###########################################################
+
+DATA DISPLAY
+
+###########################################################
+
+Badge
+
+Avatar
+
+Card
+
+Statistic
+
+Progress
+
+Timeline
+
+Accordion
+
+Tabs
+
+Tree
+
+List
+
+Description List
+
+Stepper
+
+---
+
+###########################################################
+
+DATA GRID
+
+###########################################################
+
+Enterprise Grid
+
+Features
+
+Sticky Header
+
+Sticky Columns
+
+Resizable Columns
+
+Column Reorder
+
+Column Hide
+
+Density
+
+Pagination
+
+Infinite Scroll
+
+Export
+
+Import
+
+Grouping
+
+Aggregation
+
+Summary Row
+
+Selection
+
+Context Menu
+
+Keyboard Navigation
+
+Inline Edit
+
+Pinned Columns
+
+Saved Views
+
+---
+
+Toolbar
+
+Create
+
+Edit
+
+Delete
+
+Refresh
+
+Export
+
+Import
+
+Columns
+
+Density
+
+Filter
+
+Search
+
+---
+
+###########################################################
+
+FORM LAYOUT
+
+###########################################################
+
+Form Structure
+
+Header
+
+↓
+
+Sections
+
+↓
+
+Fields
+
+↓
+
+Actions
+
+Standard Sections
+
+General
+
+Inventory
+
+Pricing
+
+Tax
+
+Images
+
+Attachments
+
+History
+
+Audit
+
+Settings
+
+---
+
+Field Width
+
+Small
+
+25%
+
+Medium
+
+50%
+
+Large
+
+100%
+
+---
+
+###########################################################
+
+DIALOG
+
+###########################################################
+
+Small
+
+Medium
+
+Large
+
+Extra Large
+
+Fullscreen
+
+Used for
+
+Create
+
+Edit
+
+Quick View
+
+Delete Confirmation
+
+Preview
+
+---
+
+###########################################################
+
+DRAWER
+
+###########################################################
+
+Filter
+
+History
+
+Audit
+
+Attachment
+
+Activity
+
+Notification
+
+---
+
+###########################################################
+
+TABLE PATTERN
+
+###########################################################
+
+Search
+
+↓
+
+Filters
+
+↓
+
+Toolbar
+
+↓
+
+Table
+
+↓
+
+Pagination
+
+↓
+
+Summary
+
+Every module uses this pattern.
+
+---
+
+###########################################################
+
+DETAIL PAGE
+
+###########################################################
+
+Header
+
+↓
+
+Summary Cards
+
+↓
+
+Tabs
+
+↓
+
+Content
+
+↓
+
+Timeline
+
+↓
+
+Audit
+
+---
+
+###########################################################
+
+DASHBOARD
+
+###########################################################
+
+Widgets
+
+KPI Cards
+
+Revenue Chart
+
+Inventory Chart
+
+Low Stock
+
+Recent Activity
+
+Notifications
+
+Tasks
+
+Quick Actions
+
+Calendar
+
+Announcements
+
+---
+
+###########################################################
+
+CHARTS
+
+###########################################################
+
+Bar
+
+Line
+
+Area
+
+Pie
+
+Donut
+
+Radar
+
+Heatmap (Future)
+
+Treemap
+
+Gauge
+
+Sparkline
+
+---
+
+###########################################################
+
+EMPTY STATE
+
+###########################################################
+
+Illustration
+
+↓
+
+Title
+
+↓
+
+Description
+
+↓
+
+Primary Action
+
+↓
+
+Secondary Action
+
+---
+
+###########################################################
+
+LOADING
+
+###########################################################
+
+Skeleton
+
+Card Skeleton
+
+Table Skeleton
+
+Form Skeleton
+
+Chart Skeleton
+
+---
+
+###########################################################
+
+ERROR
+
+###########################################################
+
+Error Illustration
+
+↓
+
+Title
+
+↓
+
+Description
+
+↓
+
+Retry Button
+
+↓
+
+Copy Error
+
+---
+
+###########################################################
+
+TOAST
+
+###########################################################
+
+Success
+
+Warning
+
+Info
+
+Danger
+
+Loading
+
+Queue supported.
+
+---
+
+###########################################################
+
+NOTIFICATION CENTER
+
+###########################################################
+
+Unread
+
+Read
+
+Archive
+
+Mark All Read
+
+Grouped by Date
+
+---
+
+###########################################################
+
+COMMAND PALETTE
+
+###########################################################
+
+Shortcut
+
+Ctrl + K
+
+Search
+
+Pages
+
+Products
+
+Customers
+
+Invoices
+
+Reports
+
+Settings
+
+Commands
+
+Create Product
+
+New Invoice
+
+Adjust Stock
+
+Transfer
+
+---
+
+###########################################################
+
+KEYBOARD SHORTCUTS
+
+###########################################################
+
+Ctrl + N
+
+Create
+
+Ctrl + S
+
+Save
+
+Ctrl + F
+
+Search
+
+Ctrl + K
+
+Command Palette
+
+Ctrl + P
+
+Print
+
+Ctrl + E
+
+Export
+
+Esc
+
+Close
+
+Enter
+
+Submit
+
+---
+
+###########################################################
+
+RESPONSIVE
+
+###########################################################
+
+Desktop
+
+>=1280
+
+Tablet
+
+768–1279
+
+Mobile
+
+<768
+
+Desktop is primary target.
+
+---
+
+###########################################################
+
+ACCESSIBILITY
+
+###########################################################
+
+WCAG AA
+
+Keyboard Navigation
+
+Screen Reader
+
+Focus Ring
+
+ARIA Labels
+
+Reduced Motion
+
+High Contrast
+
+---
+
+###########################################################
+
+MOTION
+
+###########################################################
+
+Duration
+
+150–250ms
+
+Animation Types
+
+Fade
+
+Slide
+
+Scale
+
+Collapse
+
+No excessive animation.
+
+---
+
+###########################################################
+
+DARK MODE
+
+###########################################################
+
+Support
+
+System
+
+Light
+
+Dark
+
+Persist user preference.
+
+---
+
+###########################################################
+
+FIGMA MAKE PROMPT TEMPLATE
+
+###########################################################
+
+Every screen generated by AI should:
+
+- Follow desktop-first layout
+- Use left sidebar navigation
+- Use top application bar
+- Use enterprise CRUD layout
+- Prefer cards over floating panels
+- Use consistent spacing scale
+- Use Inter typography
+- Use shadcn/ui compatible components
+- Use Lucide icons
+- Use accessible color contrast
+- Display loading, empty and error states
+- Include realistic enterprise sample data
+- Avoid decorative illustrations unless part of an empty state
+- Keep actions in predictable positions
+- Support keyboard navigation
+- Be responsive from 1366px down to tablet width
+
+---
+
+###########################################################
+
+DESIGN SYSTEM METRICS
+
+###########################################################
+
+Core Components
+
+≈150
+
+Layout Templates
+
+≈25
+
+Form Patterns
+
+≈20
+
+Table Variants
+
+≈15
+
+Chart Templates
+
+≈12
+
+Dialog Types
+
+≈10
+
+Dashboard Widgets
+
+≈30
+
+Reusable Sections
+
+≈40
+
+Coverage
+
+100% CRUD Screens
+
+100% Dashboard Screens
+
+100% Reports
+
+100% Settings
+
+END OF CHAPTER 12
+# CHAPTER 13 — FRONTEND ENGINEERING STANDARDS
+
+Version 1.0
+
+---
+
+# 13.1 Engineering Philosophy
+
+Frontend phải:
+
+- Predictable
+- Maintainable
+- Type Safe
+- Reusable
+- Testable
+- AI Friendly
+
+Không viết code "nhanh".
+
+Luôn ưu tiên code dễ đọc.
+
+---
+
+# 13.2 Technology Standards
+
+React 19
+
+TypeScript 5+
+
+Vite
+
+TailwindCSS
+
+shadcn/ui
+
+TanStack Query
+
+TanStack Table
+
+React Hook Form
+
+Zod
+
+Zustand
+
+date-fns
+
+Lucide
+
+---
+
+# 13.3 Folder Convention
+
+src/
+
+app/
+
+components/
+
+features/
+
+hooks/
+
+layouts/
+
+lib/
+
+providers/
+
+routes/
+
+services/
+
+stores/
+
+types/
+
+utils/
+
+assets/
+
+styles/
+
+---
+
+# 13.4 Feature Structure
+
+products/
+
+components/
+
+pages/
+
+hooks/
+
+services/
+
+schemas/
+
+store/
+
+types/
+
+constants/
+
+utils/
+
+api/
+
+index.ts
+
+---
+
+# 13.5 Naming Convention
+
+Component
+
+PascalCase
+
+ProductCard.tsx
+
+Hook
+
+camelCase
+
+useProducts.ts
+
+Function
+
+camelCase
+
+Variable
+
+camelCase
+
+Type
+
+PascalCase
+
+Enum
+
+PascalCase
+
+File
+
+kebab-case
+
+product-card.tsx
+
+---
+
+# 13.6 Component Rules
+
+Một component
+
+↓
+
+Một trách nhiệm.
+
+Không component >300 dòng.
+
+Không JSX lồng quá 4 cấp.
+
+Ưu tiên composition.
+
+---
+
+# 13.7 State Management
+
+Server State
+
+↓
+
+TanStack Query
+
+Client State
+
+↓
+
+Zustand
+
+Form State
+
+↓
+
+React Hook Form
+
+Temporary UI
+
+↓
+
+useState
+
+---
+
+# 13.8 Query Standards
+
+Không fetch trong component.
+
+Mọi API
+
+↓
+
+Custom Hook
+
+↓
+
+Query
+
+↓
+
+Component
+
+Ví dụ
+
+useProducts()
+
+useInventory()
+
+useCustomers()
+
+---
+
+# 13.9 Mutation Standards
+
+Mutation
+
+↓
+
+Toast
+
+↓
+
+Invalidate Query
+
+↓
+
+Refresh
+
+Không gọi refetch thủ công nếu invalidate đủ.
+
+---
+
+# 13.10 Form Standards
+
+Schema
+
+↓
+
+Zod
+
+↓
+
+React Hook Form
+
+↓
+
+Submit
+
+↓
+
+Mutation
+
+↓
+
+Toast
+
+↓
+
+Navigate
+
+---
+
+# 13.11 Error Handling
+
+API Error
+
+↓
+
+Toast
+
+Validation Error
+
+↓
+
+Inline
+
+Unexpected Error
+
+↓
+
+Error Boundary
+
+---
+
+# 13.12 Performance Rules
+
+Lazy Route
+
+Code Split
+
+Memo
+
+Virtual Scroll
+
+Debounce
+
+Throttle
+
+Không premature optimization.
+
+---
+
+# 13.13 Accessibility
+
+Keyboard
+
+ARIA
+
+Focus
+
+Contrast
+
+Tab Order
+
+Screen Reader
+
+---
+
+# 13.14 Styling Rules
+
+Tailwind Utility First.
+
+Không inline style.
+
+Không !important.
+
+Không CSS global nếu không cần.
+
+---
+
+# 13.15 Imports
+
+Third Party
+
+↓
+
+Shared
+
+↓
+
+Feature
+
+↓
+
+Relative
+
+---
+
+# 13.16 Types
+
+Không dùng any.
+
+Ưu tiên
+
+unknown
+
+generic
+
+union
+
+discriminated union
+
+---
+
+# 13.17 Testing Convention
+
+Arrange
+
+Act
+
+Assert
+
+Mock API
+
+Không mock business logic.
+
+---
+
+# 13.18 Logging
+
+Development
+
+console.*
+
+Production
+
+Monitoring Service
+
+---
+
+# 13.19 Code Quality
+
+ESLint
+
+Prettier
+
+TypeScript Strict
+
+Zero Warning Policy
+
+---
+
+# 13.20 Definition of Done
+
+✓ Type Safe
+
+✓ Build Pass
+
+✓ Responsive
+
+✓ Accessible
+
+✓ Tested
+
+✓ No Console
+
+✓ No TODO
+
+✓ Dark Mode
+
+✓ Empty State
+
+✓ Loading State
+
+✓ Error State
+
+END OF CHAPTER 13
+# CHAPTER 14 — BACKEND ENGINEERING STANDARDS
+
+Version 1.0
+
+---
+
+# 14.1 Backend Philosophy
+
+Business Logic
+
+↓
+
+Application Layer
+
+Database
+
+↓
+
+Persistence Only
+
+API
+
+↓
+
+Thin Layer
+
+---
+
+# 14.2 Architecture
+
+Presentation
+
+↓
+
+Application
+
+↓
+
+Domain
+
+↓
+
+Infrastructure
+
+↓
+
+Database
+
+---
+
+# 14.3 Principles
+
+SOLID
+
+DRY
+
+KISS
+
+YAGNI
+
+CQRS Ready
+
+Event Driven Ready
+
+---
+
+# 14.4 Folder Structure
+
+src/
+
+application/
+
+domain/
+
+infrastructure/
+
+api/
+
+shared/
+
+contracts/
+
+database/
+
+events/
+
+jobs/
+
+---
+
+# 14.5 Domain Rules
+
+Entity
+
+Aggregate
+
+Value Object
+
+Repository
+
+Specification
+
+Factory
+
+Domain Service
+
+---
+
+# 14.6 Validation
+
+DTO Validation
+
+↓
+
+Business Validation
+
+↓
+
+Persistence Validation
+
+---
+
+# 14.7 Error Handling
+
+Validation
+
+Conflict
+
+Forbidden
+
+Not Found
+
+Unexpected
+
+Business
+
+Domain
+
+Mapped to API Error Codes.
+
+---
+
+# 14.8 Transaction Rules
+
+Một Use Case
+
+↓
+
+Một Transaction
+
+Rollback toàn bộ nếu lỗi.
+
+---
+
+# 14.9 Audit Rules
+
+Every Create
+
+Every Update
+
+Every Delete
+
+Every Approval
+
+Every Import
+
+Every Export
+
+---
+
+# 14.10 Repository Rules
+
+Không viết SQL trong Business Layer.
+
+Repository chỉ thao tác dữ liệu.
+
+---
+
+# 14.11 Events
+
+PurchaseApproved
+
+GoodsReceived
+
+InventoryAdjusted
+
+SalesCompleted
+
+InvoicePaid
+
+NotificationCreated
+
+---
+
+# 14.12 Security
+
+JWT
+
+Permission
+
+RLS
+
+Rate Limit
+
+Input Validation
+
+Output Sanitization
+
+---
+
+# 14.13 Background Jobs
+
+Notification
+
+Email
+
+Backup
+
+Snapshot
+
+Cleanup
+
+---
+
+# 14.14 Logging
+
+Information
+
+Warning
+
+Error
+
+Critical
+
+CorrelationId
+
+RequestId
+
+---
+
+# 14.15 Performance
+
+Pagination
+
+Projection
+
+Batch Query
+
+Connection Pool
+
+Prepared Statement
+
+Index First
+
+---
+
+# 14.16 Database Rules
+
+UUID
+
+Soft Delete
+
+Audit
+
+Foreign Key
+
+Composite Index
+
+JSONB cho metadata
+
+---
+
+# 14.17 API Standards
+
+REST
+
+Versioned
+
+Idempotent
+
+OpenAPI
+
+Consistent Response
+
+---
+
+# 14.18 Deployment Ready
+
+Stateless
+
+Horizontal Scale
+
+Serverless Compatible
+
+Edge Ready
+
+---
+
+# 14.19 Monitoring
+
+Health Check
+
+Metrics
+
+Tracing
+
+Slow Query
+
+Error Rate
+
+---
+
+# 14.20 Definition of Done
+
+✓ Build Pass
+
+✓ Tests Pass
+
+✓ Migration Ready
+
+✓ OpenAPI Updated
+
+✓ Audit Enabled
+
+✓ Permission Checked
+
+✓ Logging Added
+
+✓ Documentation Updated
+
+END OF CHAPTER 14
+# CHAPTER 15 — IMPLEMENTATION ROADMAP
+
+Version 1.0
+
+---
+
+# Goal
+
+Xây dựng WarehouseOS từ MVP đến Production theo từng giai đoạn nhỏ, mỗi giai đoạn đều có thể deploy và sử dụng được.
+
+---
+
+# Phase 1 — Foundation
+
+- Khởi tạo Vite + React + TypeScript
+- TailwindCSS
+- shadcn/ui
+- ESLint + Prettier
+- Husky + lint-staged
+- Environment Configuration
+- Vercel Deployment
+- Supabase Project
+
+Deliverable
+
+Running Application
+
+---
+
+# Phase 2 — Authentication
+
+- Supabase Auth
+- Login
+- Logout
+- Forgot Password
+- Session Management
+- Route Guard
+- User Profile
+
+Deliverable
+
+Authentication Module
+
+---
+
+# Phase 3 — Design System
+
+- Layout
+- Sidebar
+- Topbar
+- Button
+- Input
+- Dialog
+- Table
+- Form
+- Theme
+- Dark Mode
+
+Deliverable
+
+Reusable UI Library
+
+---
+
+# Phase 4 — Master Data
+
+- Product
+- Category
+- Brand
+- Unit
+- Warehouse
+- Customer
+- Supplier
+
+Deliverable
+
+Master Data CRUD
+
+---
+
+# Phase 5 — Inventory Core
+
+- Inventory Transaction
+- Inventory Balance
+- Stock Ledger
+- Adjustment
+- Transfer
+
+Deliverable
+
+Inventory MVP
+
+---
+
+# Phase 6 — Purchase
+
+- Purchase Order
+- Goods Receipt
+- Supplier Payment
+- Purchase Return
+
+Deliverable
+
+Purchase Workflow
+
+---
+
+# Phase 7 — Sales
+
+- Quotation
+- Sales Order
+- Delivery
+- Invoice
+- Customer Receipt
+
+Deliverable
+
+Sales Workflow
+
+---
+
+# Phase 8 — Finance
+
+- Receivable
+- Payable
+- Cash Book
+- Expense
+- Income
+
+Deliverable
+
+Finance Module
+
+---
+
+# Phase 9 — Reports
+
+- Dashboard
+- Inventory Reports
+- Sales Reports
+- Purchase Reports
+- Finance Reports
+
+Deliverable
+
+Reporting Center
+
+---
+
+# Phase 10 — Administration
+
+- Users
+- Roles
+- Permissions
+- Audit Log
+- Settings
+
+Deliverable
+
+Administration Module
+
+---
+
+# Phase 11 — Import / Export
+
+- Excel Import
+- Validation
+- Preview
+- Export CSV
+- Export Excel
+- PDF
+
+Deliverable
+
+Data Exchange Module
+
+---
+
+# Phase 12 — Notification
+
+- In-app Notification
+- Email Queue
+- Realtime Updates
+
+Deliverable
+
+Notification Center
+
+---
+
+# Phase 13 — Performance
+
+- Virtual Table
+- Lazy Loading
+- Query Optimization
+- Database Index Review
+- Image Optimization
+
+Deliverable
+
+Performance Optimized
+
+---
+
+# Phase 14 — Quality Assurance
+
+- Unit Tests
+- Integration Tests
+- End-to-End Tests
+- Accessibility Audit
+- Security Review
+
+Deliverable
+
+Release Candidate
+
+---
+
+# Phase 15 — Production
+
+- Production Deployment
+- Monitoring
+- Logging
+- Backup Strategy
+- Disaster Recovery
+- Documentation Review
+
+Deliverable
+
+Production Ready System
+
+---
+
+# Suggested Milestones
+
+## MVP (6–8 weeks)
+
+- Authentication
+- Master Data
+- Inventory
+- Basic Dashboard
+
+## Beta (10–12 weeks)
+
+- Purchase
+- Sales
+- Finance
+- Reports
+
+## Release v1.0 (14–16 weeks)
+
+- Administration
+- Import/Export
+- Notifications
+- Audit
+- Performance
+- Testing
+
+## Future Roadmap (v2+)
+
+- Multi-language
+- Mobile Companion App
+- Barcode Scanner
+- QR Code
+- POS Integration
+- Accounting Integration
+- Manufacturing Module
+- CRM Module
+- AI Assistant
+- Forecasting & Analytics
+- Workflow Automation
+- Public API & Webhooks
+
+---
+
+# Success Criteria
+
+Functional
+
+- 100% nghiệp vụ cốt lõi hoạt động.
+- Không mất dữ liệu trong các giao dịch.
+- Hỗ trợ đa kho và phân quyền.
+
+Technical
+
+- Build thành công trên Vercel.
+- PostgreSQL/Supabase hoạt động ổn định.
+- TypeScript Strict không lỗi.
+- Lighthouse Performance > 90 (Desktop).
+- WCAG AA cho các màn hình chính.
+
+Operational
+
+- Có tài liệu triển khai và vận hành.
+- Có quy trình backup và khôi phục.
+- Có logging, monitoring và audit đầy đủ.
+
+END OF CHAPTER 15
