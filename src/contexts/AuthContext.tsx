@@ -18,6 +18,7 @@ interface AuthCtx {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, fullName: string, orgName: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
+  hasRole: (roles: string | string[]) => boolean
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
@@ -75,8 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }
 
+  const hasRole = (roles: string | string[]) => {
+    if (!profile) return false
+    const allow = Array.isArray(roles) ? roles : [roles]
+    return allow.includes(profile.role)
+  }
+
   return (
-    <Ctx.Provider value={{ session, user, profile, loading, signIn, signUp, signOut }}>
+    <Ctx.Provider value={{ session, user, profile, loading, signIn, signUp, signOut, hasRole }}>
       {children}
     </Ctx.Provider>
   )

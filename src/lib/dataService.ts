@@ -5,7 +5,14 @@
 import { supabase } from "./supabase"
 import * as mock from "../data/mockData"
 
-type Ctx = { isDemo: boolean; orgId?: string }
+type Ctx = { isDemo: boolean; orgId?: string; role?: string }
+
+function roleAllowed(ctx: Ctx | undefined, allowed: string[]) {
+  if (!ctx) return false
+  if (ctx.isDemo) return true
+  if (!ctx.role) return false
+  return allowed.includes(ctx.role)
+}
 
 // ─── Products ────────────────────────────────────────────────
 export async function fetchProducts({ isDemo, orgId }: Ctx) {
@@ -18,15 +25,20 @@ export async function fetchProducts({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
-  const { error } = await supabase.from("products").upsert([{ ...payload, org_id: orgId }] as any)
-  return { error }
+export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId, role }: Ctx) {
+  if (isDemo) return { data: null, error: null }
+  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
+  const { data, error } = await supabase
+    .from("products")
+    .upsert([{ ...payload, org_id: orgId }] as any, { returning: "representation" })
+    .select()
+  return { data, error }
 }
 
-export async function deleteProduct(id: string, { isDemo }: Ctx) {
+export async function deleteProduct(id: string, { isDemo, orgId, role }: Ctx) {
   if (isDemo) return { error: null }
-  const { error } = await supabase.from("products").delete().eq("id", id)
+  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
+  const { error } = await supabase.from("products").delete().eq("id", id).eq("org_id", orgId!)
   return { error }
 }
 
@@ -79,9 +91,50 @@ export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId, role }: Ctx) {
+  if (isDemo) return { data: null, error: null }
+  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .upsert([{ ...payload, org_id: orgId }] as any, { returning: "representation" })
+    .select()
+  return { data, error }
+}
+
+export async function deletePurchaseOrder(id: string, { isDemo, orgId, role }: Ctx) {
   if (isDemo) return { error: null }
-  const { error } = await supabase.from("purchase_orders").upsert([{ ...payload, org_id: orgId }] as any)
+  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
+  const { error } = await supabase.from("purchase_orders").delete().eq("id", id).eq("org_id", orgId!)
+  return { error }
+}
+
+// ─── Purchase Order Items ───────────────────────────────────
+export async function fetchPurchaseOrderItems(poId: string, { isDemo }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await supabase
+    .from("purchase_order_items")
+    .select("*")
+    .eq("po_id", poId)
+    .order("id", { ascending: true })
+  return { data: data ?? [], error }
+}
+
+export async function upsertPurchaseOrderItems(items: Record<string, unknown>[], { isDemo, orgId, role }: Ctx) {
+  if (isDemo) return { data: null, error: null }
+  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
+  // Ensure org_id is present on items if needed by policies (items reference po_id which belongs to an org)
+  const payload = items.map(i => ({ ...i } as any))
+  const { data, error } = await supabase
+    .from("purchase_order_items")
+    .upsert(payload as any, { returning: "representation" })
+    .select()
+  return { data, error }
+}
+
+export async function deletePurchaseOrderItem(id: string, { isDemo, role }: Ctx) {
+  if (isDemo) return { error: null }
+  if (!roleAllowed({ isDemo, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
+  const { error } = await supabase.from("purchase_order_items").delete().eq("id", id)
   return { error }
 }
 
