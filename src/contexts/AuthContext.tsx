@@ -64,11 +64,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: { data: { full_name: fullName, org_name: orgName } },
     })
     if (error) return { error: error.message }
-    if (data.user) {
-      // Create org + profile via edge function or direct insert
-      const { error: orgErr } = await supabase.from("organizations").insert([{ name: orgName }] as any).select().single()
-      if (orgErr && !orgErr.message.includes("already exists")) return { error: orgErr.message }
-    }
     return { error: null }
   }
 
