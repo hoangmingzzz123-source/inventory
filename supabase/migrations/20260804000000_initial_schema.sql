@@ -23,14 +23,14 @@ create table if not exists profiles (
 
 -- Auto-create profile on signup via trigger
 create or replace function handle_new_user()
-returns trigger language plpgsql security definer as $$
+returns trigger language plpgsql security definer set search_path = public, pg_catalog as $$
 declare
   org_id uuid;
   org_name text;
 begin
   org_name := coalesce(new.raw_user_meta_data->>'org_name', 'My Organization');
-  insert into organizations (name) values (org_name) returning id into org_id;
-  insert into profiles (id, email, full_name, role, org_id)
+  insert into public.organizations (name) values (org_name) returning id into org_id;
+  insert into public.profiles (id, email, full_name, role, org_id)
   values (
     new.id,
     new.email,

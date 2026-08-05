@@ -1,8 +1,11 @@
 import { Plus, Search, Download, RefreshCw, MoreHorizontal, ChevronLeft, ChevronRight, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Filter, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
+import { useAuth } from "../contexts/AuthContext"
+import { useDemo } from "../contexts/DemoContext"
+import { fetchCustomers, fetchSuppliers, fetchWarehouses, fetchSalesOrders, fetchInventoryBalance } from "../lib/dataService"
 import * as XLSX from "xlsx"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -227,10 +230,30 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
 // --- Customers ---
 export function Customers() {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
   const [dataList, setDataList] = useState(customers)
-  
+
+  useEffect(() => {
+    async function load() {
+      if (!profile) return
+      const { data, error } = await fetchCustomers({ isDemo, orgId: profile.org_id })
+      if (!error && data) setDataList(data.map((item: any) => ({
+        code: item.code,
+        name: item.name,
+        phone: item.phone ?? "",
+        email: item.email ?? "",
+        taxCode: item.tax_code ?? "",
+        creditLimit: Number(item.credit_limit ?? 0),
+        debt: Number(item.debt ?? 0),
+        status: item.status,
+      })))
+    }
+    load()
+  }, [profile, isDemo])
+
   const filtered = dataList.filter(c => search === "" || c.name.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search))
   const heads = lang === "vi"
     ? ["Mã KH", "Tên khách hàng", "Điện thoại", "Email", "MST", "Hạn mức TD", "Công nợ", "Trạng thái", ""]
@@ -318,9 +341,28 @@ export function Customers() {
 // --- Suppliers ---
 export function Suppliers() {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
   const [dataList, setDataList] = useState(suppliers)
+
+  useEffect(() => {
+    async function load() {
+      if (!profile) return
+      const { data, error } = await fetchSuppliers({ isDemo, orgId: profile.org_id })
+      if (!error && data) setDataList(data.map((item: any) => ({
+        code: item.code,
+        name: item.name,
+        phone: item.phone ?? "",
+        email: item.email ?? "",
+        taxCode: item.tax_code ?? "",
+        debt: Number(item.debt ?? 0),
+        status: item.status,
+      })))
+    }
+    load()
+  }, [profile, isDemo])
 
   const filtered = dataList.filter(s => search === "" || s.name.toLowerCase().includes(search.toLowerCase()) || s.code.includes(search))
   const heads = lang === "vi"
@@ -406,8 +448,27 @@ export function Suppliers() {
 // --- Warehouses ---
 export function Warehouses() {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [showCreate, setShowCreate] = useState(false)
   const [dataList, setDataList] = useState(warehouses)
+
+  useEffect(() => {
+    async function load() {
+      if (!profile) return
+      const { data, error } = await fetchWarehouses({ isDemo, orgId: profile.org_id })
+      if (!error && data) setDataList(data.map((item: any) => ({
+        code: item.code,
+        name: item.name,
+        address: item.address ?? "",
+        manager: item.manager ?? "",
+        phone: item.phone ?? "",
+        status: item.status,
+        stockValue: Number(item.stock_value ?? 0),
+      })))
+    }
+    load()
+  }, [profile, isDemo])
   
   return (
     <div className="flex flex-col h-full">
@@ -485,10 +546,29 @@ export function Warehouses() {
 // --- Sales Orders ---
 export function SalesOrders() {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState("all")
   const [dataList, setDataList] = useState(salesOrders)
   const [showCreate, setShowCreate] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      if (!profile) return
+      const { data, error } = await fetchSalesOrders({ isDemo, orgId: profile.org_id })
+      if (!error && data) setDataList(data.map((item: any) => ({
+        id: item.ref || item.id,
+        customer: item.customer_name,
+        warehouse: item.warehouse_name,
+        status: item.status,
+        total: Number(item.total ?? 0),
+        createdBy: item.created_by ?? "",
+        date: item.created_at ? new Date(item.created_at).toISOString().split("T")[0] : "",
+      })))
+    }
+    load()
+  }, [profile, isDemo])
 
   const filtered = dataList.filter(s =>
     (filterStatus === "all" || s.status === filterStatus) &&
@@ -588,9 +668,30 @@ export function SalesOrders() {
 // --- Stock Balance ---
 export function StockBalance() {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [dataList, setDataList] = useState(inventoryBalance)
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      if (!profile) return
+      const { data, error } = await fetchInventoryBalance({ isDemo, orgId: profile.org_id })
+      if (!error && data) setDataList(data.map((item: any) => ({
+        warehouse: item.warehouse_name,
+        product: item.product_name,
+        sku: item.sku,
+        available: Number(item.qty ?? 0),
+        reserved: 0,
+        incoming: 0,
+        outgoing: 0,
+        avgCost: Number(item.unit_cost ?? 0),
+        value: Number(item.value ?? 0),
+      })))
+    }
+    load()
+  }, [profile, isDemo])
 
   const filtered = dataList.filter(r => search === "" || r.product.toLowerCase().includes(search.toLowerCase()) || r.sku.toLowerCase().includes(search.toLowerCase()))
   const heads = lang === "vi"
