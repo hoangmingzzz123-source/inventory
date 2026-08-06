@@ -146,16 +146,16 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
           {notifOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
-              <div className="absolute right-0 top-10 z-50 bg-white border rounded-xl shadow-xl overflow-hidden" style={{ borderColor: "var(--border)", width: 380 }}>
+              <div className="absolute right-0 top-10 z-50 bg-white border rounded-xl shadow-xl overflow-hidden w-screen max-w-[92vw] sm:w-[380px]" style={{ borderColor: "var(--border)" }}>
                 {/* Dropdown header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "var(--border)" }}>
+                <div className="flex flex-col gap-3 px-4 py-3 border-b sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--border)" }}>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-slate-800">{lang === "vi" ? "Thông báo" : "Notifications"}</span>
                     {unreadCount > 0 && (
                       <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">{unreadCount}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {unreadCount > 0 && (
                       <button onClick={markAllRead} className="flex items-center gap-1 text-[11px] text-blue-600 hover:underline">
                         <Check size={11} /> {lang === "vi" ? "Đọc tất cả" : "Mark all read"}
@@ -168,7 +168,7 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
                 </div>
 
                 {/* Notification rows */}
-                <div className="max-h-[360px] overflow-y-auto">
+                <div className="max-h-[80vh] overflow-y-auto">
                   {preview.length === 0 ? (
                     <div className="py-12 text-center">
                       <Bell size={28} className="text-slate-200 mx-auto mb-2" />
@@ -189,7 +189,7 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
                 </div>
 
                 {/* Footer */}
-                <div className="px-4 py-2.5 border-t bg-slate-50 flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
+                <div className="px-4 py-2.5 border-t bg-slate-50 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--border)" }}>
                   <span className="text-[10px] text-slate-400">{notifications.length} {lang === "vi" ? "thông báo" : "notifications"}</span>
                   <button
                     onClick={() => { setNotifOpen(false); onNavigate?.("notifications") }}
