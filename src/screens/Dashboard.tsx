@@ -23,6 +23,18 @@ const periodLabels = {
   en: ["Today", "Week", "Month", "Quarter"],
 }
 
+const kpiLabels = {
+  vi: [
+    { label: "Doanh thu hôm nay", value: "₫24.580.000", change: "+12,5%", trend: "up", sub: "so với hôm qua" },
+    { label: "Đơn bán hôm nay", value: "48", change: "+8,3%", trend: "up", sub: "đơn bán hàng" },
+    { label: "Mua hàng hôm nay", value: "₫8.200.000", change: "-3,1%", trend: "down", sub: "so với hôm qua" },
+    { label: "Giá trị tồn kho", value: "₫1,24 Tỷ", change: "+0,8%", trend: "up", sub: "tổng giá trị kho" },
+    { label: "Phải thu", value: "₫185.000.000", change: "+5,2%", trend: "up", sub: "đang tồn đọng" },
+    { label: "Phải trả", value: "₫62.400.000", change: "-8,9%", trend: "down", sub: "đang tồn đọng" },
+  ],
+  en: kpiData,
+}
+
 export default function Dashboard() {
   const { t, lang } = useLang()
   const { profile } = useAuth()
