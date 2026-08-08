@@ -160,7 +160,7 @@ export default function NotificationCenter({ onNavigate }: { onNavigate?: (scree
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-5 py-3.5 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+      <div className="flex items-center justify-between px-5 py-3.5 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
             <Bell size={16} className="text-blue-600" />
@@ -170,7 +170,7 @@ export default function NotificationCenter({ onNavigate }: { onNavigate?: (scree
             <div className="text-[10px] text-slate-400">{unreadCount > 0 ? `${unreadCount} ${vi ? "thông báo chưa đọc" : "unread"}` : vi ? "Tất cả đã đọc" : "All caught up"}</div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           {unreadCount > 0 && (
             <button onClick={markAllRead} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
               <Check size={12} /> {vi ? "Đọc tất cả" : "Mark all read"}
@@ -185,7 +185,7 @@ export default function NotificationCenter({ onNavigate }: { onNavigate?: (scree
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+      <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
         {summaryStats.map(s => (
           <div key={s.label} className={`rounded-xl p-3 ${s.bg}`}>
             <div className={`text-xl font-bold mono ${s.color}`}>{s.value}</div>
@@ -195,7 +195,7 @@ export default function NotificationCenter({ onNavigate }: { onNavigate?: (scree
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap items-center gap-2 px-5 py-2 bg-white border-b flex-shrink-0 overflow-x-auto" style={{ borderColor: "var(--border)" }}>
+      <div className="flex items-center gap-1 px-5 py-2 bg-white border-b flex-shrink-0 overflow-x-auto" style={{ borderColor: "var(--border)" }}>
         {tabs.map(t => (
           <button
             key={t.key}
@@ -210,13 +210,13 @@ export default function NotificationCenter({ onNavigate }: { onNavigate?: (scree
             )}
           </button>
         ))}
-        <div className="flex-1 min-w-[120px]" />
-        <div className="flex items-center gap-1.5 min-w-[160px]">
+        <div className="flex-1" />
+        <div className="flex items-center gap-1.5">
           <Filter size={12} className="text-slate-400" />
           <select
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value as NotifType | "all")}
-            className="h-7 w-full rounded-lg border text-xs outline-none bg-white" style={{ borderColor: "var(--border)" }}
+            className="h-7 px-2 rounded-lg border text-xs outline-none bg-white" style={{ borderColor: "var(--border)" }}
           >
             {typeFilters.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>

@@ -1,11 +1,7 @@
-import { useEffect, useState } from "react"
 import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package, ArrowRight } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
-import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities } from "../data/mockData"
+import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities, quotations } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
-import { useAuth } from "../contexts/AuthContext"
-import { useDemo } from "../contexts/DemoContext"
-import { fetchDashboardMetrics } from "../lib/dataService"
 
 function fmt(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n)
@@ -23,51 +19,23 @@ const periodLabels = {
   en: ["Today", "Week", "Month", "Quarter"],
 }
 
-const kpiLabels = {
-  vi: [
-    { label: "Doanh thu hôm nay", value: "₫24.580.000", change: "+12,5%", trend: "up", sub: "so với hôm qua" },
-    { label: "Đơn bán hôm nay", value: "48", change: "+8,3%", trend: "up", sub: "đơn bán hàng" },
-    { label: "Mua hàng hôm nay", value: "₫8.200.000", change: "-3,1%", trend: "down", sub: "so với hôm qua" },
-    { label: "Giá trị tồn kho", value: "₫1,24 Tỷ", change: "+0,8%", trend: "up", sub: "tổng giá trị kho" },
-    { label: "Phải thu", value: "₫185.000.000", change: "+5,2%", trend: "up", sub: "đang tồn đọng" },
-    { label: "Phải trả", value: "₫62.400.000", change: "-8,9%", trend: "down", sub: "đang tồn đọng" },
-  ],
-  en: kpiData,
-}
-
 export default function Dashboard() {
   const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [metrics, setMetrics] = useState<null | ReturnType<typeof fetchDashboardMetrics> extends Promise<infer U> ? U : never>(null)
-  const [loadingMetrics, setLoadingMetrics] = useState(false)
   const periods = periodLabels[lang]
 
-  useEffect(() => {
-    async function loadMetrics() {
-      if (!profile || isDemo) {
-        setMetrics(null)
-        return
-      }
-      setLoadingMetrics(true)
-      const data = await fetchDashboardMetrics({ isDemo, orgId: profile.org_id })
-      setMetrics(data)
-      setLoadingMetrics(false)
-    }
-    loadMetrics()
-  }, [profile, isDemo])
+  const kpiLabels = {
+    vi: [
+      { label: "Doanh thu hôm nay", value: "₫24.580.000", change: "+12,5%", trend: "up", sub: "so với hôm qua" },
+      { label: "Đơn bán hôm nay", value: "48", change: "+8,3%", trend: "up", sub: "đơn bán hàng" },
+      { label: "Mua hàng hôm nay", value: "₫8.200.000", change: "-3,1%", trend: "down", sub: "so với hôm qua" },
+      { label: "Giá trị tồn kho", value: "₫1,24 Tỷ", change: "+0,8%", trend: "up", sub: "tổng giá trị kho" },
+      { label: "Phải thu", value: "₫185.000.000", change: "+5,2%", trend: "up", sub: "đang tồn đọng" },
+      { label: "Phải trả", value: "₫62.400.000", change: "-8,9%", trend: "down", sub: "đang tồn đọng" },
+    ],
+    en: kpiData,
+  }
 
-  const kpis = metrics && !isDemo ? [
-    { label: lang === "vi" ? "Số sản phẩm" : "Products", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(metrics.productsCount), change: "", trend: "up", sub: lang === "vi" ? "Tổng sản phẩm" : "Total products" },
-    { label: lang === "vi" ? "Đơn mua" : "Purchase Orders", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(metrics.purchaseOrdersCount), change: "", trend: "up", sub: lang === "vi" ? "Số đơn mua" : "Purchase orders" },
-    { label: lang === "vi" ? "Đơn bán" : "Sales Orders", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(metrics.salesOrdersCount), change: "", trend: "up", sub: lang === "vi" ? "Số đơn bán" : "Sales orders" },
-    { label: lang === "vi" ? "Doanh thu" : "Revenue", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US", { style: "currency", currency: "VND" }).format(metrics.revenueTotal), change: "", trend: "up", sub: lang === "vi" ? "Tổng doanh thu" : "Total revenue" },
-    { label: lang === "vi" ? "Giá trị tồn kho" : "Inventory Value", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US", { style: "currency", currency: "VND" }).format(metrics.inventoryValue), change: "", trend: "up", sub: lang === "vi" ? "Tổng giá trị tồn kho" : "Total inventory value" },
-    { label: lang === "vi" ? "Hoạt động gần đây" : "Recent Activity", value: new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(metrics.recentActivities.length), change: "", trend: "up", sub: lang === "vi" ? "Mục hoạt động" : "Activity items" },
-  ] : kpiLabels[lang]
-
-  const liveLowStock = metrics && !isDemo ? metrics.lowStock : lowStockItems
-  const liveRecentActivities = metrics && !isDemo ? metrics.recentActivities : recentActivities
+  const kpis = kpiLabels[lang]
 
   return (
     <div className="p-5 space-y-4 max-w-screen-2xl">
@@ -186,11 +154,11 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <AlertTriangle size={14} className="text-amber-500" />
               <h3 className="text-sm font-semibold text-slate-800">{t("lowStockAlert")}</h3>
-              <span className="text-[11px] bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-semibold">{liveLowStock.length}</span>
+              <span className="text-[11px] bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-semibold">{lowStockItems.length}</span>
             </div>
             <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
-          {liveLowStock.map(item => (
+          {lowStockItems.map(item => (
             <div key={item.sku} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
               <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
                 <Package size={14} className="text-amber-600" />
@@ -216,7 +184,7 @@ export default function Dashboard() {
             </div>
             <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
-          {liveRecentActivities.map((act, i) => (
+          {recentActivities.map((act, i) => (
             <div key={i} className="flex items-start gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
               <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                 {activityIcon[act.type]}

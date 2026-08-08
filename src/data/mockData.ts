@@ -151,3 +151,46 @@ export const units = [
   { id: "UN006", code: "LICENSE", name_vi: "Giấy phép", name_en: "License", type: "Digital", items: 3, status: "Active" },
 ]
 
+
+export const quotations = [
+  {
+    id: "QT-2026-001",
+    customer_id: "CUST-001",
+    customer_name: "Công ty ABC",
+    date: "2026-08-01",
+    valid_until: "2026-08-15",
+    subtotal: 12000000,
+    discount_pct: 5,
+    tax_pct: 10,
+    total: 12540000,
+    status: "accepted",
+    notes: "Báo giá thiết bị văn phòng",
+    items: [
+      { product_id: "P-001", name: "Laptop Dell XPS 15", quantity: 1, unit_price: 10000000, profit_pct: 20 },
+      { product_id: "P-002", name: "Chuột Logitech", quantity: 2, unit_price: 1000000, profit_pct: 15 }
+    ]
+  },
+  {
+    id: "QT-2026-002",
+    customer_id: "CUST-003",
+    customer_name: "Đại lý Thành Phát",
+    date: "2026-08-05",
+    valid_until: "2026-08-20",
+    subtotal: 5000000,
+    discount_pct: 0,
+    tax_pct: 8,
+    total: 5400000,
+    status: "pending",
+    notes: "Báo giá vật tư",
+    items: [
+      { product_id: "P-003", name: "Bàn phím cơ", quantity: 5, unit_price: 1000000, profit_pct: 10 }
+    ]
+  }
+]
+
+export const importRecords = [
+  { id: "IMP-001", receipt_id: "GR-001", product_id: "P001", product_name: "Dell Latitude 5540 i5", supplier_id: "SUP-001", supplier_name: "Tech Distributor VN", cost_price: 18000000, unit: "Piece", quantity: 50, date: "2026-07-15", quotation_id: "", customer_id: "", customer_name: "" },
+  { id: "IMP-002", receipt_id: "GR-002", product_id: "P001", product_name: "Dell Latitude 5540 i5", supplier_id: "SUP-002", supplier_name: "Dell EMC Vietnam", cost_price: 18500000, unit: "Piece", quantity: 100, date: "2026-08-01", quotation_id: "QT-2026-001", customer_id: "CUST-001", customer_name: "Công ty ABC" },
+  { id: "IMP-003", receipt_id: "GR-003", product_id: "P004", product_name: "Logitech MX Keys", supplier_id: "SUP-003", supplier_name: "Logitech APAC", cost_price: 2000000, unit: "Piece", quantity: 200, date: "2026-07-28", quotation_id: "", customer_id: "", customer_name: "" }
+]
+

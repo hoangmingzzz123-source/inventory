@@ -18,7 +18,6 @@ interface AuthCtx {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, fullName: string, orgName: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
-  hasRole: (roles: string | string[]) => boolean
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
@@ -64,6 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       options: { data: { full_name: fullName, org_name: orgName } },
     })
     if (error) return { error: error.message }
+    if (data.user) {
+      // Create org + profile via edge function or direct insert
+      const { error: orgErr } = await supabase.from("organizations").insert([{ name: orgName }] as any).select().single()
+      if (orgErr && !orgErr.message.includes("already exists")) return { error: orgErr.message }
+    }
     return { error: null }
   }
 
@@ -71,14 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }
 
-  const hasRole = (roles: string | string[]) => {
-    if (!profile) return false
-    const allow = Array.isArray(roles) ? roles : [roles]
-    return allow.includes(profile.role)
-  }
-
   return (
-    <Ctx.Provider value={{ session, user, profile, loading, signIn, signUp, signOut, hasRole }}>
+    <Ctx.Provider value={{ session, user, profile, loading, signIn, signUp, signOut }}>
       {children}
     </Ctx.Provider>
   )

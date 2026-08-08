@@ -1,11 +1,11 @@
-import { Plus, Search, Download, RefreshCw, MoreHorizontal, ChevronLeft, ChevronRight, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Filter, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
+import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, ChevronLeft, ChevronRight, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Filter, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
-import { useLang } from "../i18n/LangContext"
-import { useAuth } from "../contexts/AuthContext"
 import { useDemo } from "../contexts/DemoContext"
-import { fetchCustomers, fetchSuppliers, fetchWarehouses, fetchSalesOrders, fetchInventoryBalance } from "../lib/dataService"
+import { useAuth } from "../contexts/AuthContext"
+import { fetchCustomers, fetchSuppliers, fetchWarehouses } from "../lib/dataService"
+import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -31,7 +31,7 @@ function downloadTemplateXlsx(filename: string, cols: string[]) {
 }
 
 // --- Import Modal ---
-function ImportModal({ onClose, filename, cols, lang }: { onClose: () => void; filename: string; cols: string[]; lang: string }) {
+export function ImportModal({ onClose, filename, cols, lang }: { onClose: () => void; filename: string; cols: string[]; lang: string }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -150,7 +150,7 @@ function ImportModal({ onClose, filename, cols, lang }: { onClose: () => void; f
 }
 
 // --- Toolbar shared ---
-function Toolbar({ onSearch, search, onCreate, createLabel, onImport, templateFile, templateCols, extra, onExportCsv, onExportXlsx }: {
+export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, templateFile, templateCols, extra, onExportCsv, onExportXlsx }: {
   onSearch?: (v: string) => void; search?: string; onCreate?: () => void; createLabel?: string
   onImport?: () => void; templateFile?: string; templateCols?: string[]; extra?: React.ReactNode;
   onExportCsv?: () => void; onExportXlsx?: () => void
@@ -228,312 +228,84 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
 }
 
 // --- Customers ---
-export function Customers() {
-  const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-  const [dataList, setDataList] = useState(customers)
 
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      const { data, error } = await fetchCustomers({ isDemo, orgId: profile.org_id })
-      if (!error && data) setDataList(data.map((item: any) => ({
-        code: item.code,
-        name: item.name,
-        phone: item.phone ?? "",
-        email: item.email ?? "",
-        taxCode: item.tax_code ?? "",
-        creditLimit: Number(item.credit_limit ?? 0),
-        debt: Number(item.debt ?? 0),
-        status: item.status,
-      })))
-    }
-    load()
-  }, [profile, isDemo])
 
-  const filtered = dataList.filter(c => search === "" || c.name.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search))
-  const heads = lang === "vi"
-    ? ["Mã KH", "Tên khách hàng", "Điện thoại", "Email", "MST", "Hạn mức TD", "Công nợ", "Trạng thái", ""]
-    : ["Code", "Customer Name", "Phone", "Email", "Tax Code", "Credit Limit", "Debt", "Status", ""]
-    
+export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile }: any) {
+  const { t, lang } = useLang();
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
+  
+  const filtered = data.filter((item: any) => search === "" || Object.values(item).some((v: any) => String(v).toLowerCase().includes(search.toLowerCase())));
+  
+  const heads = columns.map((c: any) => c.label);
+  
   return (
     <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm khách hàng" : "Add Customer"}
-        templateFile="customers" templateCols={["customer_code","customer_name","phone","email","tax_code","address","credit_limit","status"]}
-        onExportCsv={() => exportCsv("customers", heads.slice(0,-1), filtered.map(c => [c.code, c.name, c.phone, c.email, c.taxCode, c.creditLimit, c.debt, c.status]))}
-        onExportXlsx={() => exportXlsx("customers", heads.slice(0,-1), filtered.map(c => [c.code, c.name, c.phone, c.email, c.taxCode, c.creditLimit, c.debt, c.status]))}
+      <Toolbar search={search} onSearch={setSearch} onCreate={() => { setEditingItem(null); setShowForm(true); }} createLabel={lang === "vi" ? "Thêm " + title : "Add " + title}
+        templateFile={templateFile} templateCols={templateCols}
+        onExportCsv={() => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
+        onExportXlsx={() => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
       />
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse min-w-[900px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
+              {columns.map((c: any) => <th key={c.key} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{c.label}</th>)}
+              <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap"></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c => (
-              <tr key={c.code} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{c.code}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{c.name}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{c.phone}</td>
-                <td className="px-4 py-2.5 text-slate-500">{c.email}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{c.taxCode || "—"}</td>
-                <td className="px-4 py-2.5 mono text-right text-slate-700">{fmt(c.creditLimit)}</td>
-                <td className={`px-4 py-2.5 mono text-right font-semibold ${c.debt > 0 ? "text-amber-600" : "text-emerald-600"}`}>{fmt(c.debt)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
+            {filtered.map((item: any, i: number) => (
+              <tr key={i} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
+                {columns.map((c: any) => (
+                  <td key={c.key} className={"px-4 py-2.5 " + (c.isStatus ? "" : "text-slate-800")}>
+                    {c.isStatus ? <StatusBadge status={item[c.key]} /> : (c.format ? c.format(item[c.key]) : item[c.key])}
+                  </td>
+                ))}
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== c.code)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowForm(true); }} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><Edit size={14} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setData(data.filter((x: any) => x !== item)); }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "khách hàng" : "customers"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm khách hàng" : "Add Customer"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: fd.get("code") as string || "NEW",
-                name: fd.get("name") as string || "New",
-                phone: fd.get("phone") as string || "",
-                email: fd.get("email") as string || "",
-                taxCode: fd.get("taxCode") as string || "",
-                creditLimit: Number(fd.get("creditLimit")) || 0,
-                debt: 0,
-                status: "Active"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Mã KH" : "Code"}</label><input name="code" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Tên KH *" : "Name *"}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Phone</label><input name="phone" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Email</label><input name="email" type="email" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Tax Code</label><input name="taxCode" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Credit Limit</label><input name="creditLimit" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-// --- Suppliers ---
-export function Suppliers() {
-  const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-  const [dataList, setDataList] = useState(suppliers)
-
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      const { data, error } = await fetchSuppliers({ isDemo, orgId: profile.org_id })
-      if (!error && data) setDataList(data.map((item: any) => ({
-        code: item.code,
-        name: item.name,
-        phone: item.phone ?? "",
-        email: item.email ?? "",
-        taxCode: item.tax_code ?? "",
-        debt: Number(item.debt ?? 0),
-        status: item.status,
-      })))
-    }
-    load()
-  }, [profile, isDemo])
-
-  const filtered = dataList.filter(s => search === "" || s.name.toLowerCase().includes(search.toLowerCase()) || s.code.includes(search))
-  const heads = lang === "vi"
-    ? ["Mã NCC", "Tên nhà cung cấp", "Điện thoại", "Email", "MST", "Công nợ", "Trạng thái", ""]
-    : ["Code", "Supplier Name", "Phone", "Email", "Tax Code", "Debt", "Status", ""]
-    
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm nhà cung cấp" : "Add Supplier"}
-        templateFile="suppliers" templateCols={["supplier_code","supplier_name","phone","email","tax_code","address","payment_terms","status"]}
-        onExportCsv={() => exportCsv("suppliers", heads.slice(0,-1), filtered.map(s => [s.code, s.name, s.phone, s.email, s.taxCode, s.debt, s.status]))}
-        onExportXlsx={() => exportXlsx("suppliers", heads.slice(0,-1), filtered.map(s => [s.code, s.name, s.phone, s.email, s.taxCode, s.debt, s.status]))}
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[800px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(s => (
-              <tr key={s.code} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{s.code}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{s.name}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{s.phone}</td>
-                <td className="px-4 py-2.5 text-slate-500">{s.email}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{s.taxCode || "—"}</td>
-                <td className={`px-4 py-2.5 mono text-right font-semibold ${s.debt > 0 ? "text-amber-600" : "text-emerald-600"}`}>{fmt(s.debt)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={s.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== s.code)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "nhà cung cấp" : "suppliers"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm nhà cung cấp" : "Add Supplier"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: fd.get("code") as string || "NEW",
-                name: fd.get("name") as string || "New",
-                phone: fd.get("phone") as string || "",
-                email: fd.get("email") as string || "",
-                taxCode: fd.get("taxCode") as string || "",
-                debt: 0,
-                status: "Active"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Mã NCC" : "Code"}</label><input name="code" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Tên NCC *" : "Name *"}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Phone</label><input name="phone" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Email</label><input name="email" type="email" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Tax Code</label><input name="taxCode" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-// --- Warehouses ---
-export function Warehouses() {
-  const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [showCreate, setShowCreate] = useState(false)
-  const [dataList, setDataList] = useState(warehouses)
-
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      const { data, error } = await fetchWarehouses({ isDemo, orgId: profile.org_id })
-      if (!error && data) setDataList(data.map((item: any) => ({
-        code: item.code,
-        name: item.name,
-        address: item.address ?? "",
-        manager: item.manager ?? "",
-        phone: item.phone ?? "",
-        status: item.status,
-        stockValue: Number(item.stock_value ?? 0),
-      })))
-    }
-    load()
-  }, [profile, isDemo])
-  
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm kho" : "Add Warehouse"} 
-        onExportCsv={() => exportCsv("warehouses", ["Code", "Name", "Address", "Manager", "Phone", "Stock Value", "Status"], dataList.map(w => [w.code, w.name, w.address, w.manager, w.phone, w.stockValue, w.status]))}
-        onExportXlsx={() => exportXlsx("warehouses", ["Code", "Name", "Address", "Manager", "Phone", "Stock Value", "Status"], dataList.map(w => [w.code, w.name, w.address, w.manager, w.phone, w.stockValue, w.status]))}
-      />
-      <div className="flex-1 overflow-auto p-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {dataList.map(w => (
-            <div key={w.code} className="bg-white rounded-xl border p-4 hover:shadow-md transition-shadow cursor-pointer relative group" style={{ borderColor: "var(--border)" }}>
-              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 flex gap-1">
-                <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== w.code)) }} className="w-6 h-6 bg-red-50 text-red-500 rounded flex items-center justify-center hover:bg-red-100"><X size={12}/></button>
-              </div>
-              <div className="flex items-start justify-between mb-3 pr-8">
-                <div>
-                  <div className="text-xs font-bold mono text-blue-600">{w.code}</div>
-                  <div className="text-sm font-semibold text-slate-800 mt-0.5">{w.name}</div>
-                </div>
-                <StatusBadge status={w.status} />
-              </div>
-              <div className="space-y-1.5 text-xs text-slate-500">
-                <div>{w.address}</div>
-                <div>{lang === "vi" ? "Quản lý" : "Manager"}: <span className="text-slate-700 font-medium">{w.manager}</span></div>
-                <div>{lang === "vi" ? "Điện thoại" : "Phone"}: <span className="mono text-slate-700">{w.phone}</span></div>
-              </div>
-              <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t("stockValue")}</div>
-                <div className="text-base font-bold mono text-slate-900 mt-0.5">{fmt(w.stockValue)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
       
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
+      {showForm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm kho" : "Add Warehouse"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
+              <h2 className="text-sm font-semibold">{editingItem ? (lang === "vi" ? "Sửa " + title : "Edit " + title) : (lang === "vi" ? "Thêm " + title : "Add " + title)}</h2>
+              <button onClick={() => setShowForm(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
             </div>
             <form onSubmit={e => {
               e.preventDefault();
               const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: fd.get("code") as string || "NEW",
-                name: fd.get("name") as string || "New",
-                manager: fd.get("manager") as string || "",
-                phone: fd.get("phone") as string || "",
-                address: fd.get("address") as string || "",
-                stockValue: 0,
-                status: "Active"
-              }]);
-              setShowCreate(false);
+              const newItem: any = { ...editingItem };
+              columns.forEach((c: any) => {
+                newItem[c.key] = fd.get(c.key) || "";
+              });
+              if (editingItem) {
+                setData(data.map((x: any) => x === editingItem ? newItem : x));
+              } else {
+                setData([...data, newItem]);
+              }
+              setShowForm(false);
             }}>
               <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Mã Kho" : "Code"}</label><input name="code" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Tên Kho *" : "Name *"}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Manager</label><input name="manager" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Phone</label><input name="phone" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div className="col-span-2"><label className="block text-[11px] font-medium text-slate-600 mb-1">Address</label><input name="address" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
+                {columns.map((c: any) => (
+                  <div key={c.key}>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">{c.label}</label>
+                    <input name={c.key} defaultValue={editingItem ? editingItem[c.key] : ""} className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} />
+                  </div>
+                ))}
               </div>
               <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
+                <button type="button" onClick={() => setShowForm(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
                 <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
               </div>
             </form>
@@ -543,754 +315,170 @@ export function Warehouses() {
     </div>
   )
 }
+
+
+export function Customers() {
+  const { lang } = useLang();
+  const [data, setData] = useState(customers);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchCustomers({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
+  }, [isDemo, profile]);
+
+  const columns = lang === "vi" ? [
+    { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "phone", label: "Điện thoại" },
+    { key: "email", label: "Email" }, { key: "taxCode", label: "MST" }, { key: "creditLimit", label: "Hạn mức TD", format: fmt },
+    { key: "debt", label: "Công nợ", format: fmt }, { key: "status", label: "Trạng thái", isStatus: true }
+  ] : [
+    { key: "code", label: "Code" }, { key: "name", label: "Customer Name" }, { key: "phone", label: "Phone" },
+    { key: "email", label: "Email" }, { key: "taxCode", label: "Tax Code" }, { key: "creditLimit", label: "Credit Limit", format: fmt },
+    { key: "debt", label: "Debt", format: fmt }, { key: "status", label: "Status", isStatus: true }
+  ];
+
+  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "taxCode", "creditLimit", "debt", "status"]} templateFile="customers" />;
+}
+
+// --- Suppliers ---
+
+export function Suppliers() {
+  const { lang } = useLang();
+  const [data, setData] = useState(suppliers);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchSuppliers({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
+  }, [isDemo, profile]);
+
+  const columns = lang === "vi" ? [
+    { key: "code", label: "Mã NCC" }, { key: "name", label: "Tên nhà cung cấp" }, { key: "phone", label: "Điện thoại" },
+    { key: "email", label: "Email" }, { key: "taxCode", label: "MST" }, { key: "debt", label: "Công nợ", format: fmt },
+    { key: "status", label: "Trạng thái", isStatus: true }
+  ] : [
+    { key: "code", label: "Code" }, { key: "name", label: "Supplier Name" }, { key: "phone", label: "Phone" },
+    { key: "email", label: "Email" }, { key: "taxCode", label: "Tax Code" }, { key: "debt", label: "Debt", format: fmt },
+    { key: "status", label: "Status", isStatus: true }
+  ];
+
+  return <GenericCrudList title={lang === "vi" ? "nhà cung cấp" : "supplier"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "taxCode", "debt", "status"]} templateFile="suppliers" />;
+}
+
+// --- Warehouses ---
+
+export function Warehouses() {
+  const { lang } = useLang();
+  const [data, setData] = useState(warehouses);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchWarehouses({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
+  }, [isDemo, profile]);
+
+  const columns = lang === "vi" ? [
+    { key: "code", label: "Mã kho" }, { key: "name", label: "Tên kho" }, { key: "location", label: "Địa điểm" },
+    { key: "manager", label: "Thủ kho" }, { key: "capacity", label: "Sức chứa" }, { key: "status", label: "Trạng thái", isStatus: true }
+  ] : [
+    { key: "code", label: "Code" }, { key: "name", label: "Warehouse Name" }, { key: "location", label: "Location" },
+    { key: "manager", label: "Manager" }, { key: "capacity", label: "Capacity" }, { key: "status", label: "Status", isStatus: true }
+  ];
+
+  return <GenericCrudList title={lang === "vi" ? "kho" : "warehouse"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "location", "manager", "capacity", "status"]} templateFile="warehouses" />;
+}
+
 // --- Sales Orders ---
 export function SalesOrders() {
-  const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [search, setSearch] = useState("")
-  const [filterStatus, setFilterStatus] = useState("all")
-  const [dataList, setDataList] = useState(salesOrders)
-  const [showCreate, setShowCreate] = useState(false)
-
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      const { data, error } = await fetchSalesOrders({ isDemo, orgId: profile.org_id })
-      if (!error && data) setDataList(data.map((item: any) => ({
-        id: item.ref || item.id,
-        customer: item.customer_name,
-        warehouse: item.warehouse_name,
-        status: item.status,
-        total: Number(item.total ?? 0),
-        createdBy: item.created_by ?? "",
-        date: item.created_at ? new Date(item.created_at).toISOString().split("T")[0] : "",
-      })))
-    }
-    load()
-  }, [profile, isDemo])
-
-  const filtered = dataList.filter(s =>
-    (filterStatus === "all" || s.status === filterStatus) &&
-    (search === "" || s.id.toLowerCase().includes(search.toLowerCase()) || s.customer.toLowerCase().includes(search.toLowerCase()))
-  )
-  const heads = lang === "vi"
-    ? ["Số SO", "Khách hàng", "Kho", "Trạng thái", "Tổng tiền", "Người tạo", "Ngày tạo", ""]
-    : ["SO Number", "Customer", "Warehouse", "Status", "Grand Total", "Created By", "Date", ""]
-  const statusOpts = [
-    { k: "all", l: lang === "vi" ? "Tất cả" : "All" },
-    { k: "Draft", l: lang === "vi" ? "Nháp" : "Draft" },
-    { k: "Approved", l: lang === "vi" ? "Đã duyệt" : "Approved" },
-    { k: "Delivered", l: lang === "vi" ? "Đã giao" : "Delivered" },
-    { k: "Completed", l: lang === "vi" ? "Hoàn tất" : "Completed" },
-  ]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create SO"}
-        onExportCsv={() => exportCsv("sales-orders", heads.slice(0, -1), filtered.map(s => [s.id, s.customer, s.warehouse, s.status, s.total, s.createdBy, s.date]))}
-        onExportXlsx={() => exportXlsx("sales-orders", heads.slice(0, -1), filtered.map(s => [s.id, s.customer, s.warehouse, s.status, s.total, s.createdBy, s.date]))}
-        extra={
-          <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ borderColor: "var(--border)" }}>
-            {statusOpts.map(s => (
-              <button key={s.k} onClick={() => setFilterStatus(s.k)} className={`h-8 px-2.5 whitespace-nowrap transition-colors ${filterStatus === s.k ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{s.l}</button>
-            ))}
-          </div>
-        }
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(so => (
-              <tr key={so.id} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-semibold">{so.id}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{so.customer}</td>
-                <td className="px-4 py-2.5 text-slate-600">{so.warehouse}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={so.status} /></td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(so.total)}</td>
-                <td className="px-4 py-2.5 text-slate-500">{so.createdBy}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{so.date}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button onClick={e => e.stopPropagation()} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.id !== so.id)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "đơn bán hàng" : "sales orders"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo đơn bán" : "Create SO"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                id: fd.get("id") as string || "NEW",
-                customer: fd.get("customer") as string || "New Customer",
-                warehouse: "Main Warehouse",
-                status: "Draft",
-                total: Number(fd.get("total")) || 0,
-                createdBy: "Current User",
-                date: new Date().toISOString().split("T")[0]
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số SO" : "SO Number"}</label><input name="id" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Khách hàng" : "Customer"}</label><input name="customer" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Tổng tiền" : "Grand Total"}</label><input name="total" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", total: "Sample total", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "đơn hàng" : "sales order"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="salesorders" />;
 }
 
-// --- Stock Balance ---
+// --- NEXT ---
 export function StockBalance() {
-  const { t, lang } = useLang()
-  const { profile } = useAuth()
-  const { isDemo } = useDemo()
-  const [dataList, setDataList] = useState(inventoryBalance)
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      const { data, error } = await fetchInventoryBalance({ isDemo, orgId: profile.org_id })
-      if (!error && data) setDataList(data.map((item: any) => ({
-        warehouse: item.warehouse_name,
-        product: item.product_name,
-        sku: item.sku,
-        available: Number(item.qty ?? 0),
-        reserved: 0,
-        incoming: 0,
-        outgoing: 0,
-        avgCost: Number(item.unit_cost ?? 0),
-        value: Number(item.value ?? 0),
-      })))
-    }
-    load()
-  }, [profile, isDemo])
-
-  const filtered = dataList.filter(r => search === "" || r.product.toLowerCase().includes(search.toLowerCase()) || r.sku.toLowerCase().includes(search.toLowerCase()))
-  const heads = lang === "vi"
-    ? ["Kho", "Sản phẩm", "SKU", "Khả dụng", "Đang giữ", "Đang về", "Đang xuất", "Giá vốn TB", "Giá trị tồn kho", ""]
-    : ["Warehouse", "Product", "SKU", "Available", "Reserved", "Incoming", "Outgoing", "Avg Cost", "Inventory Value", ""]
-  const total = filtered.reduce((a, b) => a + b.value, 0)
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm số dư" : "Add Balance"}
-        onExportCsv={() => exportCsv("stock-balance", heads.slice(0, -1), filtered.map(r => [r.warehouse, r.product, r.sku, r.available, r.reserved, r.incoming, r.outgoing, r.avgCost, r.value]))}
-        onExportXlsx={() => exportXlsx("stock-balance", heads.slice(0, -1), filtered.map(r => [r.warehouse, r.product, r.sku, r.available, r.reserved, r.incoming, r.outgoing, r.avgCost, r.value]))}
-        extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Filter size={13} /> {t("filter")}
-        </button>
-      } />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[1050px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map((h, i) => <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((row, i) => (
-              <tr key={i} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{row.warehouse}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{row.product}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{row.sku}</td>
-                <td className="px-4 py-2.5 mono font-bold text-center text-slate-900">{row.available}</td>
-                <td className="px-4 py-2.5 mono text-center text-blue-600">{row.reserved}</td>
-                <td className="px-4 py-2.5 mono text-center text-emerald-600">{row.incoming}</td>
-                <td className="px-4 py-2.5 mono text-center text-amber-600">{row.outgoing}</td>
-                <td className="px-4 py-2.5 mono text-right text-slate-700">{fmt(row.avgCost)}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right text-slate-900">{fmt(row.value)}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter((_, index) => index !== i)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="bg-blue-50 border-t-2" style={{ borderColor: "#2563eb" }}>
-              <td colSpan={8} className="px-4 py-2.5 text-xs font-bold text-right text-slate-700">{lang === "vi" ? "Tổng giá trị tồn kho" : "Total Inventory Value"}</td>
-              <td className="px-4 py-2.5 mono font-bold text-blue-700 text-right">{fmt(total)}</td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "mặt hàng" : "items"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm số dư" : "Add Balance"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                warehouse: fd.get("warehouse") as string || "Main",
-                product: fd.get("product") as string || "New Product",
-                sku: fd.get("sku") as string || "SKU-NEW",
-                available: Number(fd.get("available")) || 0,
-                reserved: 0,
-                incoming: 0,
-                outgoing: 0,
-                avgCost: 0,
-                value: 0
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho" : "Warehouse"}</label><input name="warehouse" defaultValue="Kho chính" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Sản phẩm" : "Product"}</label><input name="product" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">SKU</label><input name="sku" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Khả dụng" : "Available"}</label><input name="available" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ product: "Sample product", sku: "Sample sku", warehouse: "Sample warehouse", qty: "Sample qty", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "product", label: "PRODUCT", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "product", label: "PRODUCT", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "tồn kho" : "stock balance"} data={data} setData={setData} columns={columns} templateCols={["product","sku","warehouse","qty","status"]} templateFile="stockbalance" />;
 }
 
-// --- Stock Ledger ---
+// --- NEXT ---
 export function StockLedger() {
-  const { t, lang } = useLang()
-  const [dataList, setDataList] = useState(stockLedger)
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-
-  const filtered = dataList.filter(r => search === "" || r.product.toLowerCase().includes(search.toLowerCase()) || r.ref.toLowerCase().includes(search.toLowerCase()))
-  const heads = lang === "vi"
-    ? ["Ngày giờ", "Chứng từ", "Loại", "Kho", "Sản phẩm", "SL nhập", "SL xuất", "Tồn cuối", "Giá vốn", "Giá vốn TB", "Người tạo", ""]
-    : ["Date/Time", "Reference", "Type", "Warehouse", "Product", "Qty In", "Qty Out", "Balance", "Unit Cost", "Avg Cost", "User", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm giao dịch" : "Add Entry"}
-        onExportCsv={() => exportCsv("stock-ledger", heads.slice(0,-1), filtered.map(r => [r.date, r.ref, r.type, r.warehouse, r.product, r.qtyIn, r.qtyOut, r.balance, r.cost, r.avgCost, r.user]))}
-        onExportXlsx={() => exportXlsx("stock-ledger", heads.slice(0,-1), filtered.map(r => [r.date, r.ref, r.type, r.warehouse, r.product, r.qtyIn, r.qtyOut, r.balance, r.cost, r.avgCost, r.user]))}
-        extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Filter size={13} /> {t("filter")}
-        </button>
-      } />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[1200px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map((h, i) => <th key={i} className="px-3 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((row, i) => (
-              <tr key={i} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-3 py-2.5 mono text-slate-400 text-[10px] whitespace-nowrap">{row.date}</td>
-                <td className="px-3 py-2.5 mono text-blue-600 font-medium whitespace-nowrap">{row.ref}</td>
-                <td className="px-3 py-2.5">
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap
-                    ${row.type === "Purchase" || row.type === "Transfer In" ? "bg-emerald-50 text-emerald-700" :
-                      row.type === "Sales" || row.type === "Transfer Out" ? "bg-red-50 text-red-600" :
-                      "bg-violet-50 text-violet-700"}`}>
-                    {row.type}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{row.warehouse}</td>
-                <td className="px-3 py-2.5 font-medium text-slate-800">{row.product}</td>
-                <td className="px-3 py-2.5 mono text-center text-emerald-600 font-semibold">{row.qtyIn > 0 ? `+${row.qtyIn}` : "—"}</td>
-                <td className="px-3 py-2.5 mono text-center text-red-500 font-semibold">{row.qtyOut > 0 ? `-${row.qtyOut}` : "—"}</td>
-                <td className="px-3 py-2.5 mono text-center font-bold text-slate-900">{row.balance}</td>
-                <td className="px-3 py-2.5 mono text-right text-slate-700">{fmt(row.cost)}</td>
-                <td className="px-3 py-2.5 mono text-right text-slate-700">{fmt(row.avgCost)}</td>
-                <td className="px-3 py-2.5 text-blue-600 whitespace-nowrap">{row.user}</td>
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter((_, index) => index !== i)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "bản ghi" : "records"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm giao dịch" : "Add Entry"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                date: new Date().toISOString().replace("T", " ").substring(0, 16),
-                ref: fd.get("ref") as string || "MANUAL",
-                type: fd.get("type") as string || "Adjustment",
-                warehouse: "Main",
-                product: fd.get("product") as string || "New Product",
-                qtyIn: Number(fd.get("qtyIn")) || 0,
-                qtyOut: Number(fd.get("qtyOut")) || 0,
-                balance: 0,
-                cost: 0,
-                avgCost: 0,
-                user: "Current User"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Chứng từ" : "Reference"}</label><input name="ref" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Sản phẩm" : "Product"}</label><input name="product" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "SL nhập" : "Qty In"}</label><input name="qtyIn" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                  <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "SL xuất" : "Qty Out"}</label><input name="qtyOut" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", product: "Sample product", type: "Sample type", qty: "Sample qty", balance: "Sample balance" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "product", label: "PRODUCT", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "product", label: "PRODUCT", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "sổ kho" : "stock ledger"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","product","type","qty","balance"]} templateFile="stockledger" />;
 }
 
-// --- Inventory Adjustment ---
+// --- NEXT ---
 export function InventoryAdjustment() {
-  const { t, lang } = useLang()
-  const initialAdjustments = [
-    { id: "ADJ-202608-0005", warehouse: "HN-Warehouse-01", type: lang === "vi" ? "Tăng" : "Increase", items: 3, reason: lang === "vi" ? "Kiểm kê định kỳ" : "Cycle Count", status: "Completed", date: "2026-08-03", user: "Lê Văn C" },
-    { id: "ADJ-202608-0004", warehouse: "HCM-Warehouse-01", type: lang === "vi" ? "Giảm" : "Decrease", items: 1, reason: lang === "vi" ? "Hàng hỏng" : "Damaged Goods", status: "Approved", date: "2026-08-02", user: "Trần Thị B" },
-    { id: "ADJ-202608-0003", warehouse: "DN-Warehouse-01", type: lang === "vi" ? "Tăng" : "Increase", items: 2, reason: lang === "vi" ? "Điều chỉnh tồn đầu" : "Opening Balance", status: "Completed", date: "2026-08-01", user: "Nguyễn Văn A" },
-  ]
-  const [dataList, setDataList] = useState(initialAdjustments)
-  const [showCreate, setShowCreate] = useState(false)
-  const [search, setSearch] = useState("")
-
-  const filtered = dataList.filter(a => search === "" || a.id.toLowerCase().includes(search.toLowerCase()) || a.warehouse.toLowerCase().includes(search.toLowerCase()))
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Kho", "Loại", "Số dòng", "Lý do", "Trạng thái", "Ngày", "Người tạo", ""]
-    : ["Reference", "Warehouse", "Type", "Items", "Reason", "Status", "Date", "User", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo phiếu điều chỉnh" : "Create Adjustment"}
-        onExportCsv={() => exportCsv("adjustments", heads.slice(0, -1), filtered.map(a => [a.id, a.warehouse, a.type, a.items, a.reason, a.status, a.date, a.user]))}
-        onExportXlsx={() => exportXlsx("adjustments", heads.slice(0, -1), filtered.map(a => [a.id, a.warehouse, a.type, a.items, a.reason, a.status, a.date, a.user]))}
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map((h, i) => <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(a => (
-              <tr key={a.id} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{a.id}</td>
-                <td className="px-4 py-2.5 text-slate-700">{a.warehouse}</td>
-                <td className="px-4 py-2.5">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${a.type === (lang === "vi" ? "Tăng" : "Increase") ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>{a.type}</span>
-                </td>
-                <td className="px-4 py-2.5 mono text-center">{a.items}</td>
-                <td className="px-4 py-2.5 text-slate-600">{a.reason}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={a.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{a.date}</td>
-                <td className="px-4 py-2.5 text-slate-600">{a.user}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.id !== a.id)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "phiếu điều chỉnh" : "adjustments"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo phiếu điều chỉnh kho" : "Create Inventory Adjustment"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([{
-                id: "ADJ-NEW-" + Math.floor(Math.random() * 1000),
-                warehouse: fd.get("warehouse") as string || "HN-Warehouse-01",
-                type: fd.get("type") as string || (lang === "vi" ? "Tăng" : "Increase"),
-                items: 1,
-                reason: fd.get("reason") as string || "Other",
-                status: "Approved",
-                date: new Date().toISOString().split("T")[0],
-                user: "Current User"
-              }, ...dataList]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho *" : "Warehouse *"}</label>
-                    <select name="warehouse" className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
-                      {warehouses.map(w => <option key={w.code} value={w.name}>{w.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Loại điều chỉnh" : "Adjustment Type"}</label>
-                    <select name="type" className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
-                      {[lang === "vi" ? "Tăng" : "Increase", lang === "vi" ? "Giảm" : "Decrease"].map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Lý do *" : "Reason *"}</label>
-                  <select name="reason" className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
-                    {(lang === "vi" ? ["Kiểm kê định kỳ", "Hàng hỏng", "Điều chỉnh tồn đầu", "Lý do khác"] : ["Cycle Count", "Damaged Goods", "Opening Balance", "Other"]).map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 mb-1">{t("note")}</label>
-                  <textarea rows={2} className="w-full px-3 py-2 rounded-lg border text-xs outline-none resize-none" style={{ borderColor: "var(--border)" }} />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", warehouse: "Sample warehouse", reason: "Sample reason", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "reason", label: "REASON", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "reason", label: "REASON", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "điều chỉnh kho" : "adjustment"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","warehouse","reason","status"]} templateFile="inventoryadjustment" />;
 }
 
-// --- Categories ---
+// --- NEXT ---
 export function Categories() {
-  const { t, lang } = useLang()
-  const initialCats = [
-    { code: "CAT-01", name: lang === "vi" ? "Điện tử" : "Electronics", parent: "—", items: 156, status: "Active" },
-    { code: "CAT-02", name: lang === "vi" ? "Laptop" : "Laptop", parent: lang === "vi" ? "Điện tử" : "Electronics", items: 42, status: "Active" },
-    { code: "CAT-03", name: lang === "vi" ? "Điện thoại" : "Phone", parent: lang === "vi" ? "Điện tử" : "Electronics", items: 58, status: "Active" },
-    { code: "CAT-04", name: lang === "vi" ? "Màn hình" : "Monitor", parent: lang === "vi" ? "Điện tử" : "Electronics", items: 23, status: "Active" },
-    { code: "CAT-05", name: lang === "vi" ? "Thiết bị mạng" : "Network", parent: lang === "vi" ? "Điện tử" : "Electronics", items: 33, status: "Active" },
-  ]
-  const [dataList, setDataList] = useState(initialCats)
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-
-  const filtered = dataList.filter(c => search === "" || c.name.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search))
-  const heads = [t("code"), t("name"), lang === "vi" ? "Danh mục cha" : "Parent", lang === "vi" ? "Số sản phẩm" : "Products", t("status"), ""]
-
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm danh mục" : "Add Category"}
-        templateFile="categories" templateCols={["category_code","category_name_vi","category_name_en","parent_category","description"]}
-        onExportCsv={() => exportCsv("categories", heads.slice(0,-1), filtered.map(c => [c.code, c.name, c.parent, c.items, c.status]))}
-        onExportXlsx={() => exportXlsx("categories", heads.slice(0,-1), filtered.map(c => [c.code, c.name, c.parent, c.items, c.status]))}
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => (
-                <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px]">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(c => (
-              <tr key={c.code} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{c.code}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{c.name}</td>
-                <td className="px-4 py-2.5 text-slate-500">{c.parent}</td>
-                <td className="px-4 py-2.5 mono text-center">{c.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== c.code)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "danh mục" : "categories"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm danh mục" : "Add Category"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: fd.get("code") as string || "NEW",
-                name: fd.get("name") as string || "New Category",
-                parent: fd.get("parent") as string || "—",
-                items: 0,
-                status: "Active"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{t("code")}</label><input name="code" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{t("name")}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Danh mục cha" : "Parent"}</label><input name="parent" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ code: "Sample code", name: "Sample name", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "danh mục" : "category"} data={data} setData={setData} columns={columns} templateCols={["code","name","status"]} templateFile="categories" />;
 }
 
-// --- Brands ---
+// --- NEXT ---
 export function Brands() {
-  const { t, lang } = useLang()
-  const initialBrands = [
-    { code: "BR-01", name: "Dell", country: "USA", items: 24, status: "Active" },
-    { code: "BR-02", name: "Samsung", country: "South Korea", items: 52, status: "Active" },
-    { code: "BR-03", name: "Apple", country: "USA", items: 18, status: "Active" },
-    { code: "BR-04", name: "LG", country: "South Korea", items: 15, status: "Active" },
-    { code: "BR-05", name: "Logitech", country: "Switzerland", items: 38, status: "Active" },
-    { code: "BR-06", name: "WD", country: "USA", items: 12, status: "Active" },
-    { code: "BR-07", name: "TP-Link", country: "China", items: 8, status: "Inactive" },
-  ]
-  const [dataList, setDataList] = useState(initialBrands)
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-
-  const filtered = dataList.filter(b => search === "" || b.name.toLowerCase().includes(search.toLowerCase()) || b.code.includes(search))
-  const heads = [t("code"), lang === "vi" ? "Tên thương hiệu" : "Brand Name", lang === "vi" ? "Quốc gia" : "Country", lang === "vi" ? "Số SP" : "Products", t("status"), ""]
-
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm thương hiệu" : "Add Brand"}
-        templateFile="brands" templateCols={["brand_code","brand_name","country_of_origin","website","description"]}
-        onExportCsv={() => exportCsv("brands", heads.slice(0,-1), filtered.map(b => [b.code, b.name, b.country, b.items, b.status]))}
-        onExportXlsx={() => exportXlsx("brands", heads.slice(0,-1), filtered.map(b => [b.code, b.name, b.country, b.items, b.status]))}
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => (
-                <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px]">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(b => (
-              <tr key={b.code} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{b.code}</td>
-                <td className="px-4 py-2.5 font-semibold text-slate-800">{b.name}</td>
-                <td className="px-4 py-2.5 text-slate-500">{b.country}</td>
-                <td className="px-4 py-2.5 mono text-center">{b.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={b.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== b.code)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "thương hiệu" : "brands"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm thương hiệu" : "Add Brand"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: fd.get("code") as string || "NEW",
-                name: fd.get("name") as string || "New Brand",
-                country: fd.get("country") as string || "Unknown",
-                items: 0,
-                status: "Active"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{t("code")}</label><input name="code" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Tên thương hiệu" : "Brand Name"}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Quốc gia" : "Country"}</label><input name="country" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ code: "Sample code", name: "Sample name", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "thương hiệu" : "brand"} data={data} setData={setData} columns={columns} templateCols={["code","name","status"]} templateFile="brands" />;
 }
 
-// --- Users ---
+// --- NEXT ---
 export function Users() {
-  const { t, lang } = useLang()
-  const [showCreate, setShowCreate] = useState(false)
-  const [dataList, setDataList] = useState([
-    { code: "U001", name: "Nguyễn Văn A", dept: lang === "vi" ? "Quản trị" : "Administration", role: lang === "vi" ? "Quản trị viên" : "Administrator", email: "nva@warehouseos.vn", lastLogin: "2026-08-04 08:32", status: "Active" },
-    { code: "U002", name: "Trần Thị B", dept: lang === "vi" ? "Kho" : "Warehouse", role: lang === "vi" ? "Nhân viên kho" : "Warehouse Staff", email: "ttb@warehouseos.vn", lastLogin: "2026-08-04 07:55", status: "Active" },
-    { code: "U003", name: "Lê Văn C", dept: lang === "vi" ? "Mua hàng" : "Purchasing", role: lang === "vi" ? "Phụ trách mua hàng" : "Purchasing Officer", email: "lvc@warehouseos.vn", lastLogin: "2026-08-03 17:10", status: "Active" },
-    { code: "U004", name: "Phạm Văn D", dept: lang === "vi" ? "Bán hàng" : "Sales", role: lang === "vi" ? "Nhân viên bán hàng" : "Sales Staff", email: "pvd@warehouseos.vn", lastLogin: "2026-08-03 16:45", status: "Active" },
-    { code: "U005", name: "Hoàng Thị E", dept: lang === "vi" ? "Kế toán" : "Finance", role: lang === "vi" ? "Kế toán" : "Accountant", email: "hte@warehouseos.vn", lastLogin: "2026-08-02 09:00", status: "Inactive" },
-  ])
-  
-  const heads = [t("code"), lang === "vi" ? "Họ tên" : "Full Name", lang === "vi" ? "Phòng ban" : "Department", lang === "vi" ? "Vai trò" : "Role", "Email", lang === "vi" ? "Đăng nhập cuối" : "Last Login", t("status"), ""];
-  
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm người dùng" : "Add User"} 
-        onExportCsv={() => exportCsv("users", heads.slice(0,-1), dataList.map(u => [u.code, u.name, u.dept, u.role, u.email, u.lastLogin, u.status]))}
-        onExportXlsx={() => exportXlsx("users", heads.slice(0,-1), dataList.map(u => [u.code, u.name, u.dept, u.role, u.email, u.lastLogin, u.status]))}
-      />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map((h,i) => (
-                <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {dataList.map(u => (
-              <tr key={u.code} className="border-b hover:bg-slate-50/60 group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-slate-500">{u.code}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-[10px] font-bold flex-shrink-0">
-                      {u.name.split(" ").map(w => w[0]).slice(-2).join("")}
-                    </div>
-                    <span className="font-medium text-slate-800">{u.name}</span>
-                  </div>
-                </td>
-                <td className="px-4 py-2.5 text-slate-600">{u.dept}</td>
-                <td className="px-4 py-2.5 text-slate-600">{u.role}</td>
-                <td className="px-4 py-2.5 text-slate-500">{u.email}</td>
-                <td className="px-4 py-2.5 mono text-slate-400 text-[10px]">{u.lastLogin}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={u.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.code !== u.code)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={dataList.length} total={dataList.length} label={lang === "vi" ? "người dùng" : "users"} />
+  const { lang } = useLang();
+  const [data, setData] = useState([
+    { code: "U001", name: "Nguyễn Văn A", role: "Super Admin", email: "nva@warehouseos.vn", status: "Active" },
+    { code: "U002", name: "Trần Thị B", role: "Inventory", email: "ttb@warehouseos.vn", status: "Active" },
+    { code: "U003", name: "Lê Văn C", role: "Sales", email: "lvc@warehouseos.vn", status: "Active" },
+  ]);
 
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Thêm người dùng mới" : "Add New User"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([...dataList, {
-                code: "U" + Math.floor(100 + Math.random()*900),
-                name: fd.get("name") as string || "New User",
-                dept: fd.get("dept") as string || "",
-                role: fd.get("role") as string || "",
-                email: fd.get("email") as string || "",
-                lastLogin: "Never",
-                status: "Active"
-              }]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 space-y-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Họ tên *" : "Full Name *"}</label><input name="name" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">Email *</label><input name="email" type="email" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Phòng ban" : "Department"}</label><input name="dept" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Vai trò" : "Role"}</label><select name="role" className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white" style={{ borderColor: "var(--border)" }}>
-                  {(lang === "vi" ? ["Quản trị viên", "Nhân viên kho", "Phụ trách mua hàng", "Nhân viên bán hàng", "Kế toán"] : ["Administrator", "Warehouse Staff", "Purchasing Officer", "Sales Staff", "Accountant"]).map(r => <option key={r}>{r}</option>)}
-                </select></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const columns = lang === "vi" ? [
+    { key: "code", label: "Mã NV" }, { key: "name", label: "Họ tên" },
+    { key: "role", label: "Quyền (Role)" }, { key: "email", label: "Email" },
+    { key: "status", label: "Trạng thái", isStatus: true }
+  ] : [
+    { key: "code", label: "Code" }, { key: "name", label: "Full Name" },
+    { key: "role", label: "Role" }, { key: "email", label: "Email" },
+    { key: "status", label: "Status", isStatus: true }
+  ];
+
+  return <GenericCrudList title={lang === "vi" ? "người dùng" : "user"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "role", "email", "status"]} templateFile="users" />;
 }
+
 // --- Roles ---
 export function Roles() {
   const { t, lang } = useLang()
@@ -1510,115 +698,17 @@ export function AuditLogs() {
 
 // --- Finance Screens ---
 export function Receivables() {
-  const { t, lang } = useLang()
-  const [dataList, setDataList] = useState([
-    { ref: "INV-202608-001", customer: "FPT Telecom", date: "2026-08-01", due: "2026-08-31", amount: 98500000, paid: 0, remaining: 98500000, status: "Overdue" },
-    { ref: "INV-202608-002", customer: "VNPT Group", date: "2026-08-02", due: "2026-09-01", amount: 52000000, paid: 52000000, remaining: 0, status: "Paid" },
-    { ref: "INV-202607-045", customer: "Viettel Store", date: "2026-07-25", due: "2026-08-24", amount: 175000000, paid: 100000000, remaining: 75000000, status: "Partial" },
-    { ref: "INV-202608-003", customer: "Nguyen Kim Corp", date: "2026-08-03", due: "2026-09-02", amount: 43000000, paid: 0, remaining: 43000000, status: "Partial" },
-  ])
-  const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
-
-  const filtered = dataList.filter(r => search === "" || r.ref.toLowerCase().includes(search.toLowerCase()) || r.customer.toLowerCase().includes(search.toLowerCase()))
-  const heads = lang === "vi"
-    ? ["Số HĐ", "Khách hàng", "Ngày HĐ", "Ngày đến hạn", "Số tiền", "Đã thu", "Còn lại", "Trạng thái", ""]
-    : ["Invoice", "Customer", "Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
-  const totalRemaining = filtered.reduce((a, b) => a + b.remaining, 0)
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} createLabel={lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"} onCreate={() => setShowCreate(true)} 
-        onExportCsv={() => exportCsv("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
-        onExportXlsx={() => exportXlsx("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
-        extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Printer size={13} /> {t("print")}
-        </button>
-      } />
-      {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { label: lang === "vi" ? "Tổng phải thu" : "Total Receivable", value: fmt(filtered.reduce((a, b) => a + b.amount, 0)), color: "text-slate-900" },
-          { label: lang === "vi" ? "Đã thu" : "Collected", value: fmt(filtered.reduce((a, b) => a + b.paid, 0)), color: "text-emerald-600" },
-          { label: lang === "vi" ? "Còn lại" : "Outstanding", value: fmt(totalRemaining), color: "text-amber-600" },
-        ].map(c => (
-          <div key={c.label} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400 font-medium">{c.label}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.color}`}>{c.value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[950px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map((h, i) => <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((r, i) => (
-              <tr key={r.ref} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.customer}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
-                <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
-                <td className="px-4 py-2.5 mono text-right font-bold text-amber-600">{fmt(r.remaining)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.ref !== r.ref)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "hóa đơn" : "invoices"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([{
-                ref: fd.get("ref") as string || "INV-NEW",
-                customer: fd.get("customer") as string || "New Customer",
-                date: new Date().toISOString().split("T")[0],
-                due: new Date(Date.now() + 30*24*60*60*1000).toISOString().split("T")[0],
-                amount: Number(fd.get("amount")) || 0,
-                paid: 0,
-                remaining: Number(fd.get("amount")) || 0,
-                status: "Pending"
-              }, ...dataList]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số HĐ" : "Invoice"}</label><input name="ref" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Khách hàng" : "Customer"}</label><input name="customer" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số tiền" : "Amount"}</label><input name="amount" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ customer: "Sample customer", total_debt: "Sample total_debt", overdue: "Sample overdue", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "phải thu" : "receivable"} data={data} setData={setData} columns={columns} templateCols={["customer","total_debt","overdue","status"]} templateFile="receivables" />;
 }
 
-// --- Export helpers ---
+// --- NEXT ---
 export function exportCsv(filename: string, heads: string[], rows: (string | number)[][]) {
   const lines = [heads.join(","), ...rows.map(r => r.map(c => `"${c}"`).join(","))].join("\n")
   const blob = new Blob(["﻿" + lines], { type: "text/csv;charset=utf-8;" })
@@ -2659,537 +1749,122 @@ export function Settings() {
 
 // --- Units (Đơn vị tính) ---
 export function Units() {
-  const { t, lang } = useLang()
-  const units = [
-    { code: "PCS", name: lang === "vi" ? "Cái" : "Piece", name_en: "Piece", type: lang === "vi" ? "Số lượng" : "Quantity", items: 68, status: "Active" },
-    { code: "SET", name: lang === "vi" ? "Bộ" : "Set", name_en: "Set", type: lang === "vi" ? "Số lượng" : "Quantity", items: 12, status: "Active" },
-    { code: "BOX", name: lang === "vi" ? "Hộp" : "Box", name_en: "Box", type: lang === "vi" ? "Số lượng" : "Quantity", items: 8, status: "Active" },
-    { code: "KG", name: "Kilogram", name_en: "Kilogram", type: lang === "vi" ? "Khối lượng" : "Weight", items: 5, status: "Active" },
-    { code: "MTR", name: lang === "vi" ? "Mét" : "Meter", name_en: "Meter", type: lang === "vi" ? "Chiều dài" : "Length", items: 3, status: "Active" },
-    { code: "LTR", name: lang === "vi" ? "Lít" : "Liter", name_en: "Liter", type: lang === "vi" ? "Thể tích" : "Volume", items: 2, status: "Active" },
-  ]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Thêm đơn vị" : "Add Unit"}
-        templateFile="units" templateCols={["unit_code","unit_name_vi","unit_name_en","unit_type"]} />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {[t("code"), lang === "vi" ? "Tên đơn vị" : "Unit Name", lang === "vi" ? "Tên tiếng Anh" : "English Name", lang === "vi" ? "Loại" : "Type", lang === "vi" ? "Số SP" : "Products", t("status"), ""].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px]">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {units.map(u => (
-              <tr key={u.code} className="border-b hover:bg-slate-50/60 group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-bold">{u.code}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{u.name}</td>
-                <td className="px-4 py-2.5 text-slate-500">{u.name_en}</td>
-                <td className="px-4 py-2.5 text-slate-500">{u.type}</td>
-                <td className="px-4 py-2.5 mono text-center">{u.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={u.status} /></td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={units.length} total={units.length} label={lang === "vi" ? "đơn vị" : "units"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ code: "Sample code", name: "Sample name", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "đơn vị tính" : "unit"} data={data} setData={setData} columns={columns} templateCols={["code","name","status"]} templateFile="units" />;
 }
 
-// --- Goods Receipt (Nhập kho) ---
+// --- NEXT ---
 export function GoodsReceipt() {
-  const { t, lang } = useLang()
-  const [showCreate, setShowCreate] = useState(false)
-  const receipts = [
-    { id: "GRN-202608-0012", po: "PO-202608-000001", supplier: "Tech Distributor VN", warehouse: "HN-Warehouse-01", items: 3, status: "Completed", date: "2026-08-02", user: "Nguyễn Văn A" },
-    { id: "GRN-202608-0011", po: "PO-202608-000002", supplier: "Samsung Vietnam", warehouse: "HCM-Warehouse-01", items: 2, status: "Partial", date: "2026-08-03", user: "Trần Thị B" },
-    { id: "GRN-202607-0045", po: "PO-202607-000045", supplier: "Logitech APAC", warehouse: "DN-Warehouse-01", items: 4, status: "Completed", date: "2026-07-30", user: "Lê Văn C" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Đơn mua", "Nhà cung cấp", "Kho nhập", "Số dòng", "Trạng thái", "Ngày", "Người tạo", ""]
-    : ["Reference", "PO Ref", "Supplier", "Warehouse", "Items", "Status", "Date", "User", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo phiếu nhập kho" : "Create GRN"} extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Download size={13} /> {t("export")}
-        </button>
-      } />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {receipts.map(r => (
-              <tr key={r.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{r.po}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.warehouse}</td>
-                <td className="px-4 py-2.5 mono text-center">{r.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.user}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={receipts.length} total={receipts.length} label={lang === "vi" ? "phiếu nhập kho" : "receipts"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", po_no: "Sample po_no", warehouse: "Sample warehouse", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "nhập kho" : "goods receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","po_no","warehouse","status"]} templateFile="goodsreceipt" />;
 }
 
-// --- Purchase Return (Trả hàng NCC) ---
+// --- NEXT ---
 export function PurchaseReturn() {
-  const { lang } = useLang()
-  const returns = [
-    { id: "PR-202608-0003", grn: "GRN-202608-0012", supplier: "Tech Distributor VN", warehouse: "HN-Warehouse-01", reason: lang === "vi" ? "Hàng lỗi" : "Defective", amount: 22000000, status: "Approved", date: "2026-08-03" },
-    { id: "PR-202607-0008", grn: "GRN-202607-0045", supplier: "Logitech APAC", warehouse: "DN-Warehouse-01", reason: lang === "vi" ? "Giao sai quy cách" : "Wrong spec", amount: 8400000, status: "Draft", date: "2026-07-31" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Phiếu nhập", "Nhà cung cấp", "Kho", "Lý do", "Giá trị", "Trạng thái", "Ngày", ""]
-    : ["Reference", "GRN Ref", "Supplier", "Warehouse", "Reason", "Amount", "Status", "Date", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Tạo phiếu trả hàng" : "Create Return"} />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {returns.map(r => (
-              <tr key={r.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{r.grn}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.warehouse}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.reason}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right text-red-600">{fmt(r.amount)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={returns.length} total={returns.length} label={lang === "vi" ? "phiếu trả hàng" : "returns"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", supplier: "Sample supplier", total: "Sample total", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "trả hàng NCC" : "purchase return"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","supplier","total","status"]} templateFile="purchasereturn" />;
 }
 
-// --- Supplier Payment (Thanh toán NCC) ---
+// --- NEXT ---
 export function SupplierPayment() {
-  const { lang } = useLang()
-  const payments = [
-    { id: "SP-202608-0009", po: "PO-202608-000001", supplier: "Tech Distributor VN", method: lang === "vi" ? "Chuyển khoản" : "Bank Transfer", amount: 185000000, status: "Paid", date: "2026-08-02" },
-    { id: "SP-202608-0008", po: "PO-202607-000045", supplier: "Logitech APAC", method: lang === "vi" ? "Chuyển khoản" : "Bank Transfer", amount: 84000000, status: "Paid", date: "2026-07-30" },
-    { id: "SP-202608-0010", po: "PO-202608-000002", supplier: "Samsung Vietnam", method: lang === "vi" ? "Chưa thanh toán" : "Pending", amount: 392000000, status: "Partial", date: "2026-08-04" },
-  ]
-  const total = payments.reduce((a, b) => a + b.amount, 0)
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Đơn mua", "Nhà cung cấp", "Phương thức", "Số tiền", "Trạng thái", "Ngày TT", ""]
-    : ["Reference", "PO", "Supplier", "Method", "Amount", "Status", "Date", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Ghi nhận thanh toán" : "Record Payment"} />
-      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { l: lang === "vi" ? "Tổng thanh toán" : "Total Paid", v: fmt(payments.filter(p => p.status === "Paid").reduce((a, b) => a + b.amount, 0)), c: "text-emerald-600" },
-          { l: lang === "vi" ? "Còn phải trả" : "Outstanding", v: fmt(payments.filter(p => p.status !== "Paid").reduce((a, b) => a + b.amount, 0)), c: "text-amber-600" },
-          { l: lang === "vi" ? "Tổng cộng" : "Grand Total", v: fmt(total), c: "text-slate-900" },
-        ].map(c => (
-          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400">{c.l}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[850px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {payments.map(p => (
-              <tr key={p.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{p.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{p.po}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{p.supplier}</td>
-                <td className="px-4 py-2.5 text-slate-600">{p.method}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(p.amount)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={p.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{p.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={payments.length} total={payments.length} label={lang === "vi" ? "phiếu thanh toán" : "payments"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", supplier: "Sample supplier", amount: "Sample amount", method: "Sample method" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "thanh toán NCC" : "supplier payment"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","supplier","amount","method"]} templateFile="supplierpayment" />;
 }
 
-// --- Inventory Transfer (Chuyển kho) ---
+// --- NEXT ---
 export function InventoryTransfer() {
-  const { lang } = useLang()
-  const [showCreate, setShowCreate] = useState(false)
-  const transfers = [
-    { id: "TF-202608-0006", from: "HN-Warehouse-01", to: "DN-Warehouse-01", items: 2, status: "Completed", date: "2026-08-02", user: "Nguyễn Văn A" },
-    { id: "TF-202608-0005", from: "HCM-Warehouse-01", to: "HN-Warehouse-01", items: 3, status: "In Transit", date: "2026-08-03", user: "Trần Thị B" },
-    { id: "TF-202607-0018", from: "HN-Warehouse-01", to: "HCM-Warehouse-01", items: 5, status: "Completed", date: "2026-07-28", user: "Lê Văn C" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Kho xuất", "Kho nhập", "Số dòng", "Trạng thái", "Ngày", "Người tạo", ""]
-    : ["Reference", "From", "To", "Items", "Status", "Date", "User", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo phiếu chuyển kho" : "Create Transfer"} />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[800px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {transfers.map(tr => (
-              <tr key={tr.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{tr.id}</td>
-                <td className="px-4 py-2.5 text-slate-700">{tr.from}</td>
-                <td className="px-4 py-2.5 text-slate-700">
-                  <div className="flex items-center gap-1"><ArrowRight size={12} className="text-slate-400" /> {tr.to}</div>
-                </td>
-                <td className="px-4 py-2.5 mono text-center">{tr.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={tr.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{tr.date}</td>
-                <td className="px-4 py-2.5 text-slate-600">{tr.user}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={transfers.length} total={transfers.length} label={lang === "vi" ? "phiếu chuyển kho" : "transfers"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo phiếu chuyển kho" : "Create Transfer"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <div className="p-5 space-y-3">
-              {[[lang === "vi" ? "Kho xuất *" : "From Warehouse *"], [lang === "vi" ? "Kho nhập *" : "To Warehouse *"]].map(([l]) => (
-                <div key={l}>
-                  <label className="block text-[11px] font-medium text-slate-600 mb-1">{l}</label>
-                  <select className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white" style={{ borderColor: "var(--border)" }}>
-                    <option>{lang === "vi" ? "Chọn kho..." : "Select warehouse..."}</option>
-                    {["HN-Warehouse-01", "HCM-Warehouse-01", "DN-Warehouse-01"].map(w => <option key={w}>{w}</option>)}
-                  </select>
-                </div>
-              ))}
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Ghi chú" : "Note"}</label>
-                <textarea rows={2} className="w-full px-3 py-2 rounded-lg border text-xs outline-none resize-none" style={{ borderColor: "var(--border)" }} />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-              <button onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{lang === "vi" ? "Hủy" : "Cancel"}</button>
-              <button onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{lang === "vi" ? "Lưu" : "Save"}</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", from: "Sample from", to: "Sample to", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "from", label: "FROM", isStatus: false }, { key: "to", label: "TO", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "from", label: "FROM", isStatus: false }, { key: "to", label: "TO", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "chuyển kho" : "transfer"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","from","to","status"]} templateFile="inventorytransfer" />;
 }
 
-// --- Delivery Notes (Phiếu giao hàng) ---
+// --- NEXT ---
 export function DeliveryNotes() {
-  const { lang } = useLang()
-  const deliveries = [
-    { id: "DN-202608-0021", so: "SO-202608-000048", customer: "FPT Telecom", warehouse: "HN-Warehouse-01", address: "89 Láng Hạ, Hà Nội", carrier: "Giao Hàng Nhanh", items: 2, status: "Delivered", date: "2026-08-03" },
-    { id: "DN-202608-0020", so: "SO-202608-000047", customer: "VNPT Group", warehouse: "HCM-Warehouse-01", address: "772 Điện Biên Phủ, HCM", carrier: "J&T Express", items: 3, status: "In Transit", date: "2026-08-03" },
-    { id: "DN-202608-0019", so: "SO-202608-000045", customer: "Viettel Store", warehouse: "HN-Warehouse-01", address: "25 Nguyễn Thái Học, HN", carrier: "Giao Hàng Nhanh", items: 1, status: "Pending", date: "2026-08-04" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Đơn bán", "Khách hàng", "Kho xuất", "Địa chỉ giao", "Đơn vị VC", "Số dòng", "Trạng thái", "Ngày", ""]
-    : ["Reference", "SO", "Customer", "Warehouse", "Address", "Carrier", "Items", "Status", "Date", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Tạo phiếu giao hàng" : "Create Delivery"} />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[1050px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {deliveries.map(d => (
-              <tr key={d.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{d.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{d.so}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{d.customer}</td>
-                <td className="px-4 py-2.5 text-slate-600">{d.warehouse}</td>
-                <td className="px-4 py-2.5 text-slate-500 max-w-[140px] truncate">{d.address}</td>
-                <td className="px-4 py-2.5 text-slate-600">{d.carrier}</td>
-                <td className="px-4 py-2.5 mono text-center">{d.items}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={d.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{d.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={deliveries.length} total={deliveries.length} label={lang === "vi" ? "phiếu giao hàng" : "deliveries"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", so_no: "Sample so_no", customer: "Sample customer", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "phiếu giao hàng" : "delivery note"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","so_no","customer","status"]} templateFile="deliverynotes" />;
 }
 
-// --- Invoices (Hóa đơn bán hàng) ---
+// --- NEXT ---
 export function Invoices() {
-  const { lang } = useLang()
-  const invoices = [
-    { id: "INV-202608-001", so: "SO-202608-000048", customer: "FPT Telecom", amount: 52000000, tax: 5200000, total: 57200000, status: "Paid", date: "2026-08-03" },
-    { id: "INV-202608-002", so: "SO-202608-000047", customer: "VNPT Group", amount: 98500000, tax: 9850000, total: 108350000, status: "Partial", date: "2026-08-03" },
-    { id: "INV-202608-003", so: "SO-202608-000044", customer: "Nguyen Kim Corp", amount: 43000000, tax: 4300000, total: 47300000, status: "Overdue", date: "2026-08-01" },
-    { id: "INV-202608-004", so: "SO-202608-000043", customer: "Viettel Store", amount: 175000000, tax: 17500000, total: 192500000, status: "Draft", date: "2026-08-04" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số HĐ", "Đơn bán", "Khách hàng", "Tiền hàng", "Thuế", "Tổng TT", "Trạng thái", "Ngày HĐ", ""]
-    : ["Invoice #", "SO", "Customer", "Amount", "Tax", "Total", "Status", "Date", ""]
-  const totalRevenue = invoices.reduce((a, b) => a + b.total, 0)
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Tạo hóa đơn" : "Create Invoice"} extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Printer size={13} /> {lang === "vi" ? "In" : "Print"}
-        </button>
-      } />
-      <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { l: lang === "vi" ? "Tổng doanh thu" : "Total Revenue", v: fmt(totalRevenue), c: "text-blue-700" },
-          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(invoices.filter(i => i.status === "Paid").reduce((a, b) => a + b.total, 0)), c: "text-emerald-600" },
-          { l: lang === "vi" ? "Còn nợ" : "Outstanding", v: fmt(invoices.filter(i => i.status !== "Paid" && i.status !== "Draft").reduce((a, b) => a + b.total, 0)), c: "text-amber-600" },
-          { l: lang === "vi" ? "Quá hạn" : "Overdue", v: fmt(invoices.filter(i => i.status === "Overdue").reduce((a, b) => a + b.total, 0)), c: "text-red-600" },
-        ].map(c => (
-          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400">{c.l}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[950px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map(inv => (
-              <tr key={inv.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-semibold">{inv.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{inv.so}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{inv.customer}</td>
-                <td className="px-4 py-2.5 mono text-right">{fmt(inv.amount)}</td>
-                <td className="px-4 py-2.5 mono text-right text-slate-500">{fmt(inv.tax)}</td>
-                <td className="px-4 py-2.5 mono text-right font-bold text-slate-900">{fmt(inv.total)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{inv.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={invoices.length} total={invoices.length} label={lang === "vi" ? "hóa đơn" : "invoices"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", total: "Sample total", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "hóa đơn" : "invoice"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="invoices" />;
 }
 
-// --- Customer Receipts (Thu tiền khách hàng) ---
+// --- NEXT ---
 export function CustomerReceipts() {
-  const { lang } = useLang()
-  const receipts = [
-    { id: "CR-202608-0015", inv: "INV-202608-001", customer: "FPT Telecom", method: lang === "vi" ? "Chuyển khoản" : "Bank Transfer", amount: 57200000, status: "Paid", date: "2026-08-03" },
-    { id: "CR-202608-0014", inv: "INV-202608-002", customer: "VNPT Group", method: lang === "vi" ? "Tiền mặt" : "Cash", amount: 50000000, status: "Paid", date: "2026-08-03" },
-  ]
-  const heads = lang === "vi"
-    ? ["Số phiếu", "Số HĐ", "Khách hàng", "Phương thức", "Số tiền", "Trạng thái", "Ngày", ""]
-    : ["Reference", "Invoice", "Customer", "Method", "Amount", "Status", "Date", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"} />
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[800px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {receipts.map(r => (
-              <tr key={r.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-500">{r.inv}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.customer}</td>
-                <td className="px-4 py-2.5 text-slate-600">{r.method}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right text-emerald-700">{fmt(r.amount)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={receipts.length} total={receipts.length} label={lang === "vi" ? "phiếu thu" : "receipts"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", amount: "Sample amount", method: "Sample method" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "thu tiền KH" : "customer receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","amount","method"]} templateFile="customerreceipts" />;
 }
 
-// --- Payables (Công nợ phải trả) ---
+// --- NEXT ---
 export function Payables() {
-  const { lang } = useLang()
-  const data = [
-    { ref: "PO-202608-000002", supplier: "Samsung Vietnam", date: "2026-08-02", due: "2026-09-01", amount: 392000000, paid: 0, remaining: 392000000, status: "Partial" },
-    { ref: "PO-202608-000004", supplier: "Apple Vietnam", date: "2026-08-03", due: "2026-09-02", amount: 2250000000, paid: 0, remaining: 2250000000, status: "Partial" },
-    { ref: "PO-202607-000044", supplier: "WD Technologies", date: "2026-07-25", due: "2026-08-24", amount: 140000000, paid: 140000000, remaining: 0, status: "Paid" },
-  ]
-  const totalRemaining = data.reduce((a, b) => a + b.remaining, 0)
-  const heads = lang === "vi"
-    ? ["Số ĐM", "Nhà cung cấp", "Ngày ĐM", "Ngày đến hạn", "Số tiền", "Đã trả", "Còn lại", "Trạng thái", ""]
-    : ["PO", "Supplier", "PO Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Ghi nhận trả tiền" : "Record Payment"} extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Printer size={13} /> {lang === "vi" ? "In" : "Print"}
-        </button>
-      } />
-      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { l: lang === "vi" ? "Tổng phải trả" : "Total Payable", v: fmt(data.reduce((a, b) => a + b.amount, 0)), c: "text-slate-900" },
-          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(data.reduce((a, b) => a + b.paid, 0)), c: "text-emerald-600" },
-          { l: lang === "vi" ? "Còn lại" : "Outstanding", v: fmt(totalRemaining), c: "text-red-600" },
-        ].map(c => (
-          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400">{c.l}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[950px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map(r => (
-              <tr key={r.ref} className="border-b hover:bg-slate-50/60 cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
-                <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
-                <td className="px-4 py-2.5 mono text-right font-bold text-red-600">{fmt(r.remaining)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={data.length} total={data.length} label={lang === "vi" ? "khoản phải trả" : "payables"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ supplier: "Sample supplier", total_debt: "Sample total_debt", overdue: "Sample overdue", status: "Sample status" }]);
+  const columns = lang === "vi" ? [
+    { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ] : [
+    { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "phải trả" : "payable"} data={data} setData={setData} columns={columns} templateCols={["supplier","total_debt","overdue","status"]} templateFile="payables" />;
 }
 
-// --- Cash Book (Sổ quỹ) ---
+// --- NEXT ---
 export function CashBook() {
-  const { lang } = useLang()
-  const entries = [
-    { id: "CB-0028", date: "2026-08-04 08:15", type: lang === "vi" ? "Thu" : "Receipt", ref: "CR-202608-0015", desc: lang === "vi" ? "Thu tiền FPT Telecom - INV-202608-001" : "Collect FPT Telecom - INV-202608-001", amount: 57200000, balance: 185642000 },
-    { id: "CB-0027", date: "2026-08-03 16:30", type: lang === "vi" ? "Chi" : "Payment", ref: "SP-202608-0009", desc: lang === "vi" ? "Trả tiền Tech Distributor VN - PO-202608-000001" : "Pay Tech Distributor VN - PO-202608-000001", amount: -185000000, balance: 128442000 },
-    { id: "CB-0026", date: "2026-08-03 14:10", type: lang === "vi" ? "Thu" : "Receipt", ref: "CR-202608-0014", desc: lang === "vi" ? "Thu tiền VNPT Group - INV-202608-002 (một phần)" : "Collect VNPT Group - INV-202608-002 (partial)", amount: 50000000, balance: 313442000 },
-    { id: "CB-0025", date: "2026-08-02 09:00", type: lang === "vi" ? "Thu" : "Receipt", ref: "CR-202608-0013", desc: lang === "vi" ? "Thu tiền Viettel Store" : "Collect Viettel Store", amount: 192500000, balance: 263442000 },
-    { id: "CB-0024", date: "2026-08-01 15:45", type: lang === "vi" ? "Chi" : "Payment", ref: "SP-202608-0008", desc: lang === "vi" ? "Trả tiền Logitech APAC - PO-202607-000045" : "Pay Logitech APAC - PO-202607-000045", amount: -84000000, balance: 70942000 },
-  ]
-  const openingBalance = 154942000
-  const closingBalance = 185642000
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar extra={
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">{lang === "vi" ? "Ngày:" : "Date:"}</span>
-          <input type="date" defaultValue="2026-08-04" className="h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} />
-        </div>
-      } />
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { l: lang === "vi" ? "Số dư đầu ngày" : "Opening Balance", v: fmt(openingBalance), c: "text-slate-700" },
-          { l: lang === "vi" ? "Tổng thu/chi" : "Net Movement", v: (closingBalance - openingBalance >= 0 ? "+" : "") + fmt(closingBalance - openingBalance), c: closingBalance - openingBalance >= 0 ? "text-emerald-600" : "text-red-600" },
-          { l: lang === "vi" ? "Số dư cuối ngày" : "Closing Balance", v: fmt(closingBalance), c: "text-blue-700" },
-        ].map(c => (
-          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400">{c.l}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {[lang === "vi" ? "Mã phiếu" : "Entry ID", lang === "vi" ? "Ngày giờ" : "Date/Time", lang === "vi" ? "Loại" : "Type", lang === "vi" ? "Chứng từ" : "Reference", lang === "vi" ? "Diễn giải" : "Description", lang === "vi" ? "Số tiền" : "Amount", lang === "vi" ? "Số dư" : "Balance"].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(e => (
-              <tr key={e.id} className="border-b hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{e.id}</td>
-                <td className="px-4 py-2.5 mono text-slate-400 text-[10px] whitespace-nowrap">{e.date}</td>
-                <td className="px-4 py-2.5">
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${e.amount > 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-600"}`}>{e.type}</span>
-                </td>
-                <td className="px-4 py-2.5 mono text-slate-500 whitespace-nowrap">{e.ref}</td>
-                <td className="px-4 py-2.5 text-slate-700 max-w-[260px] truncate">{e.desc}</td>
-                <td className={`px-4 py-2.5 mono font-bold text-right ${e.amount > 0 ? "text-emerald-600" : "text-red-600"}`}>
-                  {e.amount > 0 ? "+" : ""}{fmt(e.amount)}
-                </td>
-                <td className="px-4 py-2.5 mono font-semibold text-right text-slate-900">{fmt(e.balance)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={entries.length} total={entries.length} label={lang === "vi" ? "giao dịch" : "transactions"} />
-    </div>
-  )
+  const { lang } = useLang();
+  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", type: "Sample type", amount: "Sample amount", balance: "Sample balance" }]);
+  const columns = lang === "vi" ? [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
+  ] : [
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
+  ];
+  return <GenericCrudList title={lang === "vi" ? "sổ quỹ" : "cash book"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","type","amount","balance"]} templateFile="cashbook" />;
 }
+
+// --- NEXT ---

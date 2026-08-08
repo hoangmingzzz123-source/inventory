@@ -5,31 +5,7 @@
 import { supabase } from "./supabase"
 import * as mock from "../data/mockData"
 
-type Ctx = { isDemo: boolean; orgId?: string; role?: string }
-
-type DashboardActivity = {
-  type: "purchase" | "sales"
-  text: string
-  time: string
-  user: string
-}
-
-type DashboardMetrics = {
-  productsCount: number
-  purchaseOrdersCount: number
-  salesOrdersCount: number
-  revenueTotal: number
-  inventoryValue: number
-  lowStock: { name: string; sku: string; qty: number; warehouse: string }[]
-  recentActivities: DashboardActivity[]
-}
-
-function roleAllowed(ctx: Ctx | undefined, allowed: string[]) {
-  if (!ctx) return false
-  if (ctx.isDemo) return true
-  if (!ctx.role) return false
-  return allowed.includes(ctx.role)
-}
+type Ctx = { isDemo: boolean; orgId?: string }
 
 // ─── Products ────────────────────────────────────────────────
 export async function fetchProducts({ isDemo, orgId }: Ctx) {
@@ -42,20 +18,15 @@ export async function fetchProducts({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId, role }: Ctx) {
-  if (isDemo) return { data: null, error: null }
-  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
-  const { data, error } = await supabase
-    .from("products")
-    .upsert([{ ...payload, org_id: orgId }] as any, { returning: "representation" })
-    .select()
-  return { data, error }
+export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("products").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
 }
 
-export async function deleteProduct(id: string, { isDemo, orgId, role }: Ctx) {
+export async function deleteProduct(id: string, { isDemo }: Ctx) {
   if (isDemo) return { error: null }
-  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
-  const { error } = await supabase.from("products").delete().eq("id", id).eq("org_id", orgId!)
+  const { error } = await supabase.from("products").delete().eq("id", id)
   return { error }
 }
 
@@ -108,50 +79,9 @@ export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId, role }: Ctx) {
-  if (isDemo) return { data: null, error: null }
-  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
-  const { data, error } = await supabase
-    .from("purchase_orders")
-    .upsert([{ ...payload, org_id: orgId }] as any, { returning: "representation" })
-    .select()
-  return { data, error }
-}
-
-export async function deletePurchaseOrder(id: string, { isDemo, orgId, role }: Ctx) {
+export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
-  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
-  const { error } = await supabase.from("purchase_orders").delete().eq("id", id).eq("org_id", orgId!)
-  return { error }
-}
-
-// ─── Purchase Order Items ───────────────────────────────────
-export async function fetchPurchaseOrderItems(poId: string, { isDemo }: Ctx) {
-  if (isDemo) return { data: [], error: null }
-  const { data, error } = await supabase
-    .from("purchase_order_items")
-    .select("*")
-    .eq("po_id", poId)
-    .order("id", { ascending: true })
-  return { data: data ?? [], error }
-}
-
-export async function upsertPurchaseOrderItems(items: Record<string, unknown>[], { isDemo, orgId, role }: Ctx) {
-  if (isDemo) return { data: null, error: null }
-  if (!roleAllowed({ isDemo, orgId, role }, ["admin", "manager"])) return { data: null, error: new Error("Not authorized") }
-  // Ensure org_id is present on items if needed by policies (items reference po_id which belongs to an org)
-  const payload = items.map(i => ({ ...i } as any))
-  const { data, error } = await supabase
-    .from("purchase_order_items")
-    .upsert(payload as any, { returning: "representation" })
-    .select()
-  return { data, error }
-}
-
-export async function deletePurchaseOrderItem(id: string, { isDemo, role }: Ctx) {
-  if (isDemo) return { error: null }
-  if (!roleAllowed({ isDemo, role }, ["admin", "manager"])) return { error: new Error("Not authorized") }
-  const { error } = await supabase.from("purchase_order_items").delete().eq("id", id)
+  const { error } = await supabase.from("purchase_orders").upsert([{ ...payload, org_id: orgId }] as any)
   return { error }
 }
 
@@ -196,62 +126,13 @@ export async function fetchUnits({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-export async function fetchDashboardMetrics({ isDemo, orgId }: Ctx): Promise<DashboardMetrics> {
-  if (isDemo) {
-    return {
-      productsCount: 0,
-      purchaseOrdersCount: 0,
-      salesOrdersCount: 0,
-      revenueTotal: 0,
-      inventoryValue: 0,
-      lowStock: [],
-      recentActivities: [],
-    }
-  }
-
-  const [prodRes, poRes, soRes, salesRes, inventoryRes, lowStockRes, recentSalesRes, recentPurchaseRes] = await Promise.all([
-    supabase.from("products").select("id", { count: "exact", head: true }).eq("org_id", orgId!),
-    supabase.from("purchase_orders").select("id", { count: "exact", head: true }).eq("org_id", orgId!),
-    supabase.from("sales_orders").select("id", { count: "exact", head: true }).eq("org_id", orgId!),
-    supabase.from("sales_orders").select("total").eq("org_id", orgId!),
-    supabase.from("inventory_balance").select("value").eq("org_id", orgId!),
-    supabase.from("products").select("id,name,sku,qty").eq("org_id", orgId!).order("qty", { ascending: true }).limit(5),
-    supabase.from("sales_orders").select("id,customer_name,warehouse_name,status,total,created_at,created_by").eq("org_id", orgId!).order("created_at", { ascending: false }).limit(3),
-    supabase.from("purchase_orders").select("id,supplier_name,warehouse_name,status,total,created_at,created_by").eq("org_id", orgId!).order("created_at", { ascending: false }).limit(2),
-  ])
-
-  const revenueTotal = salesRes.data?.reduce((sum, row) => sum + Number(row.total ?? 0), 0) ?? 0
-  const inventoryValue = inventoryRes.data?.reduce((sum, row) => sum + Number(row.value ?? 0), 0) ?? 0
-
-  const lowStock = lowStockRes.data?.map(row => ({
-    name: row.name,
-    sku: row.sku ?? "",
-    qty: Number(row.qty ?? 0),
-    warehouse: "",
-  })) ?? []
-
-  const recentActivities = [
-    ...(recentSalesRes.data?.map(row => ({
-      type: "sales" as const,
-      text: `SO ${row.id} • ${row.customer_name}`,
-      time: row.created_at ? new Date(row.created_at).toISOString().slice(0, 10) : "",
-      user: row.created_by ?? "",
-    })) ?? []),
-    ...(recentPurchaseRes.data?.map(row => ({
-      type: "purchase" as const,
-      text: `PO ${row.id} • ${row.supplier_name}`,
-      time: row.created_at ? new Date(row.created_at).toISOString().slice(0, 10) : "",
-      user: row.created_by ?? "",
-    })) ?? []),
-  ].slice(0, 5)
-
-  return {
-    productsCount: prodRes.count ?? 0,
-    purchaseOrdersCount: poRes.count ?? 0,
-    salesOrdersCount: soRes.count ?? 0,
-    revenueTotal,
-    inventoryValue,
-    lowStock,
-    recentActivities,
-  }
+// --- Quotations ---
+export async function fetchQuotations({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: mock.quotations, error: null }
+  const { data, error } = await supabase
+    .from("quotations")
+    .select("*")
+    .eq("org_id", orgId!)
+    .order("created_at", { ascending: false })
+  return { data: data ?? [], error }
 }

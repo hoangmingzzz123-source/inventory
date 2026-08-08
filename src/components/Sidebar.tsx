@@ -6,6 +6,7 @@ import {
   KeyRound, ScrollText, Building2, BookOpen,
 } from "lucide-react"
 import { useState } from "react"
+import { useAuth } from "../contexts/AuthContext"
 import { useLang } from "../i18n/LangContext"
 
 type NavChild = { id: string; labelKey: string; icon: React.ReactNode }
@@ -46,6 +47,7 @@ const navItems: NavItem[] = [
   {
     id: "sales", labelKey: "sales", icon: <TrendingUp size={16} />,
     children: [
+      { id: "quotations", labelKey: "quotations", icon: <FileText size={14} /> },
       { id: "sales-orders", labelKey: "salesOrders", icon: <FileText size={14} /> },
       { id: "delivery", labelKey: "deliveryNotes", icon: <Truck size={14} /> },
       { id: "invoices", labelKey: "invoices", icon: <Receipt size={14} /> },

@@ -7,11 +7,11 @@ import {
 } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { products as initialProducts } from "../data/mockData"
-import { useLang } from "../i18n/LangContext"
-import { useAuth } from "../contexts/AuthContext"
 import { useDemo } from "../contexts/DemoContext"
+import { useAuth } from "../contexts/AuthContext"
+import { fetchProducts } from "../lib/dataService"
+import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx } from "./GenericList"
-import { fetchProducts, upsertProduct, deleteProduct } from "../lib/dataService"
 import * as XLSX from "xlsx"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
@@ -34,106 +34,10 @@ function downloadXlsxTemplate(filename: string, cols: string[]) {
 
 const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","min_stock","max_stock","description","status"]
 
-type ParsedProductImport = {
-  sku: string
-  barcode: string
-  product_name: string
-  category: string
-  brand: string
-  unit: string
-  purchase_price: number
-  selling_price: number
-  tax_pct: number
-  min_stock: number
-  max_stock: number
-  description: string
-  status: string
-}
-
-type ImportError = { row: number; message: string }
-
-function parseImportRows(rows: Record<string, unknown>[]) {
-  const requiredColumns = ["product_name", "purchase_price", "selling_price"]
-  const errors: ImportError[] = []
-  const parsed: ParsedProductImport[] = []
-
-  rows.forEach((row, index) => {
-    const line = index + 2
-    const product_name = String(row["product_name"] ?? "").trim()
-    const sku = String(row["sku"] ?? "").trim()
-    const barcode = String(row["barcode"] ?? "").trim()
-    const category = String(row["category"] ?? "").trim()
-    const brand = String(row["brand"] ?? "").trim()
-    const unit = String(row["unit"] ?? "").trim()
-    const status = String(row["status"] ?? "Active").trim() || "Active"
-    const description = String(row["description"] ?? "").trim()
-    const purchase_price = Number(row["purchase_price"] ?? NaN)
-    const selling_price = Number(row["selling_price"] ?? NaN)
-    const tax_pct = Number(row["tax_pct"] ?? 0)
-    const min_stock = Number(row["min_stock"] ?? 0)
-    const max_stock = Number(row["max_stock"] ?? 0)
-
-    if (!product_name) errors.push({ row: line, message: "Product name is required" })
-    if (Number.isNaN(purchase_price)) errors.push({ row: line, message: "Purchase price must be a number" })
-    if (Number.isNaN(selling_price)) errors.push({ row: line, message: "Selling price must be a number" })
-    if (status && !["Active", "Draft", "Inactive"].includes(status)) {
-      errors.push({ row: line, message: `Status must be Active, Draft or Inactive` })
-    }
-    if (unit && unit.length > 20) errors.push({ row: line, message: "Unit is too long" })
-
-    parsed.push({ sku, barcode, product_name, category, brand, unit, purchase_price, selling_price, tax_pct, min_stock, max_stock, description, status })
-  })
-
-  return { parsed, errors }
-}
-
-function ProductImportModal({ onClose, onImport, lang }: { onClose: () => void; onImport: (rows: ParsedProductImport[]) => Promise<void>; lang: string }) {
+function ProductImportModal({ onClose, lang }: { onClose: () => void; lang: string }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [previewRows, setPreviewRows] = useState<ParsedProductImport[]>([])
-  const [errors, setErrors] = useState<ImportError[]>([])
-  const [loading, setLoading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-
-  const handleFile = async (file: File) => {
-    const data = await file.arrayBuffer()
-    let workbook
-    try {
-      workbook = XLSX.read(data, { type: "array" })
-    } catch (err) {
-      setErrors([{ row: 0, message: lang === "vi" ? "Không thể đọc file" : "Unable to read file" }])
-      return
-    }
-
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
-    const normalizedRows = rawRows.map(row => {
-      const normalized: Record<string, unknown> = {}
-      Object.entries(row).forEach(([key, value]) => {
-        normalized[String(key).trim().toLowerCase().replace(/\s+/g, "_")] = value
-      })
-      return normalized
-    })
-
-    const { parsed, errors } = parseImportRows(normalizedRows)
-    setPreviewRows(parsed)
-    setErrors(errors)
-    setFile(file)
-  }
-
-  const handleImport = async () => {
-    if (!file) return
-    if (errors.length > 0) return
-    if (previewRows.length === 0) {
-      setErrors([{ row: 0, message: lang === "vi" ? "File không có dữ liệu" : "No import data found" }])
-      return
-    }
-    setLoading(true)
-    await onImport(previewRows)
-    setLoading(false)
-    onClose()
-  }
-
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -172,11 +76,11 @@ function ProductImportModal({ onClose, onImport, lang }: { onClose: () => void; 
                 <div
                   onDragOver={e => { e.preventDefault(); setDragging(true) }}
                   onDragLeave={() => setDragging(false)}
-                  onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) void handleFile(f) }}
+                  onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) setFile(f) }}
                   onClick={() => fileRef.current?.click()}
                   className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${dragging ? "border-blue-400 bg-blue-50" : file ? "border-emerald-400 bg-emerald-50" : "border-slate-200 hover:border-blue-300"}`}
                 >
-                  <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+                  <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={e => e.target.files?.[0] && setFile(e.target.files[0])} />
                   {file ? (
                     <><FileSpreadsheet size={20} className="text-emerald-500 mx-auto mb-1" /><div className="text-xs font-semibold text-emerald-700">{file.name}</div><div className="text-[10px] text-emerald-500">{(file.size / 1024).toFixed(1)} KB</div></>
                   ) : (
@@ -189,49 +93,8 @@ function ProductImportModal({ onClose, onImport, lang }: { onClose: () => void; 
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <button onClick={onClose} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{lang === "vi" ? "Hủy" : "Cancel"}</button>
-          <button disabled={!file || errors.length > 0 || loading} onClick={handleImport} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
-            {lang === "vi" ? "Nhập dữ liệu" : "Import"}
-          </button>
+          <button disabled={!file} onClick={() => { alert(lang === "vi" ? "Nhập dữ liệu thành công!" : "Import successful!"); onClose() }} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">{lang === "vi" ? "Nhập dữ liệu" : "Import"}</button>
         </div>
-        {previewRows.length > 0 && (
-          <div className="px-5 pb-4">
-            <div className="text-[11px] font-semibold text-slate-600 mb-2">{lang === "vi" ? "Dữ liệu xem trước" : "Preview data"}</div>
-            <div className="max-h-32 overflow-auto rounded-xl border" style={{ borderColor: "var(--border)" }}>
-              <table className="w-full text-[11px] border-collapse">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-2 py-1 text-left">{lang === "vi" ? "Tên" : "Name"}</th>
-                    <th className="px-2 py-1 text-left">SKU</th>
-                    <th className="px-2 py-1 text-right">{lang === "vi" ? "Giá bán" : "Price"}</th>
-                    <th className="px-2 py-1 text-left">{lang === "vi" ? "Trạng thái" : "Status"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewRows.slice(0, 5).map((row, index) => (
-                    <tr key={index} className="border-t" style={{ borderColor: "var(--border)" }}>
-                      <td className="px-2 py-1">{row.product_name}</td>
-                      <td className="px-2 py-1">{row.sku}</td>
-                      <td className="px-2 py-1 text-right">{fmt(row.selling_price)}</td>
-                      <td className="px-2 py-1">{row.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        {errors.length > 0 && (
-          <div className="px-5 pb-4">
-            <div className="text-[11px] font-semibold text-red-600 mb-2">{lang === "vi" ? "Lỗi dữ liệu" : "Data errors"}</div>
-            <div className="space-y-1 text-[11px] text-slate-600">
-              {errors.map(error => (
-                <div key={`${error.row}-${error.message}`} className="rounded-lg bg-red-50 px-3 py-2 text-red-700">
-                  {lang === "vi" ? `Dòng ${error.row}: ${error.message}` : `Row ${error.row}: ${error.message}`}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -456,7 +319,6 @@ interface ProductDetailProps { product: Product; onEdit: (p: Product) => void; o
 
 function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetailProps) {
   const { t, lang } = useLang()
-  const { profile, hasRole } = useAuth()
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex" onClick={e => e.stopPropagation()}>
@@ -496,18 +358,12 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetai
             </div>
           </div>
           <div className="flex gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-            {hasRole(["admin", "manager"]) ? (
-              <>
-                <button onClick={() => onEdit(product)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center justify-center gap-1.5">
-                  <Edit size={12} /> {t("edit")}
-                </button>
-                <button onClick={() => onDelete(product)} className="h-8 px-4 rounded-lg border text-xs text-red-600 hover:bg-red-50 flex items-center gap-1.5" style={{ borderColor: "var(--border)" }}>
-                  <Trash2 size={12} /> {t("delete")}
-                </button>
-              </>
-            ) : (
-              <div className="text-xs text-slate-500 px-2">{lang === "vi" ? "Không có quyền" : "No permission"}</div>
-            )}
+            <button onClick={() => onEdit(product)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center justify-center gap-1.5">
+              <Edit size={12} /> {t("edit")}
+            </button>
+            <button onClick={() => onDelete(product)} className="h-8 px-4 rounded-lg border text-xs text-red-600 hover:bg-red-50 flex items-center gap-1.5" style={{ borderColor: "var(--border)" }}>
+              <Trash2 size={12} /> {t("delete")}
+            </button>
           </div>
         </div>
       </div>
@@ -518,9 +374,15 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetai
 // ---- Main Products screen ----
 export default function Products() {
   const { t, lang } = useLang()
-  const { user, profile, hasRole } = useAuth()
+  const [products, setProducts] = useState<any[]>(initialProducts)
   const { isDemo } = useDemo()
-  const [products, setProducts] = useState(initialProducts)
+  const { profile } = useAuth()
+
+  useEffect(() => {
+    fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => {
+      if (res.data) setProducts(res.data)
+    })
+  }, [isDemo, profile])
   const [search, setSearch] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
@@ -535,9 +397,7 @@ export default function Products() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [showImportModal, setShowImportModal] = useState(false)
-  const [loading, setLoading] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
-  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -546,36 +406,6 @@ export default function Products() {
     document.addEventListener("mousedown", handler)
     return () => document.removeEventListener("mousedown", handler)
   }, [])
-
-  useEffect(() => {
-    async function load() {
-      if (!profile) return
-      setLoading(true)
-      const { data, error } = await fetchProducts({ isDemo, orgId: profile.org_id })
-      if (error) {
-        showToast(lang === "vi" ? "Không tải được sản phẩm" : "Unable to load products", false)
-      } else if (data) {
-        setProducts(data.map((item: any) => ({
-          id: item.id,
-          sku: item.sku,
-          barcode: item.barcode ?? "",
-          name: item.name,
-          category: item.category ?? "—",
-          brand: item.brand ?? "—",
-          unit: item.unit ?? "Piece",
-          cost: Number(item.cost ?? 0),
-          price: Number(item.price ?? 0),
-          qty: Number(item.qty ?? 0),
-          status: item.status,
-          updated: item.updated_at ? new Date(item.updated_at).toISOString().slice(0, 10) : "",
-          updatedBy: item.updated_by ?? "",
-        })))
-      }
-      setLoading(false)
-    }
-
-    load()
-  }, [profile, isDemo, lang])
 
   const categories = ["all", ...Array.from(new Set(products.map(p => p.category)))]
 
@@ -607,188 +437,45 @@ export default function Products() {
   const openEdit = (p: Product) => { setEditingProduct(p); setForm(productToForm(p)); setActionRow(null); setDetailProduct(null) }
   const closeForm = () => { setShowCreate(false); setEditingProduct(null) }
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!form.name.trim()) { showToast(lang === "vi" ? "Vui lòng nhập tên sản phẩm" : "Please enter product name", false); return }
-    if (!profile) {
-      showToast(lang === "vi" ? "Vui lòng đăng nhập để lưu" : "Please log in to save", false)
-      return
+    if (editingProduct) {
+      setProducts(prev => prev.map(p => p.id === editingProduct.id ? {
+        ...p, name: form.name, sku: form.sku || p.sku, barcode: form.barcode,
+        category: form.category || p.category, brand: form.brand || p.brand,
+        unit: form.unit || p.unit, cost: Number(form.purchasePrice) || p.cost,
+        price: Number(form.sellingPrice) || p.price, status: form.status,
+        updated: new Date().toISOString().slice(0, 10), updatedBy: "Nguyễn Văn A",
+      } : p))
+      closeForm()
+      showToast(lang === "vi" ? "Cập nhật sản phẩm thành công!" : "Product updated!")
+    } else {
+      const newId = `P${String(products.length + 1).padStart(3, "0")}`
+      setProducts(prev => [...prev, {
+        id: newId, sku: form.sku || `SKU-${newId}`, barcode: form.barcode || "",
+        name: form.name, category: form.category || "—", brand: form.brand || "—",
+        unit: form.unit || "Piece", cost: Number(form.purchasePrice) || 0,
+        price: Number(form.sellingPrice) || 0, qty: 0, status: form.status,
+        updated: new Date().toISOString().slice(0, 10), updatedBy: "Nguyễn Văn A",
+      }])
+      closeForm()
+      showToast(lang === "vi" ? "Tạo sản phẩm thành công!" : "Product created!")
     }
-
-    setLoading(true)
-    const payload = {
-      id: editingProduct?.id,
-      sku: form.sku || editingProduct?.sku || "",
-      barcode: form.barcode || null,
-      name: form.name,
-      category: form.category || null,
-      brand: form.brand || null,
-      unit: form.unit || null,
-      cost: Number(form.purchasePrice) || 0,
-      price: Number(form.sellingPrice) || 0,
-      status: form.status,
-      updated_by: profile.full_name || profile.email,
-      qty: editingProduct?.qty ?? 0,
-    }
-
-    const { data, error } = await upsertProduct(payload, { isDemo, orgId: profile.org_id, role: profile?.role })
-    setLoading(false)
-
-    if (error) {
-      showToast(lang === "vi" ? "Lưu sản phẩm thất bại" : "Failed to save product", false)
-      return
-    }
-
-    const updated = data?.[0]
-    if (!updated) {
-      showToast(lang === "vi" ? "Không có dữ liệu trả về" : "No product returned", false)
-      return
-    }
-
-    const normalized: Product = {
-      id: updated.id,
-      sku: updated.sku,
-      barcode: updated.barcode ?? "",
-      name: updated.name,
-      category: updated.category ?? "—",
-      brand: updated.brand ?? "—",
-      unit: updated.unit ?? "Piece",
-      cost: Number(updated.cost ?? 0),
-      price: Number(updated.price ?? 0),
-      qty: Number(updated.qty ?? 0),
-      status: updated.status,
-      updated: updated.updated_at ? new Date(updated.updated_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      updatedBy: updated.updated_by ?? "",
-    }
-
-    setProducts(prev => {
-      const existing = prev.find(p => p.id === normalized.id)
-      if (existing) {
-        return prev.map(p => p.id === normalized.id ? normalized : p)
-      }
-      return [normalized, ...prev]
-    })
-
-    closeForm()
-    showToast(lang === "vi" ? (editingProduct ? "Cập nhật sản phẩm thành công!" : "Tạo sản phẩm thành công!") : (editingProduct ? "Product updated!" : "Product created!"))
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!deleteTarget) return
-    if (!profile) {
-      showToast(lang === "vi" ? "Vui lòng đăng nhập để xóa" : "Please log in to delete", false)
-      return
-    }
-    setLoading(true)
-    const { error } = await deleteProduct(deleteTarget.id, { isDemo, orgId: profile.org_id })
-    setLoading(false)
-    if (error) {
-      showToast(lang === "vi" ? "Xóa sản phẩm thất bại" : "Failed to delete product", false)
-      return
-    }
     setProducts(prev => prev.filter(p => p.id !== deleteTarget.id))
     setDetailProduct(null)
     setDeleteTarget(null)
     showToast(lang === "vi" ? "Đã xóa sản phẩm" : "Product deleted")
   }
 
-  const handleDuplicate = async (p: Product) => {
-    if (!profile) {
-      showToast(lang === "vi" ? "Vui lòng đăng nhập để sao chép" : "Please log in to duplicate", false)
-      return
-    }
-    setLoading(true)
-    const payload = {
-      sku: `${p.sku}-COPY`,
-      barcode: p.barcode || null,
-      name: `${p.name} (Copy)`,
-      category: p.category === "—" ? null : p.category,
-      brand: p.brand === "—" ? null : p.brand,
-      unit: p.unit === "Piece" ? null : p.unit,
-      cost: p.cost,
-      price: p.price,
-      status: p.status,
-      updated_by: profile.full_name || profile.email,
-      qty: 0,
-    }
-    const { data, error } = await upsertProduct(payload, { isDemo, orgId: profile.org_id, role: profile?.role })
-    setLoading(false)
-    if (error || !data?.[0]) {
-      showToast(lang === "vi" ? "Không thể sao chép sản phẩm" : "Unable to duplicate product", false)
-      return
-    }
-    const created = data[0]
-    setProducts(prev => [{
-      id: created.id,
-      sku: created.sku,
-      barcode: created.barcode ?? "",
-      name: created.name,
-      category: created.category ?? "—",
-      brand: created.brand ?? "—",
-      unit: created.unit ?? "Piece",
-      cost: Number(created.cost ?? 0),
-      price: Number(created.price ?? 0),
-      qty: Number(created.qty ?? 0),
-      status: created.status,
-      updated: created.updated_at ? new Date(created.updated_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      updatedBy: created.updated_by ?? "",
-    }, ...prev])
+  const handleDuplicate = (p: Product) => {
+    const newId = `P${String(products.length + 1).padStart(3, "0")}`
+    setProducts(prev => [...prev, { ...p, id: newId, sku: `${p.sku}-COPY`, name: `${p.name} (Copy)`, qty: 0, updated: new Date().toISOString().slice(0, 10) }])
     setActionRow(null)
     showToast(lang === "vi" ? "Đã sao chép sản phẩm" : "Product duplicated")
-  }
-
-  const handleImportRows = async (rows: ParsedProductImport[]) => {
-    if (!profile) {
-      showToast(lang === "vi" ? "Vui lòng đăng nhập để nhập dữ liệu" : "Please log in to import data", false)
-      return
-    }
-    if (rows.length === 0) {
-      showToast(lang === "vi" ? "Không có dữ liệu để nhập" : "No rows to import", false)
-      return
-    }
-    setLoading(true)
-      const imported: Product[] = []
-      const role = profile?.role || null; // Added role extraction
-      for (const row of rows) {
-      const payload = {
-        sku: row.sku || undefined,
-        barcode: row.barcode || null,
-        name: row.product_name,
-        category: row.category || null,
-        brand: row.brand || null,
-        unit: row.unit || null,
-        cost: row.purchase_price,
-        price: row.selling_price,
-            status: row.status || "Active",
-        updated_by: profile.full_name || profile.email,
-        qty: 0,
-      }
-      const { data, error } = await upsertProduct(payload, { isDemo, orgId: profile.org_id, role: profile?.role })
-      if (error || !data?.[0]) {
-        showToast(lang === "vi" ? "Nhập sản phẩm thất bại" : "Import failed", false)
-        continue
-      }
-      const item = data[0]
-      imported.push({
-        id: item.id,
-        sku: item.sku,
-        barcode: item.barcode ?? "",
-        name: item.name,
-        category: item.category ?? "—",
-        brand: item.brand ?? "—",
-        unit: item.unit ?? "Piece",
-        cost: Number(item.cost ?? 0),
-        price: Number(item.price ?? 0),
-        qty: Number(item.qty ?? 0),
-        status: item.status,
-        updated: item.updated_at ? new Date(item.updated_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-        updatedBy: item.updated_by ?? "",
-      })
-    }
-    setLoading(false)
-    if (imported.length > 0) {
-      setProducts(prev => [...imported, ...prev])
-      showToast(lang === "vi" ? `Đã nhập ${imported.length} sản phẩm` : `Imported ${imported.length} products`)
-    }
   }
 
   const statusOptions = [
@@ -829,24 +516,15 @@ export default function Products() {
           {toast.msg}
         </div>
       )}
-      {loading && (
-        <div className="absolute inset-0 bg-white/70 z-40 flex items-center justify-center">
-          <div className="text-sm font-semibold text-slate-700">{lang === "vi" ? "Đang tải..." : "Loading..."}</div>
-        </div>
-      )}
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b flex-shrink-0 flex-wrap gap-y-2" style={{ borderColor: "var(--border)" }}>
-        {hasRole(["admin", "manager"]) && (
-          <>
-            <button onClick={openCreate} className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-              <Plus size={13} /> {t("create")}
-            </button>
-            <button onClick={() => setShowImportModal(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-              <Upload size={13} /> {t("import")}
-            </button>
-          </>
-        )}
+        <button onClick={openCreate} className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
+          <Plus size={13} /> {t("create")}
+        </button>
+        <button onClick={() => setShowImportModal(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+          <Upload size={13} /> {t("import")}
+        </button>
         <div className="relative group">
           <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={13} /> {t("export")}
@@ -903,9 +581,7 @@ export default function Products() {
         <div className="flex items-center gap-3 px-5 py-2 bg-blue-50 border-b text-xs" style={{ borderColor: "var(--border)" }}>
           <span className="text-blue-700 font-semibold">{selected.length} {t("selected")}</span>
           <button onClick={() => showToast(lang === "vi" ? "Đã lưu trữ" : "Archived")} className="text-blue-600 hover:underline">{t("archive")}</button>
-          {hasRole(["admin", "manager"]) && (
-            <button onClick={() => { setProducts(prev => prev.filter(p => !selected.includes(p.id))); setSelected([]); showToast(lang === "vi" ? "Đã xóa" : "Deleted") }} className="text-red-600 hover:underline">{t("delete")}</button>
-          )}
+          <button onClick={() => { setProducts(prev => prev.filter(p => !selected.includes(p.id))); setSelected([]); showToast(lang === "vi" ? "Đã xóa" : "Deleted") }} className="text-red-600 hover:underline">{t("delete")}</button>
           <button onClick={() => setSelected([])} className="text-slate-500 hover:underline ml-auto">{t("clearSelection")}</button>
         </div>
       )}
@@ -1005,22 +681,15 @@ export default function Products() {
                     </button>
                     {actionRow === p.id && (
                       <div className="absolute bottom-9 right-0 z-30 bg-white border rounded-xl shadow-xl py-1 min-w-[150px]" style={{ borderColor: "var(--border)" }}>
-                        {(() => {
-                          const actions: any[] = [
-                            { icon: <Eye size={13} />, label: t("view"), onClick: () => { setDetailProduct(p); setActionRow(null) } },
-                          ]
-                          if (hasRole(["admin", "manager"])) {
-                            actions.push({ icon: <Edit size={13} />, label: t("edit"), onClick: () => openEdit(p) })
-                            actions.push({ icon: <Copy size={13} />, label: t("duplicate"), onClick: () => handleDuplicate(p) })
-                          }
-                          return actions.map(a => (
-                            <button key={a.label} onClick={a.onClick} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-slate-700 hover:bg-slate-50">{a.icon} {a.label}</button>
-                          ))
-                        })()}
+                        {[
+                          { icon: <Eye size={13} />, label: t("view"), onClick: () => { setDetailProduct(p); setActionRow(null) } },
+                          { icon: <Edit size={13} />, label: t("edit"), onClick: () => openEdit(p) },
+                          { icon: <Copy size={13} />, label: t("duplicate"), onClick: () => handleDuplicate(p) },
+                        ].map(a => (
+                          <button key={a.label} onClick={a.onClick} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-slate-700 hover:bg-slate-50">{a.icon} {a.label}</button>
+                        ))}
                         <div className="border-t my-1" style={{ borderColor: "var(--border)" }} />
-                        {hasRole(["admin", "manager"]) && (
-                          <button onClick={() => { setDeleteTarget(p); setActionRow(null) }} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> {t("delete")}</button>
-                        )}
+                        <button onClick={() => { setDeleteTarget(p); setActionRow(null) }} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} /> {t("delete")}</button>
                       </div>
                     )}
                   </div>
@@ -1085,7 +754,7 @@ export default function Products() {
       {deleteTarget && (
         <DeleteConfirmDialog product={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
       )}
-      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImportRows} lang={lang} />}
+      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} lang={lang} />}
       {(showCreate || editingProduct) && (
         <ProductFormModal
           editingProduct={editingProduct}

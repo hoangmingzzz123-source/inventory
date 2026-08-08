@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import Quotations from "./screens/Quotations"
 import Sidebar from "./components/Sidebar"
 import Topbar from "./components/Topbar"
 import DemoBanner from "./components/DemoBanner"
@@ -6,7 +7,6 @@ import Dashboard from "./screens/Dashboard"
 import Products from "./screens/Products"
 import PurchaseOrders from "./screens/PurchaseOrders"
 import AuthScreen from "./screens/AuthScreen"
-import UserRoles from "./screens/UserRoles"
 import {
   Customers, Suppliers, Warehouses, SalesOrders,
   StockBalance, StockLedger, InventoryAdjustment, InventoryTransfer,
@@ -42,6 +42,7 @@ const breadcrumbKeys: Record<string, string[]> = {
   "goods-receipt":    ["purchase", "goodsReceipt"],
   "purchase-return":  ["purchase", "purchaseReturn"],
   "supplier-payment": ["purchase", "supplierPayment"],
+  "quotations":       ["sales", "quotations"],
   "sales-orders":     ["sales", "salesOrders"],
   delivery:           ["sales", "deliveryNotes"],
   invoices:           ["sales", "invoices"],
@@ -78,7 +79,7 @@ function PlaceholderScreen({ id }: { id: string }) {
 
 function AppInner() {
   const { t, lang } = useLang()
-  const { user, profile, signOut, hasRole } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const { isDemo, setDemo } = useDemo()
   const [active, setActive] = useState("dashboard")
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -108,6 +109,7 @@ function AppInner() {
   function renderScreen() {
     switch (active) {
       case "dashboard":        return <Dashboard />
+      case "quotations":       return <Quotations />
       case "products":         return <Products />
       case "purchase-orders":  return <PurchaseOrders />
       case "customers":        return <Customers />
@@ -125,8 +127,9 @@ function AppInner() {
       case "reports":          return <Reports />
       case "settings":         return <Settings />
       case "users":            return <Users />
-      case "roles":            return hasRole(["admin", "manager"]) ? <UserRoles /> : <PlaceholderScreen id={lang === "vi" ? "Không có quyền" : "No permission"} />
+      case "roles":            return <Roles />
       case "receivable":       return <Receivables />
+      case "goods-receipt":    return <GoodsReceipt />
       case "purchase-return":  return <PurchaseReturn />
       case "supplier-payment": return <SupplierPayment />
       case "delivery":         return <DeliveryNotes />
@@ -194,9 +197,7 @@ function AppInner() {
 
 function AppGate() {
   const { session, loading } = useAuth()
-  const qs = window.location.search
-  const isDemoRequested = qs.includes("demo=true")
-  const isAuthRequested = qs.includes("auth") || qs.includes("login")
+  const isDemoRequested = window.location.search.includes("demo=true") || !window.location.search.includes("auth")
 
   if (loading) {
     return (
@@ -211,9 +212,8 @@ function AppGate() {
     )
   }
 
-  // Show auth screen when explicitly requested via `?auth` (or `?login`),
-  // or when not demo and no query string — and the user is not logged in.
-  if (!session && (isAuthRequested || (!isDemoRequested && qs === ""))) {
+  // Show auth screen when explicitly navigated to (no demo param) and not logged in
+  if (!session && !isDemoRequested && window.location.search === "") {
     return <AuthScreen />
   }
 
