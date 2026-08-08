@@ -145,7 +145,7 @@ function AppInner() {
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "var(--background)" }}>
       {/* Demo mode banner */}
-      {isDemo && <DemoBanner onGoLive={() => window.location.search = ""} />}
+      {isDemo && <DemoBanner onGoLive={() => window.location.search = "?auth"} />}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
         <Sidebar active={active} onNavigate={setActive} collapsed={sidebarCollapsed} />
@@ -197,7 +197,9 @@ function AppInner() {
 
 function AppGate() {
   const { session, loading } = useAuth()
-  const isDemoRequested = window.location.search.includes("demo=true") || !window.location.search.includes("auth")
+  const qs = window.location.search
+  const isDemoRequested = qs.includes("demo=true")
+  const isAuthRequested = qs.includes("auth") || qs.includes("login")
 
   if (loading) {
     return (
@@ -212,8 +214,8 @@ function AppGate() {
     )
   }
 
-  // Show auth screen when explicitly navigated to (no demo param) and not logged in
-  if (!session && !isDemoRequested && window.location.search === "") {
+  // Show auth screen when explicitly requested (?auth / ?login) or when not demo and no query string and not logged in
+  if (!session && (isAuthRequested || (!isDemoRequested && qs === ""))) {
     return <AuthScreen />
   }
 
