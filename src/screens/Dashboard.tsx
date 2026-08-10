@@ -1,7 +1,7 @@
 import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package, ArrowRight } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
 import { useState, useEffect } from "react"
-import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities, quotations as mockQuotations } from "../data/mockData"
+import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
@@ -29,7 +29,7 @@ export default function Dashboard() {
   const { isDemo } = useDemo()
   const { profile } = useAuth()
 
-  const [quotationsData, setQuotationsData] = useState<any[]>(mockQuotations)
+  const [quotationsData, setQuotationsData] = useState<any[]>([])
 
   useEffect(() => {
     fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setQuotationsData(res.data) })
