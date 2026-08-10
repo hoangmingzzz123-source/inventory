@@ -243,28 +243,25 @@ export async function deleteCashBook(id: string, { isDemo }: Ctx) {
 // --- Quotations ---
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.quotations, error: null }
-  try {
-    const { data, error } = await supabase
-      .from("quotations")
-      .select("*")
-      .eq("org_id", orgId!)
-      .order("created_at", { ascending: false })
-    if (error) return { data: mock.quotations, error: null }
-    return { data: data ?? [], error: null }
-  } catch (error) {
-    return { data: mock.quotations, error: null }
-  }
+  const { data, error } = await supabase
+    .from("quotations")
+    .select("*")
+    .eq("org_id", orgId!)
+    .order("date", { ascending: false })
+  return { data: data ?? [], error }
 }
 
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
-  // Quotations table is not present in the current schema; fallback to no-op live behavior.
-  return { error: null }
+  const row = { ...payload, org_id: orgId }
+  const { error } = await supabase.from("quotations").upsert([row] as any)
+  return { error }
 }
 
 export async function deleteQuotation(id: string, { isDemo }: Ctx) {
   if (isDemo) return { error: null }
-  return { error: null }
+  const { error } = await supabase.from("quotations").delete().eq("id", id)
+  return { error }
 }
 
 export async function upsertSupplier(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {

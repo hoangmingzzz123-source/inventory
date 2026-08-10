@@ -273,6 +273,7 @@ alter table units               enable row level security;
 alter table warehouses          enable row level security;
 alter table customers           enable row level security;
 alter table suppliers           enable row level security;
+alter table quotations          enable row level security;
 alter table purchase_orders     enable row level security;
 alter table purchase_order_items enable row level security;
 alter table goods_receipts      enable row level security;
@@ -295,6 +296,7 @@ create policy "org_isolation" on units          using (org_id = get_org_id());
 create policy "org_isolation" on warehouses     using (org_id = get_org_id());
 create policy "org_isolation" on customers      using (org_id = get_org_id());
 create policy "org_isolation" on suppliers      using (org_id = get_org_id());
+create policy "org_isolation" on quotations     using (org_id = get_org_id());
 create policy "org_isolation" on purchase_orders using (org_id = get_org_id());
 create policy "org_isolation" on goods_receipts  using (org_id = get_org_id());
 create policy "org_isolation" on sales_orders   using (org_id = get_org_id());
@@ -316,7 +318,7 @@ create policy "org_members_read" on organizations
 -- Full CRUD policies (using same helper) — insert/update/delete
 do $$ begin
   for tbl in select unnest(array['products','categories','brands','units','warehouses',
-    'customers','suppliers','purchase_orders','goods_receipts','sales_orders',
+    'customers','suppliers','quotations','purchase_orders','goods_receipts','sales_orders',
     'inventory_balance','invoices','cash_book']) as t loop
     execute format(
       'create policy "org_insert_%1$s" on %1$s for insert with check (org_id = get_org_id())',
