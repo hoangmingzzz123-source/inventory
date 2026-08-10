@@ -4,14 +4,49 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCustomers, fetchSuppliers, fetchWarehouses } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
+import { importFromExcel } from "../lib/excelUtils"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
+
+type ImportPreviewRow = {
+  rowIndex: number
+  row: Record<string, any>
+  keyValue: string
+  issues: string[]
+  isDuplicate: boolean
+}
+
+function getImportKeyField(cols: string[]) {
+  return cols.includes("code") ? "code" : (cols.includes("id") ? "id" : cols[0])
+}
+
+function mapRowToColumns(raw: Record<string, any>, cols: string[]) {
+  const lowerKeys = Object.keys(raw).reduce<Record<string, string>>((acc, k) => ({
+    ...acc,
+    [k.toString().trim().toLowerCase()]: k.toString(),
+  }), {})
+  return cols.reduce<Record<string, any>>((obj, col) => {
+    const lookup = lowerKeys[col.toLowerCase()]
+    obj[col] = raw[lookup] ?? raw[col] ?? ""
+    return obj
+  }, {})
+}
+
+function fieldPlaceholder(lang: string, label: string) {
+  return lang === "vi" ? `Nhập ${label}` : `Enter ${label}`
+}
+
+function getStatusOptions(lang: string) {
+  return lang === "vi"
+    ? ["Đang hoạt động", "Ngừng hoạt động", "Nháp", "Chờ duyệt", "Đã duyệt", "Đã hủy"]
+    : ["Active", "Inactive", "Draft", "Pending Approval", "Approved", "Cancelled"]
+}
 
 // --- Download CSV template utility ---
 function downloadTemplate(filename: string, cols: string[]) {
@@ -30,16 +65,111 @@ function downloadTemplateXlsx(filename: string, cols: string[]) {
   XLSX.writeFile(wb, filename + "_template.xlsx")
 }
 
+function formatCsvCell(value: string | number) {
+  const text = String(value ?? "")
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function getReportTitle(filename: string) {
+  return filename
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, s => s.toUpperCase())
+}
+
+function getExportDate() {
+  return new Intl.DateTimeFormat("vi-VN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date())
+}
+
+function escapeHtml(value: string | number) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 // --- Import Modal ---
-export function ImportModal({ onClose, filename, cols, lang }: { onClose: () => void; filename: string; cols: string[]; lang: string }) {
+export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImportRows }: { onClose: () => void; filename: string; cols: string[]; lang: string; existingKeys?: string[]; onImportRows?: (rows: any[]) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
+  const [previewRows, setPreviewRows] = useState<ImportPreviewRow[]>([])
+  const [processing, setProcessing] = useState(false)
+  const [parseError, setParseError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const parseFile = async (file: File) => {
+    setParseError(null)
+    try {
+      setProcessing(true)
+      const parsed = await importFromExcel(file)
+      const keyField = getImportKeyField(cols)
+      const existingSet = new Set((existingKeys ?? []).map(k => String(k).trim().toLowerCase()))
+      const seen = new Set<string>()
+      const rows = parsed.map((rawRow: any, index: number) => {
+        const row = mapRowToColumns(rawRow, cols)
+        const keyValue = String(row[keyField] ?? "").trim()
+        const issues = [] as string[]
+        if (!keyValue) {
+          issues.push(lang === "vi" ? `Thiếu ${keyField}` : `${keyField} missing`)
+        }
+        const keyValueLower = keyValue.toLowerCase()
+        const isDuplicate = keyValue ? existingSet.has(keyValueLower) || seen.has(keyValueLower) : false
+        if (isDuplicate) {
+          issues.push(lang === "vi" ? `Trùng ${keyField}` : `${keyField} duplicate`)
+        }
+        if (keyValue) seen.add(keyValueLower)
+        return {
+          rowIndex: index + 1,
+          row,
+          keyValue,
+          issues,
+          isDuplicate,
+        }
+      })
+      setPreviewRows(rows)
+    } catch (err) {
+      console.error(err)
+      setPreviewRows([])
+      setParseError(lang === "vi" ? "Lỗi khi đọc file" : "Failed to read file")
+    } finally {
+      setProcessing(false)
+    }
+  }
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
-    if (f && (f.name.endsWith(".csv") || f.name.endsWith(".xlsx"))) setFile(f)
+    if (f && (f.name.endsWith(".csv") || f.name.endsWith(".xlsx") || f.name.endsWith(".xls"))) {
+      setFile(f)
+      parseFile(f)
+    }
+  }
+
+  const handleFileChange = (file: File | null) => {
+    setFile(file)
+    if (file) parseFile(file)
+    else setPreviewRows([])
+  }
+
+  const runImport = async () => {
+    if (!file || !onImportRows) return alert(lang === "vi" ? "Chưa có chức năng import" : "Import handler not provided")
+    if (previewRows.length === 0) return alert(lang === "vi" ? "Chưa có dữ liệu để nhập" : "No data to import")
+    if (previewRows.some(r => r.issues.length > 0 || r.isDuplicate)) return alert(lang === "vi" ? "Vui lòng sửa các lỗi trước khi import" : "Please fix the errors before importing")
+    try {
+      setProcessing(true)
+      await onImportRows(previewRows.map(r => r.row))
+      onClose()
+    } catch (err) {
+      console.error(err)
+      alert(lang === "vi" ? "Lỗi khi import dữ liệu" : "Failed to import data")
+    } finally { setProcessing(false) }
   }
 
   return (
@@ -108,8 +238,8 @@ export function ImportModal({ onClose, filename, cols, lang }: { onClose: () => 
                   onClick={() => fileRef.current?.click()}
                   className={`mt-2 border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${dragging ? "border-blue-400 bg-blue-50" : file ? "border-emerald-400 bg-emerald-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}
                 >
-                  <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden"
-                    onChange={e => e.target.files?.[0] && setFile(e.target.files[0])} />
+                  <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
+                    onChange={e => e.target.files?.[0] && handleFileChange(e.target.files[0])} />
                   {file ? (
                     <>
                       <FileSpreadsheet size={20} className="text-emerald-500 mx-auto mb-1" />
@@ -132,16 +262,60 @@ export function ImportModal({ onClose, filename, cols, lang }: { onClose: () => 
           </div>
         </div>
 
+        {(file || parseError || previewRows.length > 0) && (
+          <div className="p-5 border-t space-y-3" style={{ borderColor: "var(--border)" }}>
+            <div className="flex items-center justify-between text-[11px] text-slate-500">
+              <span>{lang === "vi" ? "Xem trước dữ liệu" : "Preview data"}</span>
+              <span>{lang === "vi" ? "Hàng" : "Rows"}: {previewRows.length}</span>
+            </div>
+            {parseError ? (
+              <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">{parseError}</div>
+            ) : previewRows.length === 0 ? (
+              <div className="text-[11px] text-slate-500">{lang === "vi" ? "Tải file để xem trước dữ liệu" : "Upload a file to preview rows"}</div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-[40px_1fr_120px_140px] gap-2 bg-slate-50 px-3 py-2 text-[11px] uppercase text-slate-500 font-semibold">
+                  <div>#</div>
+                  <div>{lang === "vi" ? "Giá trị" : "Key"}</div>
+                  <div>{lang === "vi" ? "Trạng thái" : "Status"}</div>
+                  <div>{lang === "vi" ? "Lỗi" : "Issues"}</div>
+                </div>
+                <div className="max-h-48 overflow-y-auto bg-white">
+                  {previewRows.slice(0, 8).map(row => (
+                    <div key={row.rowIndex} className="grid grid-cols-[40px_1fr_120px_140px] gap-2 px-3 py-2 text-[12px] border-t border-slate-200">
+                      <div className="text-slate-500">{row.rowIndex}</div>
+                      <div className="truncate">{row.keyValue || "—"}</div>
+                      <div className="text-[11px] font-medium">
+                        {row.isDuplicate ? (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">{lang === "vi" ? "Trùng" : "Duplicate"}</span>
+                        ) : row.issues.length > 0 ? (
+                          <span className="inline-flex items-center rounded-full bg-red-100 text-red-800 px-2 py-0.5">{lang === "vi" ? "Lỗi" : "Error"}</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">{lang === "vi" ? "Sẵn sàng" : "Ready"}</span>
+                        )}
+                      </div>
+                      <div className="text-slate-600 truncate">{row.issues.join(", ") || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {previewRows.length > 8 && (
+              <div className="text-[11px] text-slate-500">{lang === "vi" ? `Chỉ hiển thị 8 dòng đầu tiên. Tổng ${previewRows.length} dòng.` : `Showing first 8 rows. ${previewRows.length} total.`}</div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <button onClick={onClose} className="h-8 px-4 rounded-lg border text-xs text-slate-600 hover:bg-white" style={{ borderColor: "var(--border)" }}>
             {lang === "vi" ? "Hủy" : "Cancel"}
           </button>
           <button
-            disabled={!file}
-            onClick={() => { alert(lang === "vi" ? "Đã nhập dữ liệu thành công!" : "Data imported successfully!"); onClose() }}
+            disabled={!file || processing}
+            onClick={() => runImport()}
             className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {lang === "vi" ? "Nhập dữ liệu" : "Import"}
+            {processing ? (lang === "vi" ? "Đang xử lý..." : "Processing...") : (lang === "vi" ? "Nhập dữ liệu" : "Import")}
           </button>
         </div>
       </div>
@@ -150,10 +324,10 @@ export function ImportModal({ onClose, filename, cols, lang }: { onClose: () => 
 }
 
 // --- Toolbar shared ---
-export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, templateFile, templateCols, extra, onExportCsv, onExportXlsx }: {
+export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onImportRows, templateFile, templateCols, existingKeys, extra, onExportCsv, onExportXlsx, onPrint }: {
   onSearch?: (v: string) => void; search?: string; onCreate?: () => void; createLabel?: string
-  onImport?: () => void; templateFile?: string; templateCols?: string[]; extra?: React.ReactNode;
-  onExportCsv?: () => void; onExportXlsx?: () => void
+  onImport?: () => void; onImportRows?: (rows: any[]) => Promise<void>; templateFile?: string; templateCols?: string[]; existingKeys?: string[]; extra?: React.ReactNode;
+  onExportCsv?: () => void; onExportXlsx?: () => void; onPrint?: () => void
 }) {
   const { t, lang } = useLang()
   const [showImport, setShowImport] = useState(false)
@@ -170,7 +344,7 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, tem
             <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
               <Download size={13} /> {t("export")}
             </button>
-            <div className="absolute top-full left-0 mt-1 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
+            <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
               {onExportCsv && <button onClick={onExportCsv} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>}
               {onExportXlsx && <button onClick={onExportXlsx} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>}
             </div>
@@ -187,6 +361,15 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, tem
             style={{ borderColor: "var(--border)" }}
           >
             <Upload size={13} /> {lang === "vi" ? "Nhập file" : "Import"}
+          </button>
+        )}
+        {onPrint && (
+          <button
+            onClick={onPrint}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <Printer size={13} /> {t("print")}
           </button>
         )}
         {extra}
@@ -207,6 +390,8 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, tem
           filename={templateFile ?? "template"}
           cols={templateCols}
           lang={lang}
+          existingKeys={existingKeys}
+          onImportRows={async (rows) => { if (typeof onImportRows === 'function') await onImportRows(rows) }}
         />
       )}
     </>
@@ -235,15 +420,115 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [relatedOptions, setRelatedOptions] = useState<Record<string, string[]>>({
+    customer: [], supplier: [], warehouse: [], category: [], brand: [], unit: [], status: getStatusOptions(lang)
+  });
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  const importKeyField = getImportKeyField(templateCols);
+  const existingKeys = data.map((item: any) => item[importKeyField]).filter(Boolean).map(String);
+
+  useEffect(() => {
+    const extractList = (key: string) => Array.from(new Set(data.map((item: any) => item[key]).filter(Boolean).map(String))).sort()
+    const nextOptions: Record<string, string[]> = {
+      customer: extractList("customer"),
+      supplier: extractList("supplier"),
+      warehouse: extractList("warehouse"),
+      category: extractList("category"),
+      brand: extractList("brand"),
+      unit: extractList("unit"),
+      status: Array.from(new Set([...getStatusOptions(lang), ...extractList("status")]))
+    }
+    setRelatedOptions(nextOptions)
+  }, [data, lang])
   
   const filtered = data.filter((item: any) => search === "" || Object.values(item).some((v: any) => String(v).toLowerCase().includes(search.toLowerCase())));
   
   const heads = columns.map((c: any) => c.label);
   
+  async function handleUpsert(newItem: any) {
+    const res = await handleUpsertFor(templateFile, newItem, isDemo, profile)
+    if (!isDemo) {
+      if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    }
+    if (editingItem) setData(data.map((x: any) => x === editingItem ? newItem : x)); else setData([...data, newItem]);
+  }
+
+  async function handleImportRows(rows: any[]) {
+    if (!rows || rows.length === 0) return alert(lang === 'vi' ? 'Không có dữ liệu để import' : 'No rows to import')
+    const keyField = templateCols.includes('code') ? 'code' : (templateCols.includes('id') ? 'id' : templateCols[0])
+    const duplicates: any[] = []
+    const failed: any[] = []
+    const toImport: any[] = []
+
+    for (const r of rows) {
+      const item = { ...r }
+      const key = item[keyField]
+      if (!key) { failed.push({ row: item, reason: 'missing_key' }); continue }
+      const exists = data.some((d: any) => d[keyField] && item[keyField] && String(d[keyField]).trim() === String(item[keyField]).trim())
+      if (exists) { duplicates.push(item); continue }
+      toImport.push(item)
+    }
+
+    let importedCount = 0
+    if (toImport.length > 0) {
+      if (!isDemo) {
+        const ctx = { isDemo, orgId: profile?.org_id }
+        if (templateFile === 'customers') {
+          const res = await bulkUpsertCustomers(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
+        } else if (templateFile === 'suppliers') {
+          const res = await bulkUpsertSuppliers(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
+        } else if (templateFile === 'warehouses') {
+          const res = await bulkUpsertWarehouses(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
+        } else {
+          // fallback to per-record upsert
+          for (const item of toImport) {
+            const res = await handleUpsertFor(templateFile, item, isDemo, profile)
+            if (res && res.error) failed.push({ row: item, reason: 'api_error' })
+            else importedCount++
+          }
+        }
+      } else {
+        // demo mode: just append
+        setData((prev: any[]) => [...toImport, ...prev])
+        importedCount = toImport.length
+      }
+    }
+
+    // refresh list for live tables
+    if (!isDemo) {
+      if (templateFile === 'customers') { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'suppliers') { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'warehouses') { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+    }
+
+    alert(lang === 'vi'
+      ? `Import xong. Thành công: ${importedCount}, Trùng: ${duplicates.length}, Lỗi: ${failed.length}`
+      : `Import complete. Success: ${importedCount}, Duplicates: ${duplicates.length}, Failed: ${failed.length}`)
+  }
+
+  async function handleDelete(item: any) {
+    if (isDemo) { setData(data.filter((x: any) => x !== item)); return }
+    const id = item.id || item.code || item.ref || item.doc_no
+    await handleDeleteFor(templateFile, id, isDemo, profile)
+    if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    setData(data.filter((x: any) => x !== item))
+  }
+  
   return (
     <div className="flex flex-col h-full">
       <Toolbar search={search} onSearch={setSearch} onCreate={() => { setEditingItem(null); setShowForm(true); }} createLabel={lang === "vi" ? "Thêm " + title : "Add " + title}
-        templateFile={templateFile} templateCols={templateCols}
+        templateFile={templateFile} templateCols={templateCols} existingKeys={existingKeys} onImportRows={handleImportRows}
         onExportCsv={() => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
         onExportXlsx={() => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
       />
@@ -265,8 +550,8 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
                 ))}
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowForm(true); }} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><Edit size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setData(data.filter((x: any) => x !== item)); }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowForm(true); }} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><Edit size={14} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(item) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
                   </div>
                 </td>
               </tr>
@@ -289,20 +574,41 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
               columns.forEach((c: any) => {
                 newItem[c.key] = fd.get(c.key) || "";
               });
-              if (editingItem) {
-                setData(data.map((x: any) => x === editingItem ? newItem : x));
-              } else {
-                setData([...data, newItem]);
-              }
-              setShowForm(false);
+              handleUpsert(newItem).finally(() => setShowForm(false));
             }}>
               <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-                {columns.map((c: any) => (
-                  <div key={c.key}>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">{c.label}</label>
-                    <input name={c.key} defaultValue={editingItem ? editingItem[c.key] : ""} className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} />
-                  </div>
-                ))}
+                {columns.map((c: any) => {
+                  const options = relatedOptions[c.key] || []
+                  const inputType = c.type || (/(amount|price|cost|total|debt|credit|capacity|qty|quantity)/i.test(c.key) ? "number" : (/(email)/i.test(c.key) ? "email" : "text"))
+                  const defaultValue = editingItem ? editingItem[c.key] ?? "" : ""
+                  return (
+                    <div key={c.key}>
+                      <label className="block text-[11px] font-medium text-slate-600 mb-1">{c.label}</label>
+                      {options.length > 0 ? (
+                        <select
+                          name={c.key}
+                          defaultValue={defaultValue}
+                          className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white"
+                          style={{ borderColor: "var(--border)" }}
+                        >
+                          <option value="">{fieldPlaceholder(lang, c.label)}</option>
+                          {options.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          name={c.key}
+                          type={inputType}
+                          defaultValue={defaultValue}
+                          placeholder={fieldPlaceholder(lang, c.label)}
+                          className="w-full h-8 px-3 rounded-lg border text-xs outline-none"
+                          style={{ borderColor: "var(--border)" }}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
               <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
                 <button type="button" onClick={() => setShowForm(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
@@ -314,6 +620,36 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       )}
     </div>
   )
+}
+
+async function handleUpsertFor(templateFile: string, item: any, isDemo: boolean, profile: any) {
+  if (isDemo) return { error: null }
+  const ctx = { isDemo, orgId: profile?.org_id }
+  switch (templateFile) {
+    case "customers":
+      return await upsertCustomer(item, ctx)
+    case "suppliers":
+      return await upsertSupplier(item, ctx)
+    case "warehouses":
+      return await upsertWarehouse(item, ctx)
+    default:
+      return { error: null }
+  }
+}
+
+async function handleDeleteFor(templateFile: string, id: string, isDemo: boolean, profile: any) {
+  if (isDemo) return { error: null }
+  const ctx = { isDemo, orgId: profile?.org_id }
+  switch (templateFile) {
+    case "customers":
+      return await deleteCustomer(id, ctx)
+    case "suppliers":
+      return await deleteSupplier(id, ctx)
+    case "warehouses":
+      return await deleteWarehouse(id, ctx)
+    default:
+      return { error: null }
+  }
 }
 
 
@@ -698,30 +1034,188 @@ export function AuditLogs() {
 
 // --- Finance Screens ---
 export function Receivables() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ customer: "Sample customer", total_debt: "Sample total_debt", overdue: "Sample overdue", status: "Sample status" }]);
-  const columns = lang === "vi" ? [
-    { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "phải thu" : "receivable"} data={data} setData={setData} columns={columns} templateCols={["customer","total_debt","overdue","status"]} templateFile="receivables" />;
+  const { t, lang } = useLang()
+  const [dataList, setDataList] = useState([
+    { ref: "INV-202608-001", customer: "FPT Telecom", date: "2026-08-01", due: "2026-08-31", amount: 98500000, paid: 0, remaining: 98500000, status: "Overdue" },
+    { ref: "INV-202608-002", customer: "VNPT Group", date: "2026-08-02", due: "2026-09-01", amount: 52000000, paid: 52000000, remaining: 0, status: "Paid" },
+    { ref: "INV-202607-045", customer: "Viettel Store", date: "2026-07-25", due: "2026-08-24", amount: 175000000, paid: 100000000, remaining: 75000000, status: "Partial" },
+    { ref: "INV-202608-003", customer: "Nguyen Kim Corp", date: "2026-08-03", due: "2026-09-02", amount: 43000000, paid: 0, remaining: 43000000, status: "Partial" },
+  ])
+  const [search, setSearch] = useState("")
+  const [showCreate, setShowCreate] = useState(false)
+
+  const filtered = dataList.filter(r => search === "" || r.ref.toLowerCase().includes(search.toLowerCase()) || r.customer.toLowerCase().includes(search.toLowerCase()))
+  const heads = lang === "vi"
+    ? ["Số HĐ", "Khách hàng", "Ngày HĐ", "Ngày đến hạn", "Số tiền", "Đã thu", "Còn lại", "Trạng thái", ""]
+    : ["Invoice", "Customer", "Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
+  const totalRemaining = filtered.reduce((a, b) => a + b.remaining, 0)
+  return (
+    <div className="flex flex-col h-full">
+      <Toolbar search={search} onSearch={setSearch} createLabel={lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"} onCreate={() => setShowCreate(true)}
+        onExportCsv={() => exportCsv("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
+        onExportXlsx={() => exportXlsx("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
+        onPrint={() => printTable("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
+      />
+      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+        {[
+          { label: lang === "vi" ? "Tổng phải thu" : "Total Receivable", value: fmt(filtered.reduce((a, b) => a + b.amount, 0)), color: "text-slate-900" },
+          { label: lang === "vi" ? "Đã thu" : "Collected", value: fmt(filtered.reduce((a, b) => a + b.paid, 0)), color: "text-emerald-600" },
+          { label: lang === "vi" ? "Còn lại" : "Outstanding", value: fmt(totalRemaining), color: "text-amber-600" },
+        ].map(c => (
+          <div key={c.label} className="bg-slate-50 rounded-xl p-3">
+            <div className="text-[10px] text-slate-400 font-medium">{c.label}</div>
+            <div className={`text-sm font-bold mono mt-0.5 ${c.color}`}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-xs border-collapse min-w-[950px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
+              {heads.map((h, i) => <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r, i) => (
+              <tr key={r.ref} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
+                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-800">{r.customer}</td>
+                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
+                <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
+                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
+                <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
+                <td className="px-4 py-2.5 mono text-right font-bold text-amber-600">{fmt(r.remaining)}</td>
+                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.ref !== r.ref)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "hóa đơn" : "invoices"} />
+
+      {showCreate && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
+              <h2 className="text-sm font-semibold">{lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"}</h2>
+              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
+            </div>
+            <form onSubmit={e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              setDataList([{
+                ref: fd.get("ref") as string || "INV-NEW",
+                customer: fd.get("customer") as string || "New Customer",
+                date: new Date().toISOString().split("T")[0],
+                due: new Date(Date.now() + 30*24*60*60*1000).toISOString().split("T")[0],
+                amount: Number(fd.get("amount")) || 0,
+                paid: 0,
+                remaining: Number(fd.get("amount")) || 0,
+                status: "Pending"
+              }, ...dataList]);
+              setShowCreate(false);
+            }}>
+              <div className="p-5 grid gap-3">
+                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số HĐ" : "Invoice"}</label><input name="ref" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
+                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Khách hàng" : "Customer"}</label><input name="customer" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
+                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số tiền" : "Amount"}</label><input name="amount" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
+              </div>
+              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
+                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
+                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
-// --- NEXT ---
-export function exportCsv(filename: string, heads: string[], rows: (string | number)[][]) {
-  const lines = [heads.join(","), ...rows.map(r => r.map(c => `"${c}"`).join(","))].join("\n")
+// --- Export helpers ---
+export function exportCsv(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
+  const exportDate = getExportDate()
+  const meta = [
+    ["Company", companyName],
+    ["Report", getReportTitle(filename)],
+    ["Exported", exportDate],
+    [],
+  ]
+  const lines = [
+    ...meta.map(row => row.map(formatCsvCell).join(",")),
+    heads.map(formatCsvCell).join(","),
+    ...rows.map(r => r.map(formatCsvCell).join(",")),
+  ].join("\n")
   const blob = new Blob(["﻿" + lines], { type: "text/csv;charset=utf-8;" })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a"); a.href = url; a.download = filename + ".csv"; a.click()
   URL.revokeObjectURL(url)
 }
 
-export function exportXlsx(filename: string, heads: string[], rows: (string | number)[][]) {
-  const ws = XLSX.utils.aoa_to_sheet([heads, ...rows])
+export function exportXlsx(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
+  const exportDate = getExportDate()
+  const wsRows = [
+    ["Company", companyName],
+    ["Report", getReportTitle(filename)],
+    ["Exported", exportDate],
+    [],
+    heads,
+    ...rows,
+  ]
+  const ws = XLSX.utils.aoa_to_sheet(wsRows)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, "Report")
   XLSX.writeFile(wb, filename + ".xlsx")
+}
+
+export function printTable(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
+  const title = getReportTitle(filename)
+  const exportDate = getExportDate()
+  const htmlRows = rows.map(row => `
+      <tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>
+    `).join("")
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(title)}</title>
+<style>
+  body { margin: 20px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; }
+  .header { margin-bottom: 16px; }
+  .company { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .report-title { font-size: 15px; color: #334155; margin-bottom: 2px; }
+  .meta { font-size: 12px; color: #64748b; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; color: #334155; font-weight: 700; }
+  @media print { body { margin: 10mm; } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="company">${escapeHtml(companyName)}</div>
+    <div class="report-title">${escapeHtml(title)}</div>
+    <div class="meta">Exported: ${escapeHtml(exportDate)}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>${heads.map(head => `<th>${escapeHtml(head)}</th>`).join('')}</tr>
+    </thead>
+    <tbody>${htmlRows}</tbody>
+  </table>
+  <script>window.print()</script>
+</body>
+</html>`
+  const printWindow = window.open("", "_blank", "width=900,height=700")
+  if (!printWindow) return
+  printWindow.document.write(html)
+  printWindow.document.close()
 }
 
 // --- Report Detail Modal ---
@@ -1821,14 +2315,62 @@ export function DeliveryNotes() {
 
 // --- NEXT ---
 export function Invoices() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", total: "Sample total", status: "Sample status" }]);
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "hóa đơn" : "invoice"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="invoices" />;
+  const { lang } = useLang()
+  const invoices = [
+    { id: "INV-202608-001", so: "SO-202608-000048", customer: "FPT Telecom", amount: 52000000, tax: 5200000, total: 57200000, status: "Paid", date: "2026-08-03" },
+    { id: "INV-202608-002", so: "SO-202608-000047", customer: "VNPT Group", amount: 98500000, tax: 9850000, total: 108350000, status: "Partial", date: "2026-08-03" },
+    { id: "INV-202608-003", so: "SO-202608-000044", customer: "Nguyen Kim Corp", amount: 43000000, tax: 4300000, total: 47300000, status: "Overdue", date: "2026-08-01" },
+    { id: "INV-202608-004", so: "SO-202608-000043", customer: "Viettel Store", amount: 175000000, tax: 17500000, total: 192500000, status: "Draft", date: "2026-08-04" },
+  ]
+  const heads = lang === "vi"
+    ? ["Số HĐ", "Đơn bán", "Khách hàng", "Tiền hàng", "Thuế", "Tổng TT", "Trạng thái", "Ngày HĐ", ""]
+    : ["Invoice #", "SO", "Customer", "Amount", "Tax", "Total", "Status", "Date", ""]
+  const totalRevenue = invoices.reduce((a, b) => a + b.total, 0)
+  return (
+    <div className="flex flex-col h-full">
+      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Tạo hóa đơn" : "Create Invoice"}
+        onPrint={() => printTable("invoices", heads.slice(0, -1), invoices.map(inv => [inv.id, inv.so, inv.customer, inv.amount, inv.tax, inv.total, inv.status, inv.date]))}
+      />
+      <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+        {[
+          { l: lang === "vi" ? "Tổng doanh thu" : "Total Revenue", v: fmt(totalRevenue), c: "text-blue-700" },
+          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(invoices.filter(i => i.status === "Paid").reduce((a, b) => a + b.total, 0)), c: "text-emerald-600" },
+          { l: lang === "vi" ? "Còn nợ" : "Outstanding", v: fmt(invoices.filter(i => i.status !== "Paid" && i.status !== "Draft").reduce((a, b) => a + b.total, 0)), c: "text-amber-600" },
+          { l: lang === "vi" ? "Quá hạn" : "Overdue", v: fmt(invoices.filter(i => i.status === "Overdue").reduce((a, b) => a + b.total, 0)), c: "text-red-600" },
+        ].map(c => (
+          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
+            <div className="text-[10px] text-slate-400">{c.l}</div>
+            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-xs border-collapse min-w-[950px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
+              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {invoices.map(inv => (
+              <tr key={inv.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
+                <td className="px-4 py-2.5 mono text-blue-600 font-semibold">{inv.id}</td>
+                <td className="px-4 py-2.5 mono text-slate-500">{inv.so}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-800">{inv.customer}</td>
+                <td className="px-4 py-2.5 mono text-right">{fmt(inv.amount)}</td>
+                <td className="px-4 py-2.5 mono text-right text-slate-500">{fmt(inv.tax)}</td>
+                <td className="px-4 py-2.5 mono text-right font-bold text-slate-900">{fmt(inv.total)}</td>
+                <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
+                <td className="px-4 py-2.5 mono text-slate-400">{inv.date}</td>
+                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager count={invoices.length} total={invoices.length} label={lang === "vi" ? "hóa đơn" : "invoices"} />
+    </div>
+  )
 }
 
 // --- NEXT ---
@@ -1845,14 +2387,60 @@ export function CustomerReceipts() {
 
 // --- NEXT ---
 export function Payables() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ supplier: "Sample supplier", total_debt: "Sample total_debt", overdue: "Sample overdue", status: "Sample status" }]);
-  const columns = lang === "vi" ? [
-    { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total_debt", label: "TOTAL_DEBT", isStatus: false }, { key: "overdue", label: "OVERDUE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "phải trả" : "payable"} data={data} setData={setData} columns={columns} templateCols={["supplier","total_debt","overdue","status"]} templateFile="payables" />;
+  const { lang } = useLang()
+  const data = [
+    { ref: "PO-202608-000002", supplier: "Samsung Vietnam", date: "2026-08-02", due: "2026-09-01", amount: 392000000, paid: 0, remaining: 392000000, status: "Partial" },
+    { ref: "PO-202608-000004", supplier: "Apple Vietnam", date: "2026-08-03", due: "2026-09-02", amount: 2250000000, paid: 0, remaining: 2250000000, status: "Partial" },
+    { ref: "PO-202607-000044", supplier: "WD Technologies", date: "2026-07-25", due: "2026-08-24", amount: 140000000, paid: 140000000, remaining: 0, status: "Paid" },
+  ]
+  const totalRemaining = data.reduce((a, b) => a + b.remaining, 0)
+  const heads = lang === "vi"
+    ? ["Số ĐM", "Nhà cung cấp", "Ngày ĐM", "Ngày đến hạn", "Số tiền", "Đã trả", "Còn lại", "Trạng thái", ""]
+    : ["PO", "Supplier", "PO Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
+  return (
+    <div className="flex flex-col h-full">
+      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Ghi nhận trả tiền" : "Record Payment"}
+        onPrint={() => printTable("payables", heads.slice(0, -1), data.map(r => [r.ref, r.supplier, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
+      />
+      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+        {[
+          { l: lang === "vi" ? "Tổng phải trả" : "Total Payable", v: fmt(data.reduce((a, b) => a + b.amount, 0)), c: "text-slate-900" },
+          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(data.reduce((a, b) => a + b.paid, 0)), c: "text-emerald-600" },
+          { l: lang === "vi" ? "Còn lại" : "Outstanding", v: fmt(totalRemaining), c: "text-red-600" },
+        ].map(c => (
+          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
+            <div className="text-[10px] text-slate-400">{c.l}</div>
+            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-xs border-collapse min-w-[950px]">
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
+              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {data.map(r => (
+              <tr key={r.ref} className="border-b hover:bg-slate-50/60 cursor-pointer" style={{ borderColor: "var(--border)" }}>
+                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier}</td>
+                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
+                <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
+                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
+                <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
+                <td className="px-4 py-2.5 mono text-right font-bold text-red-600">{fmt(r.remaining)}</td>
+                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
+                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager count={data.length} total={data.length} label={lang === "vi" ? "khoản phải trả" : "payables"} />
+    </div>
+  )
 }
 
 // --- NEXT ---

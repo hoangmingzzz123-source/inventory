@@ -3,10 +3,10 @@ import { Plus, Search, Download, Printer, RefreshCw, CheckCircle, XCircle, MoreH
 import StatusBadge from "../components/StatusBadge"
 import { purchaseOrders as initPOs, suppliers, warehouses } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
-import { exportCsv, exportXlsx, ImportModal } from "./GenericList"
+import { exportCsv, exportXlsx, printTable, ImportModal } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchPurchaseOrders } from "../lib/dataService"
+import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder } from "../lib/dataService"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -43,10 +43,14 @@ export default function PurchaseOrders() {
   const taxAmt = items.reduce((acc, i) => acc + i.qty * i.price * (1 - i.discount / 100) * (i.tax / 100), 0)
   const grand = subtotal + taxAmt
 
-  const handleApprove = (po: typeof initPOs[0]) => {
-    setPOs(prev => prev.map(p => p.id === po.id ? { ...p, status: "Approved" } : p))
-    setShowDetail(null)
-    showToast(lang === "vi" ? `Đã duyệt ${po.id}` : `Approved ${po.id}`)
+  const handleApprove = async (po: typeof initPOs[0]) => {
+    const res = await upsertPurchaseOrder({ id: po.id, status: "Approved" } as any, { isDemo, orgId: profile?.org_id })
+    if (res && res.error) showToast(lang === "vi" ? `Lỗi khi duyệt ${po.id}` : `Approve failed ${po.id}`, false)
+    else {
+      const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data)
+      setShowDetail(null)
+      showToast(lang === "vi" ? `Đã duyệt ${po.id}` : `Approved ${po.id}`)
+    }
   }
 
   const statusOptions = [
@@ -73,14 +77,18 @@ export default function PurchaseOrders() {
         <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <CheckCircle size={13} className="text-emerald-500" /> {t("approve")}
         </button>
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        <button onClick={() => printTable(
+          "purchase-orders",
+          [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"],
+          filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]),
+        )} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Printer size={13} /> {t("print")}
         </button>
         <div className="relative group">
           <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={13} /> {t("export")}
           </button>
-          <div className="absolute top-full left-0 mt-1 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
+          <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
             <button onClick={() => exportCsv("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
             <button onClick={() => exportXlsx("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
           </div>
@@ -128,7 +136,7 @@ export default function PurchaseOrders() {
                     <button onClick={e => e.stopPropagation()} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100">
                       <MoreHorizontal size={14} />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); setPOs(prev => prev.filter(x => x.id !== po.id)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
+                    <button onClick={async (e) => { e.stopPropagation(); const res = await deletePurchaseOrder(po.id, { isDemo, orgId: profile?.org_id }); if (res && res.error) showToast(lang === "vi" ? "Lỗi khi xóa" : "Delete failed", false); else { const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data); } }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
                   </div>
                 </td>
               </tr>
@@ -155,22 +163,26 @@ export default function PurchaseOrders() {
               <h2 className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Tạo đơn mua hàng" : "Create Purchase Order"}</h2>
               <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
             </div>
-            <form onSubmit={e => {
+            <form onSubmit={async e => {
               e.preventDefault();
               const fd = new FormData(e.currentTarget);
               const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement;
               const isDraft = submitter.value === "draft";
-              setPOs([{
-                id: "PO-" + Math.floor(10000 + Math.random() * 90000),
+              const payload: any = {
                 supplier: fd.get(t("supplier") + " *") as string || "Unknown",
                 warehouse: fd.get(t("warehouse") + " *") as string || "Unknown",
                 status: isDraft ? "Draft" : "Pending Approval",
                 total: grand,
                 createdBy: "Current User",
                 date: new Date().toISOString().split("T")[0]
-              }, ...pos]);
-              setShowCreate(false);
-              showToast(isDraft ? (lang === "vi" ? "Đã lưu nháp" : "Saved as draft") : (lang === "vi" ? "Đã gửi duyệt thành công" : "Submitted for approval"));
+              }
+              const res = await upsertPurchaseOrder(payload, { isDemo, orgId: profile?.org_id })
+              if (res && res.error) showToast(lang === "vi" ? "Lỗi khi tạo PO" : "Create PO failed", false)
+              else {
+                const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data)
+                setShowCreate(false)
+                showToast(isDraft ? (lang === "vi" ? "Đã lưu nháp" : "Saved as draft") : (lang === "vi" ? "Đã gửi duyệt thành công" : "Submitted for approval"))
+              }
             }}>
             <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
               <div className="grid grid-cols-3 gap-3">

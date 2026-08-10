@@ -6,7 +6,7 @@ import { quotations as mockQuotations, importRecords, products, suppliers, custo
 import { exportCsv, exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchQuotations } from "../lib/dataService"
+import { fetchQuotations, upsertQuotation, deleteQuotation } from "../lib/dataService"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -444,28 +444,39 @@ export default function Quotations() {
     }
     alert(vi ? `Đã chuyển báo giá ${id} thành Phiếu nhập kho (Goods Receipt) thành công!` : `Quotation ${id} converted to Goods Receipt!`)
     setData(prev => prev.map(q => q.id === id ? { ...q, status: "converted" } : q))
+    // persist status
+    upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id }).then(() => fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) }))
   }
 
   const updateStatus = (id: string, st: string) => {
-    setData(prev => prev.map(q => q.id === id ? { ...q, status: st } : q))
+    // persist status change
+    upsertQuotation({ id, status: st } as any, { isDemo, orgId: profile?.org_id }).then(res => {
+      if (res && res.error) alert(vi ? "Lỗi" : "Error")
+      else fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
+    })
   }
 
   const handleSave = (form: any) => {
     const c = customers.find(c => c.code === form.customer_id)
     if (editingItem) {
-      setData(prev => prev.map(q => q.id === editingItem.id ? { ...q, ...form, customer_name: c?.name } : q))
-      setEditingItem(null)
-      alert(vi ? "Cập nhật thành công!" : "Updated successfully!")
+      upsertQuotation({ id: editingItem.id, ...form } as any, { isDemo, orgId: profile?.org_id }).then(res => {
+        if (res && res.error) alert(vi ? "Lỗi khi lưu" : "Save failed")
+        else {
+          setEditingItem(null)
+          fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
+          alert(vi ? "Cập nhật thành công!" : "Updated successfully!")
+        }
+      })
     } else {
-      const newQ = {
-        id: "QT-2026-" + Math.floor(Math.random() * 1000).toString().padStart(3, "0"),
-        ...form,
-        customer_name: c?.name,
-        status: "Draft"
-      }
-      setData([newQ, ...data])
-      setShowCreate(false)
-      alert(vi ? "Tạo báo giá thành công!" : "Quotation created!")
+      const payload: any = { ...form, status: "Draft" }
+      upsertQuotation(payload, { isDemo, orgId: profile?.org_id }).then(res => {
+        if (res && res.error) alert(vi ? "Lỗi khi tạo báo giá" : "Create failed")
+        else {
+          fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
+          setShowCreate(false)
+          alert(vi ? "Tạo báo giá thành công!" : "Quotation created!")
+        }
+      })
     }
   }
 

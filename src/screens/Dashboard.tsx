@@ -1,7 +1,11 @@
 import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package, ArrowRight } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
-import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities, quotations } from "../data/mockData"
+import { useState, useEffect } from "react"
+import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities, quotations as mockQuotations } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
+import { useDemo } from "../contexts/DemoContext"
+import { useAuth } from "../contexts/AuthContext"
+import { fetchQuotations } from "../lib/dataService"
 
 function fmt(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n)
@@ -22,6 +26,14 @@ const periodLabels = {
 export default function Dashboard() {
   const { t, lang } = useLang()
   const periods = periodLabels[lang]
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
+
+  const [quotationsData, setQuotationsData] = useState<any[]>(mockQuotations)
+
+  useEffect(() => {
+    fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setQuotationsData(res.data) })
+  }, [isDemo, profile])
 
   const kpiLabels = {
     vi: [
@@ -142,6 +154,38 @@ export default function Dashboard() {
                 <span className="font-semibold text-slate-800 mono">{d.value}%</span>
               </div>
             ))}
+          </div>
+        </div>
+        {/* Quotations status chart */}
+        <div className="lg:col-span-3 bg-white rounded-xl border p-4" style={{ borderColor: "var(--border)" }}>
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">{lang === 'vi' ? 'Báo giá' : 'Quotations'}</h2>
+              <p className="text-[11px] text-slate-400">{lang === 'vi' ? 'Phân bố theo trạng thái' : 'Distribution by status'}</p>
+            </div>
+          </div>
+          <div className="flex gap-4 items-center">
+            <div style={{ width: 240, height: 160 }}>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie dataKey="value" data={Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map(([k, v]) => ({ name: k, value: v }))} innerRadius={36} outerRadius={68} paddingAngle={3}>
+                    {Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map((entry, i) => (
+                      <Cell key={i} fill={["#2563eb", "#7c3aed", "#10b981", "#ef4444", "#f59e0b"][i % 5]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex-1">
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between text-sm px-2 py-1 border rounded" style={{ borderColor: 'var(--border)' }}>
+                    <span className="text-slate-700">{k}</span>
+                    <span className="font-semibold text-slate-900 mono">{String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>

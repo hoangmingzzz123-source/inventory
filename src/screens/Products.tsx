@@ -9,9 +9,9 @@ import StatusBadge from "../components/StatusBadge"
 import { products as initialProducts } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchProducts } from "../lib/dataService"
+import { fetchProducts, upsertProduct, deleteProduct } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
-import { exportCsv, exportXlsx } from "./GenericList"
+import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import * as XLSX from "xlsx"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
@@ -437,45 +437,54 @@ export default function Products() {
   const openEdit = (p: Product) => { setEditingProduct(p); setForm(productToForm(p)); setActionRow(null); setDetailProduct(null) }
   const closeForm = () => { setShowCreate(false); setEditingProduct(null) }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) { showToast(lang === "vi" ? "Vui lòng nhập tên sản phẩm" : "Please enter product name", false); return }
-    if (editingProduct) {
-      setProducts(prev => prev.map(p => p.id === editingProduct.id ? {
-        ...p, name: form.name, sku: form.sku || p.sku, barcode: form.barcode,
-        category: form.category || p.category, brand: form.brand || p.brand,
-        unit: form.unit || p.unit, cost: Number(form.purchasePrice) || p.cost,
-        price: Number(form.sellingPrice) || p.price, status: form.status,
-        updated: new Date().toISOString().slice(0, 10), updatedBy: "Nguyễn Văn A",
-      } : p))
-      closeForm()
-      showToast(lang === "vi" ? "Cập nhật sản phẩm thành công!" : "Product updated!")
+    const payload: any = {
+      name: form.name,
+      sku: form.sku || undefined,
+      barcode: form.barcode || undefined,
+      category: form.category || undefined,
+      brand: form.brand || undefined,
+      unit: form.unit || undefined,
+      cost: Number(form.purchasePrice) || 0,
+      price: Number(form.sellingPrice) || 0,
+      status: form.status,
+    }
+    if (editingProduct) payload.id = editingProduct.id
+    const res = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
+    if (res && res.error) {
+      showToast(lang === "vi" ? "Lỗi khi lưu" : "Save failed", false)
     } else {
-      const newId = `P${String(products.length + 1).padStart(3, "0")}`
-      setProducts(prev => [...prev, {
-        id: newId, sku: form.sku || `SKU-${newId}`, barcode: form.barcode || "",
-        name: form.name, category: form.category || "—", brand: form.brand || "—",
-        unit: form.unit || "Piece", cost: Number(form.purchasePrice) || 0,
-        price: Number(form.sellingPrice) || 0, qty: 0, status: form.status,
-        updated: new Date().toISOString().slice(0, 10), updatedBy: "Nguyễn Văn A",
-      }])
+      // refresh
+      const r = await fetchProducts({ isDemo, orgId: profile?.org_id })
+      if (r.data) setProducts(r.data as any[])
       closeForm()
-      showToast(lang === "vi" ? "Tạo sản phẩm thành công!" : "Product created!")
+      showToast(lang === "vi" ? (editingProduct ? "Cập nhật sản phẩm thành công!" : "Tạo sản phẩm thành công!") : (editingProduct ? "Product updated!" : "Product created!"))
     }
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return
-    setProducts(prev => prev.filter(p => p.id !== deleteTarget.id))
-    setDetailProduct(null)
-    setDeleteTarget(null)
-    showToast(lang === "vi" ? "Đã xóa sản phẩm" : "Product deleted")
+    const res = await deleteProduct(deleteTarget.id, { isDemo, orgId: profile?.org_id })
+    if (res && res.error) showToast(lang === "vi" ? "Lỗi khi xóa" : "Delete failed", false)
+    else {
+      const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+      setDetailProduct(null)
+      setDeleteTarget(null)
+      showToast(lang === "vi" ? "Đã xóa sản phẩm" : "Product deleted")
+    }
   }
 
-  const handleDuplicate = (p: Product) => {
-    const newId = `P${String(products.length + 1).padStart(3, "0")}`
-    setProducts(prev => [...prev, { ...p, id: newId, sku: `${p.sku}-COPY`, name: `${p.name} (Copy)`, qty: 0, updated: new Date().toISOString().slice(0, 10) }])
-    setActionRow(null)
-    showToast(lang === "vi" ? "Đã sao chép sản phẩm" : "Product duplicated")
+  const handleDuplicate = async (p: Product) => {
+    const { id, ...rest } = p as any
+    const payload = { ...rest, sku: `${p.sku}-COPY`, name: `${p.name} (Copy)`, qty: 0 }
+    const res = await upsertProduct(payload as any, { isDemo, orgId: profile?.org_id })
+    if (res && res.error) showToast(lang === "vi" ? "Lỗi khi sao chép" : "Duplicate failed", false)
+    else {
+      const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+      setActionRow(null)
+      showToast(lang === "vi" ? "Đã sao chép sản phẩm" : "Product duplicated")
+    }
   }
 
   const statusOptions = [
@@ -529,12 +538,16 @@ export default function Products() {
           <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={13} /> {t("export")}
           </button>
-          <div className="absolute top-full left-0 mt-1 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
+          <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
             <button onClick={() => exportCsv("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
             <button onClick={() => exportXlsx("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
           </div>
         </div>
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        <button onClick={() => printTable(
+          "products",
+          ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")],
+          filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]),
+        )} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Printer size={13} /> {t("print")}
         </button>
         <div className="flex-1" />
@@ -577,11 +590,16 @@ export default function Products() {
       </div>
 
       {/* Selection bar */}
-      {selected.length > 0 && (
+          {selected.length > 0 && (
         <div className="flex items-center gap-3 px-5 py-2 bg-blue-50 border-b text-xs" style={{ borderColor: "var(--border)" }}>
           <span className="text-blue-700 font-semibold">{selected.length} {t("selected")}</span>
           <button onClick={() => showToast(lang === "vi" ? "Đã lưu trữ" : "Archived")} className="text-blue-600 hover:underline">{t("archive")}</button>
-          <button onClick={() => { setProducts(prev => prev.filter(p => !selected.includes(p.id))); setSelected([]); showToast(lang === "vi" ? "Đã xóa" : "Deleted") }} className="text-red-600 hover:underline">{t("delete")}</button>
+          <button onClick={async () => {
+              for (const id of selected) { await deleteProduct(id, { isDemo, orgId: profile?.org_id }) }
+              const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+              setSelected([])
+              showToast(lang === "vi" ? "Đã xóa" : "Deleted")
+            }} className="text-red-600 hover:underline">{t("delete")}</button>
           <button onClick={() => setSelected([])} className="text-slate-500 hover:underline ml-auto">{t("clearSelection")}</button>
         </div>
       )}

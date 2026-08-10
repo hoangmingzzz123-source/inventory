@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useAuth } from "../contexts/AuthContext"
 import { supabase } from "../lib/supabase"
+import type { Database } from "../lib/database.types"
 import { useLang } from "../i18n/LangContext"
 
 export default function UserRoles() {
@@ -27,7 +28,7 @@ export default function UserRoles() {
   const changeRole = async (id: string, role: string) => {
     if (!profile) return
     setLoading(true)
-    const { error } = await supabase.from("profiles").update({ role }).eq("id", id).eq("org_id", profile.org_id)
+    const { error } = await (supabase as any).from("profiles").update({ role } as any).eq("id", id).eq("org_id", profile.org_id)
     setLoading(false)
     if (error) { showToast(lang === "vi" ? "Cập nhật vai trò thất bại" : "Failed to update role", false); return }
     setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u))
