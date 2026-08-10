@@ -66,19 +66,19 @@ export const inventoryBalance = [
 ]
 
 export const customers = [
-  { code: "C001", name: "FPT Telecom", phone: "024-3737-8888", email: "purchase@fpt.vn", taxCode: "0101248150", creditLimit: 1000000000, debt: 185000000, status: "Active" },
-  { code: "C002", name: "VNPT Group", phone: "024-3775-6666", email: "supply@vnpt.vn", taxCode: "0100686209", creditLimit: 2000000000, debt: 98500000, status: "Active" },
-  { code: "C003", name: "Viettel Store", phone: "024-3756-7891", email: "b2b@viettel.com.vn", taxCode: "0100489426", creditLimit: 5000000000, debt: 0, status: "Active" },
-  { code: "C004", name: "Nguyen Kim Corp", phone: "028-3920-8282", email: "mua.hang@nguyenkim.com.vn", taxCode: "0307258855", creditLimit: 500000000, debt: 43000000, status: "Active" },
-  { code: "C005", name: "Hoang Ha Mobile", phone: "024-3555-6666", email: "supply@hoanghamobile.com", taxCode: "0101234567", creditLimit: 300000000, debt: 0, status: "Inactive" },
+  { code: "C001", name: "FPT Telecom", phone: "024-3737-8888", email: "purchase@fpt.vn", tax_code: "0101248150", credit_limit: 1000000000, debt: 185000000, status: "Active" },
+  { code: "C002", name: "VNPT Group", phone: "024-3775-6666", email: "supply@vnpt.vn", tax_code: "0100686209", credit_limit: 2000000000, debt: 98500000, status: "Active" },
+  { code: "C003", name: "Viettel Store", phone: "024-3756-7891", email: "b2b@viettel.com.vn", tax_code: "0100489426", credit_limit: 5000000000, debt: 0, status: "Active" },
+  { code: "C004", name: "Nguyen Kim Corp", phone: "028-3920-8282", email: "mua.hang@nguyenkim.com.vn", tax_code: "0307258855", credit_limit: 500000000, debt: 43000000, status: "Active" },
+  { code: "C005", name: "Hoang Ha Mobile", phone: "024-3555-6666", email: "supply@hoanghamobile.com", tax_code: "0101234567", credit_limit: 300000000, debt: 0, status: "Inactive" },
 ]
 
 export const suppliers = [
-  { code: "S001", name: "Tech Distributor VN", phone: "024-3888-9999", email: "sales@techdist.vn", taxCode: "0101987654", debt: 185000000, status: "Active" },
-  { code: "S002", name: "Samsung Vietnam", phone: "028-3822-8228", email: "b2b@samsung.com.vn", taxCode: "0308523876", debt: 392000000, status: "Active" },
-  { code: "S003", name: "Dell EMC Vietnam", phone: "024-3562-8881", email: "vn_sales@dell.com", taxCode: "0101567890", debt: 0, status: "Active" },
-  { code: "S004", name: "Logitech APAC", phone: "+65-6391-8000", email: "apac@logitech.com", taxCode: "", debt: 84000000, status: "Active" },
-  { code: "S005", name: "Apple Vietnam", phone: "028-3827-2288", email: "vn-reseller@apple.com", taxCode: "0302686209", debt: 0, status: "Active" },
+  { code: "S001", name: "Tech Distributor VN", phone: "024-3888-9999", email: "sales@techdist.vn", tax_code: "0101987654", debt: 185000000, status: "Active" },
+  { code: "S002", name: "Samsung Vietnam", phone: "028-3822-8228", email: "b2b@samsung.com.vn", tax_code: "0308523876", debt: 392000000, status: "Active" },
+  { code: "S003", name: "Dell EMC Vietnam", phone: "024-3562-8881", email: "vn_sales@dell.com", tax_code: "0101567890", debt: 0, status: "Active" },
+  { code: "S004", name: "Logitech APAC", phone: "+65-6391-8000", email: "apac@logitech.com", tax_code: "", debt: 84000000, status: "Active" },
+  { code: "S005", name: "Apple Vietnam", phone: "028-3827-2288", email: "vn-reseller@apple.com", tax_code: "0302686209", debt: 0, status: "Active" },
 ]
 
 export const lowStockItems = [

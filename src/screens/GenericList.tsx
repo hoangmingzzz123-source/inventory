@@ -4,7 +4,7 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchCashBook, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
 import { importFromExcel } from "../lib/excelUtils"
@@ -429,7 +429,12 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
   const existingKeys = data.map((item: any) => item[importKeyField]).filter(Boolean).map(String);
 
   useEffect(() => {
-    const extractList = (key: string) => Array.from(new Set(data.map((item: any) => item[key]).filter(Boolean).map(String))).sort()
+    const extractList = (key: string): string[] => Array.from(new Set<string>(
+      data
+        .map((item: any) => item[key])
+        .filter((value: any) => value != null && value !== "")
+        .map((value: any) => String(value))
+    )).sort()
     const nextOptions: Record<string, string[]> = {
       customer: extractList("customer"),
       supplier: extractList("supplier"),
@@ -437,7 +442,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       category: extractList("category"),
       brand: extractList("brand"),
       unit: extractList("unit"),
-      status: Array.from(new Set([...getStatusOptions(lang), ...extractList("status")]))
+      status: Array.from(new Set<string>([...getStatusOptions(lang), ...extractList("status")]))
     }
     setRelatedOptions(nextOptions)
   }, [data, lang])
@@ -452,6 +457,11 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
       if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
       if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "categories") { const r = await fetchCategories({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "brands") { const r = await fetchBrands({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "units") { const r = await fetchUnits({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+      if (templateFile === "goodsreceipt") { const r = await fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))); return }
+      if (templateFile === "cashbook") { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))); return }
     }
     if (editingItem) setData(data.map((x: any) => x === editingItem ? newItem : x)); else setData([...data, newItem]);
   }
@@ -488,6 +498,18 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
           const res = await bulkUpsertWarehouses(toImport, ctx)
           if (res && res.error) failed.push({ reason: 'api_error' })
           else importedCount = toImport.length
+        } else if (templateFile === 'categories') {
+          const res = await bulkUpsertCategories(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
+        } else if (templateFile === 'brands') {
+          const res = await bulkUpsertBrands(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
+        } else if (templateFile === 'units') {
+          const res = await bulkUpsertUnits(toImport, ctx)
+          if (res && res.error) failed.push({ reason: 'api_error' })
+          else importedCount = toImport.length
         } else {
           // fallback to per-record upsert
           for (const item of toImport) {
@@ -508,6 +530,11 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       if (templateFile === 'customers') { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
       else if (templateFile === 'suppliers') { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
       else if (templateFile === 'warehouses') { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'categories') { const r = await fetchCategories({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'brands') { const r = await fetchBrands({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'units') { const r = await fetchUnits({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
+      else if (templateFile === 'goodsreceipt') { const r = await fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))) }
+      else if (templateFile === 'cashbook') { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))) }
     }
 
     alert(lang === 'vi'
@@ -522,6 +549,11 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
     if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "categories") { const r = await fetchCategories({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "brands") { const r = await fetchBrands({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "units") { const r = await fetchUnits({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
+    if (templateFile === "goodsreceipt") { const r = await fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))); return }
+    if (templateFile === "cashbook") { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))); return }
     setData(data.filter((x: any) => x !== item))
   }
   
@@ -632,6 +664,29 @@ async function handleUpsertFor(templateFile: string, item: any, isDemo: boolean,
       return await upsertSupplier(item, ctx)
     case "warehouses":
       return await upsertWarehouse(item, ctx)
+    case "categories":
+      return await upsertCategory(item, ctx)
+    case "brands":
+      return await upsertBrand(item, ctx)
+    case "units":
+      return await upsertUnit(item, ctx)
+    case "goodsreceipt":
+      return await upsertGoodsReceipt({
+        ...item,
+        ref: item.doc_no || item.ref,
+        po_ref: item.po_no,
+        supplier_name: item.supplier,
+        warehouse_name: item.warehouse,
+        status: item.status,
+      }, ctx)
+    case "cashbook":
+      return await upsertCashBook({
+        ...item,
+        ref: item.doc_no || item.ref,
+        type: item.type,
+        amount: item.amount,
+        balance: item.balance,
+      }, ctx)
     default:
       return { error: null }
   }
@@ -647,6 +702,16 @@ async function handleDeleteFor(templateFile: string, id: string, isDemo: boolean
       return await deleteSupplier(id, ctx)
     case "warehouses":
       return await deleteWarehouse(id, ctx)
+    case "categories":
+      return await deleteCategory(id, ctx)
+    case "brands":
+      return await deleteBrand(id, ctx)
+    case "units":
+      return await deleteUnit(id, ctx)
+    case "goodsreceipt":
+      return await deleteGoodsReceipt(id, ctx)
+    case "cashbook":
+      return await deleteCashBook(id, ctx)
     default:
       return { error: null }
   }
@@ -664,15 +729,15 @@ export function Customers() {
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "phone", label: "Điện thoại" },
-    { key: "email", label: "Email" }, { key: "taxCode", label: "MST" }, { key: "creditLimit", label: "Hạn mức TD", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "credit_limit", label: "Hạn mức TD", format: fmt },
     { key: "debt", label: "Công nợ", format: fmt }, { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Customer Name" }, { key: "phone", label: "Phone" },
-    { key: "email", label: "Email" }, { key: "taxCode", label: "Tax Code" }, { key: "creditLimit", label: "Credit Limit", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "credit_limit", label: "Credit Limit", format: fmt },
     { key: "debt", label: "Debt", format: fmt }, { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "taxCode", "creditLimit", "debt", "status"]} templateFile="customers" />;
+  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "credit_limit", "debt", "status"]} templateFile="customers" />;
 }
 
 // --- Suppliers ---
@@ -688,15 +753,15 @@ export function Suppliers() {
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã NCC" }, { key: "name", label: "Tên nhà cung cấp" }, { key: "phone", label: "Điện thoại" },
-    { key: "email", label: "Email" }, { key: "taxCode", label: "MST" }, { key: "debt", label: "Công nợ", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "debt", label: "Công nợ", format: fmt },
     { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Supplier Name" }, { key: "phone", label: "Phone" },
-    { key: "email", label: "Email" }, { key: "taxCode", label: "Tax Code" }, { key: "debt", label: "Debt", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "debt", label: "Debt", format: fmt },
     { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "nhà cung cấp" : "supplier"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "taxCode", "debt", "status"]} templateFile="suppliers" />;
+  return <GenericCrudList title={lang === "vi" ? "nhà cung cấp" : "supplier"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "debt", "status"]} templateFile="suppliers" />;
 }
 
 // --- Warehouses ---
@@ -712,13 +777,13 @@ export function Warehouses() {
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã kho" }, { key: "name", label: "Tên kho" }, { key: "location", label: "Địa điểm" },
-    { key: "manager", label: "Thủ kho" }, { key: "capacity", label: "Sức chứa" }, { key: "status", label: "Trạng thái", isStatus: true }
+    { key: "manager", label: "Thủ kho" }, { key: "stock_value", label: "Giá trị tồn kho", format: fmt }, { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Warehouse Name" }, { key: "location", label: "Location" },
-    { key: "manager", label: "Manager" }, { key: "capacity", label: "Capacity" }, { key: "status", label: "Status", isStatus: true }
+    { key: "manager", label: "Manager" }, { key: "stock_value", label: "Stock Value", format: fmt }, { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "kho" : "warehouse"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "location", "manager", "capacity", "status"]} templateFile="warehouses" />;
+  return <GenericCrudList title={lang === "vi" ? "kho" : "warehouse"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "location", "manager", "stock_value", "status"]} templateFile="warehouses" />;
 }
 
 // --- Sales Orders ---
@@ -736,13 +801,18 @@ export function SalesOrders() {
 // --- NEXT ---
 export function StockBalance() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ product: "Sample product", sku: "Sample sku", warehouse: "Sample warehouse", qty: "Sample qty", status: "Sample status" }]);
+  const [data, setData] = useState<any[]>([{ warehouse: "HN-Warehouse-01", product: "Dell Latitude 5540 i5", sku: "LP-DELL-001", available: 12, reserved: 3, incoming: 5, outgoing: 2, avgCost: 18500000, value: 222000000 }]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchInventoryBalance({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) })
+  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
-    { key: "product", label: "PRODUCT", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "product", label: "Sản phẩm", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "Kho", isStatus: false }, { key: "available", label: "Tồn khả dụng", isStatus: false, format: fmt }, { key: "reserved", label: "Đã đặt", isStatus: false, format: fmt }, { key: "incoming", label: "Nhập tới", isStatus: false, format: fmt }, { key: "outgoing", label: "Xuất ra", isStatus: false, format: fmt }, { key: "avgCost", label: "Giá vốn TB", isStatus: false, format: fmt }, { key: "value", label: "Giá trị", isStatus: false, format: fmt }
   ] : [
-    { key: "product", label: "PRODUCT", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "product", label: "Product", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "Warehouse", isStatus: false }, { key: "available", label: "Available", isStatus: false, format: fmt }, { key: "reserved", label: "Reserved", isStatus: false, format: fmt }, { key: "incoming", label: "Incoming", isStatus: false, format: fmt }, { key: "outgoing", label: "Outgoing", isStatus: false, format: fmt }, { key: "avgCost", label: "Avg Cost", isStatus: false, format: fmt }, { key: "value", label: "Value", isStatus: false, format: fmt }
   ];
-  return <GenericCrudList title={lang === "vi" ? "tồn kho" : "stock balance"} data={data} setData={setData} columns={columns} templateCols={["product","sku","warehouse","qty","status"]} templateFile="stockbalance" />;
+  return <GenericCrudList title={lang === "vi" ? "tồn kho" : "stock balance"} data={data} setData={setData} columns={columns} templateCols={["product","sku","warehouse","available","reserved","incoming","outgoing","avgCost","value"]} templateFile="stockbalance" />;
 }
 
 // --- NEXT ---
@@ -2257,6 +2327,11 @@ export function Units() {
 export function GoodsReceipt() {
   const { lang } = useLang();
   const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", po_no: "Sample po_no", warehouse: "Sample warehouse", status: "Sample status" }]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))) })
+  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
@@ -2447,6 +2522,11 @@ export function Payables() {
 export function CashBook() {
   const { lang } = useLang();
   const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", type: "Sample type", amount: "Sample amount", balance: "Sample balance" }]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  useEffect(() => {
+    fetchCashBook({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))) })
+  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
   ] : [

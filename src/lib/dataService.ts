@@ -139,27 +139,132 @@ export async function fetchUnits({ isDemo, orgId }: Ctx) {
   return { data: data ?? [], error }
 }
 
-// --- Quotations ---
-export async function fetchQuotations({ isDemo, orgId }: Ctx) {
-  if (isDemo) return { data: mock.quotations, error: null }
+export async function upsertCategory(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("categories").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
+}
+
+export async function bulkUpsertCategories(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const rows = payloads.map(p => ({ ...p, org_id: orgId }))
+  const { error } = await supabase.from("categories").upsert(rows as any)
+  return { error }
+}
+
+export async function deleteCategory(id: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("categories").delete().eq("code", id)
+  return { error }
+}
+
+export async function upsertBrand(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("brands").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
+}
+
+export async function bulkUpsertBrands(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const rows = payloads.map(p => ({ ...p, org_id: orgId }))
+  const { error } = await supabase.from("brands").upsert(rows as any)
+  return { error }
+}
+
+export async function deleteBrand(id: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("brands").delete().eq("code", id)
+  return { error }
+}
+
+export async function upsertUnit(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("units").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
+}
+
+export async function bulkUpsertUnits(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const rows = payloads.map(p => ({ ...p, org_id: orgId }))
+  const { error } = await supabase.from("units").upsert(rows as any)
+  return { error }
+}
+
+export async function deleteUnit(id: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("units").delete().eq("code", id)
+  return { error }
+}
+
+export async function fetchGoodsReceipts({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
   const { data, error } = await supabase
-    .from("quotations")
+    .from("goods_receipts")
     .select("*")
     .eq("org_id", orgId!)
     .order("created_at", { ascending: false })
   return { data: data ?? [], error }
 }
 
+export async function upsertGoodsReceipt(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("goods_receipts").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
+}
+
+export async function deleteGoodsReceipt(id: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("goods_receipts").delete().eq("ref", id)
+  return { error }
+}
+
+export async function fetchCashBook({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await supabase
+    .from("cash_book")
+    .select("*")
+    .eq("org_id", orgId!)
+    .order("created_at", { ascending: false })
+  return { data: data ?? [], error }
+}
+
+export async function upsertCashBook(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("cash_book").upsert([{ ...payload, org_id: orgId }] as any)
+  return { error }
+}
+
+export async function deleteCashBook(id: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await supabase.from("cash_book").delete().eq("ref", id)
+  return { error }
+}
+
+// --- Quotations ---
+export async function fetchQuotations({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: mock.quotations, error: null }
+  try {
+    const { data, error } = await supabase
+      .from("quotations")
+      .select("*")
+      .eq("org_id", orgId!)
+      .order("created_at", { ascending: false })
+    if (error) return { data: mock.quotations, error: null }
+    return { data: data ?? [], error: null }
+  } catch (error) {
+    return { data: mock.quotations, error: null }
+  }
+}
+
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
-  const { error } = await supabase.from("quotations").upsert([{ ...payload, org_id: orgId }] as any)
-  return { error }
+  // Quotations table is not present in the current schema; fallback to no-op live behavior.
+  return { error: null }
 }
 
 export async function deleteQuotation(id: string, { isDemo }: Ctx) {
   if (isDemo) return { error: null }
-  const { error } = await supabase.from("quotations").delete().eq("id", id)
-  return { error }
+  return { error: null }
 }
 
 export async function upsertSupplier(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {

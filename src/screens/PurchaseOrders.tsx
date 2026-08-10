@@ -21,9 +21,17 @@ export default function PurchaseOrders() {
   const { isDemo } = useDemo()
   const { profile } = useAuth()
 
-  
-    useEffect(() => {
-      fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setPOs(res.data) }) }, [isDemo, profile])
+  const normalizePOs = (rows: any[]) => rows.map((r: any) => ({
+    ...r,
+    createdBy: r.createdBy ?? r.created_by ?? r.created_by ?? "",
+    supplier: r.supplier_name ?? r.supplier,
+    warehouse: r.warehouse_name ?? r.warehouse,
+    ref: r.ref ?? r.id,
+  }))
+
+  useEffect(() => {
+    fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setPOs(normalizePOs(res.data)) })
+  }, [isDemo, profile])
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState("all")
   const [showCreate, setShowCreate] = useState(false)
@@ -36,7 +44,7 @@ export default function PurchaseOrders() {
 
   const filtered = pos.filter(p =>
     (filterStatus === "all" || p.status === filterStatus) &&
-    (search === "" || p.id.toLowerCase().includes(search.toLowerCase()) || p.supplier.toLowerCase().includes(search.toLowerCase()))
+    (search === "" || p.ref?.toLowerCase().includes(search.toLowerCase()) || p.supplier.toLowerCase().includes(search.toLowerCase()))
   )
 
   const subtotal = items.reduce((acc, i) => acc + i.qty * i.price * (1 - i.discount / 100), 0)
@@ -89,8 +97,8 @@ export default function PurchaseOrders() {
             <Download size={13} /> {t("export")}
           </button>
           <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
-            <button onClick={() => exportCsv("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
-            <button onClick={() => exportXlsx("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
+            <button onClick={() => exportCsv("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.ref, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
+            <button onClick={() => exportXlsx("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.ref, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
           </div>
         </div>
         <div className="flex-1" />
