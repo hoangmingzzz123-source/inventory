@@ -17,10 +17,15 @@ export default function UserRoles() {
     async function load() {
       if (!profile) return
       setLoading(true)
-      const { data, error } = await supabase.from("profiles").select("id, email, full_name, role").eq("org_id", profile.org_id)
+      const { data: userData, error: userErr } = await supabase.from("profiles").select("id, email, full_name, role").eq("org_id", profile.org_id)
+      if (userErr) {
+        setLoading(false)
+        return showToast(lang === "vi" ? "Không tải được người dùng" : "Unable to load users", false)
+      }
+
+      const safeUserData = (userData ?? []).map((u: any) => ({ ...u, role: u.role ?? "user" }))
+      setUsers(safeUserData)
       setLoading(false)
-      if (error) return showToast(lang === "vi" ? "Không tải được người dùng" : "Unable to load users", false)
-      setUsers(data ?? [])
     }
     load()
   }, [profile, lang])

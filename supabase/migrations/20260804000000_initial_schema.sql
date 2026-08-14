@@ -21,6 +21,26 @@ create table if not exists profiles (
   created_at  timestamptz default now()
 );
 
+create table if not exists roles (
+  id          uuid primary key default uuid_generate_v4(),
+  org_id      uuid not null references organizations(id) on delete cascade,
+  code        text not null,
+  name_vi     text not null,
+  name_en     text not null,
+  is_system   boolean not null default false,
+  description text,
+  created_at  timestamptz default now(),
+  unique (org_id, code)
+);
+
+create table if not exists role_permissions (
+  role_id     uuid not null references roles(id) on delete cascade,
+  module      text not null,
+  action      text not null,
+  allowed     boolean not null default true,
+  primary key (role_id, module, action)
+);
+
 -- Auto-create profile on signup via trigger
 create or replace function handle_new_user()
 returns trigger language plpgsql security definer set search_path = public, pg_catalog as $$
@@ -151,6 +171,43 @@ create table if not exists suppliers (
   unique (org_id, code)
 );
 
+-- ─── Quotations ─────────────────────────────────────────────
+create table if not exists quotations (
+  id             uuid primary key default uuid_generate_v4(),
+  org_id         uuid not null references organizations(id) on delete cascade,
+  customer_id    uuid references customers(id),
+  customer_name  text not null,
+  date           date not null default current_date,
+  valid_until    date,
+  status         text not null default 'Draft',
+  discount_val   numeric(18,0) not null default 0,
+  discount_type  text not null default 'pct',
+  notes          text,
+  total          numeric(18,0) not null default 0,
+  created_by     text,
+  created_at     timestamptz default now(),
+  updated_at     timestamptz default now(),
+  unique (org_id, id)
+);
+
+create table if not exists quotation_items (
+  id             uuid primary key default uuid_generate_v4(),
+  quotation_id   uuid not null references quotations(id) on delete cascade,
+  product_id     uuid references products(id),
+  product_name   text not null,
+  supplier_id    uuid references suppliers(id),
+  supplier_name  text,
+  import_unit    text,
+  sell_unit      text,
+  qty            numeric(18,2) not null default 1,
+  cost_price     numeric(18,0) not null default 0,
+  profit_pct     numeric(18,2) not null default 0,
+  selling_price  numeric(18,0) not null default 0,
+  vat_pct        numeric(18,2) not null default 0,
+  total          numeric(18,0) not null default 0,
+  created_at     timestamptz default now()
+);
+
 -- ─── Purchase Orders ─────────────────────────────────────────
 create table if not exists purchase_orders (
   id             uuid primary key default uuid_generate_v4(),
@@ -266,6 +323,8 @@ create table if not exists cash_book (
 -- ─── Row Level Security ──────────────────────────────────────
 alter table organizations       enable row level security;
 alter table profiles            enable row level security;
+alter table roles              enable row level security;
+alter table role_permissions   enable row level security;
 alter table products            enable row level security;
 alter table categories          enable row level security;
 alter table brands              enable row level security;
@@ -274,6 +333,7 @@ alter table warehouses          enable row level security;
 alter table customers           enable row level security;
 alter table suppliers           enable row level security;
 alter table quotations          enable row level security;
+alter table quotation_items     enable row level security;
 alter table purchase_orders     enable row level security;
 alter table purchase_order_items enable row level security;
 alter table goods_receipts      enable row level security;
@@ -289,6 +349,8 @@ returns uuid language sql security definer stable as $$
 $$;
 
 -- RLS Policies — users can only access their org's data
+create policy "org_isolation" on roles          using (org_id = get_org_id());
+create policy "org_isolation" on role_permissions using (role_id in (select id from roles where org_id = get_org_id()));
 create policy "org_isolation" on products       using (org_id = get_org_id());
 create policy "org_isolation" on categories     using (org_id = get_org_id());
 create policy "org_isolation" on brands         using (org_id = get_org_id());
@@ -297,6 +359,7 @@ create policy "org_isolation" on warehouses     using (org_id = get_org_id());
 create policy "org_isolation" on customers      using (org_id = get_org_id());
 create policy "org_isolation" on suppliers      using (org_id = get_org_id());
 create policy "org_isolation" on quotations     using (org_id = get_org_id());
+create policy "org_isolation" on quotation_items using (quotation_id in (select id from quotations where org_id = get_org_id()));
 create policy "org_isolation" on purchase_orders using (org_id = get_org_id());
 create policy "org_isolation" on goods_receipts  using (org_id = get_org_id());
 create policy "org_isolation" on sales_orders   using (org_id = get_org_id());
@@ -317,8 +380,8 @@ create policy "org_members_read" on organizations
 
 -- Full CRUD policies (using same helper) — insert/update/delete
 do $$ begin
-  for tbl in select unnest(array['products','categories','brands','units','warehouses',
-    'customers','suppliers','quotations','purchase_orders','goods_receipts','sales_orders',
+  for tbl in select unnest(array['roles','role_permissions','products','categories','brands','units','warehouses',
+    'customers','suppliers','quotations','quotation_items','purchase_orders','goods_receipts','sales_orders',
     'inventory_balance','invoices','cash_book']) as t loop
     execute format(
       'create policy "org_insert_%1$s" on %1$s for insert with check (org_id = get_org_id())',

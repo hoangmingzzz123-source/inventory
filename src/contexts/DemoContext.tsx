@@ -5,11 +5,11 @@ interface DemoCtx {
   setDemo: (v: boolean) => void
 }
 
-const Ctx = createContext<DemoCtx>({ isDemo: true, setDemo: () => {} })
+const Ctx = createContext<DemoCtx>({ isDemo: false, setDemo: () => {} })
 
 export function DemoProvider({ children }: { children: ReactNode }) {
-  // Default: demo mode ON (no real data until user logs in with a live org)
-  const [isDemo, setDemo] = useState(true)
+  // Default to live mode so real Supabase data is used unless the app explicitly switches to demo.
+  const [isDemo, setDemo] = useState(false)
   return <Ctx.Provider value={{ isDemo, setDemo }}>{children}</Ctx.Provider>
 }
 

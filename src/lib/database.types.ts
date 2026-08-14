@@ -8,6 +8,16 @@ export interface Database {
         Insert: { id: string; email: string; full_name?: string | null; role?: string; org_id?: string }
         Update: { full_name?: string | null; role?: string }
       }
+      roles: {
+        Row: { id: string; org_id: string; code: string; name_vi: string; name_en: string; is_system: boolean; description: string | null; created_at: string }
+        Insert: Omit<Database["public"]["Tables"]["roles"]["Row"], "id" | "created_at"> & { id?: string }
+        Update: Partial<Database["public"]["Tables"]["roles"]["Insert"]>
+      }
+      role_permissions: {
+        Row: { role_id: string; module: string; action: string; allowed: boolean }
+        Insert: Database["public"]["Tables"]["role_permissions"]["Row"]
+        Update: Partial<Database["public"]["Tables"]["role_permissions"]["Row"]>
+      }
       organizations: {
         Row: { id: string; name: string; created_at: string }
         Insert: { name: string }
@@ -47,6 +57,16 @@ export interface Database {
         Row: { id: string; org_id: string; code: string; name: string; phone: string | null; email: string | null; tax_code: string | null; address: string | null; payment_terms: number; debt: number; status: string; created_at: string }
         Insert: Omit<Database["public"]["Tables"]["suppliers"]["Row"], "id" | "created_at"> & { id?: string }
         Update: Partial<Database["public"]["Tables"]["suppliers"]["Insert"]>
+      }
+      quotations: {
+        Row: { id: string; org_id: string; customer_id: string | null; customer_name: string; date: string; valid_until: string | null; status: string; discount_val: number; discount_type: string; notes: string | null; total: number; created_by: string | null; created_at: string; updated_at: string }
+        Insert: Omit<Database["public"]["Tables"]["quotations"]["Row"], "id" | "created_at" | "updated_at"> & { id?: string }
+        Update: Partial<Database["public"]["Tables"]["quotations"]["Insert"]>
+      }
+      quotation_items: {
+        Row: { id: string; quotation_id: string; product_id: string | null; product_name: string; supplier_id: string | null; supplier_name: string | null; import_unit: string | null; sell_unit: string | null; qty: number; cost_price: number; profit_pct: number; selling_price: number; vat_pct: number; total: number; created_at: string }
+        Insert: Omit<Database["public"]["Tables"]["quotation_items"]["Row"], "id" | "created_at"> & { id?: string }
+        Update: Partial<Database["public"]["Tables"]["quotation_items"]["Insert"]>
       }
       purchase_orders: {
         Row: { id: string; org_id: string; ref: string; supplier_id: string | null; supplier_name: string; warehouse_id: string | null; warehouse_name: string; status: string; total: number; notes: string | null; created_by: string | null; created_at: string; updated_at: string }

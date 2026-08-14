@@ -7,15 +7,32 @@ import * as mock from "../data/mockData"
 
 type Ctx = { isDemo: boolean; orgId?: string }
 
+function isSchemaMissingError(error: any) {
+  const msg = String(error?.message ?? "")
+  return msg.includes("Could not find the table") || msg.includes("Could not find the column") || msg.includes("schema cache")
+}
+
+async function safeSelect(table: string, columns = "*", configure?: (query: any) => any) {
+  try {
+    let query = supabase.from(table).select(columns)
+    if (configure) query = configure(query) ?? query
+    const { data, error } = await query
+    if (error) {
+      if (isSchemaMissingError(error)) return { data: [], error: null }
+      return { data: [], error }
+    }
+    return { data: data ?? [], error: null }
+  } catch (error: any) {
+    if (isSchemaMissingError(error)) return { data: [], error: null }
+    return { data: [], error }
+  }
+}
+
 // ─── Products ────────────────────────────────────────────────
 export async function fetchProducts({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.products, error: null }
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("updated_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("products", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -33,12 +50,8 @@ export async function deleteProduct(id: string, { isDemo }: Ctx) {
 // ─── Customers ───────────────────────────────────────────────
 export async function fetchCustomers({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.customers, error: null }
-  const { data, error } = await supabase
-    .from("customers")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("customers", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function upsertCustomer(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -63,33 +76,27 @@ export async function deleteCustomer(id: string, { isDemo }: Ctx) {
 // ─── Suppliers ───────────────────────────────────────────────
 export async function fetchSuppliers({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.suppliers, error: null }
-  const { data, error } = await supabase
-    .from("suppliers")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("suppliers", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 // ─── Warehouses ──────────────────────────────────────────────
 export async function fetchWarehouses({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.warehouses, error: null }
-  const { data, error } = await supabase
-    .from("warehouses")
-    .select("*")
-    .eq("org_id", orgId!)
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("warehouses", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 // ─── Purchase Orders ─────────────────────────────────────────
 export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.purchaseOrders, error: null }
-  const { data, error } = await supabase
-    .from("purchase_orders")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("purchase_orders", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: (data as any[] ?? []).map((row: any) => ({
+    ...row,
+    createdBy: row.created_by ?? row.createdBy ?? "",
+    supplier: row.supplier_name ?? row.supplier ?? "",
+    warehouse: row.warehouse_name ?? row.warehouse ?? "",
+  })), error }
 }
 
 export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -101,42 +108,34 @@ export async function upsertPurchaseOrder(payload: Record<string, unknown>, { is
 // ─── Sales Orders ────────────────────────────────────────────
 export async function fetchSalesOrders({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.salesOrders, error: null }
-  const { data, error } = await supabase
-    .from("sales_orders")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("sales_orders", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 // ─── Inventory Balance ───────────────────────────────────────
 export async function fetchInventoryBalance({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.inventoryBalance, error: null }
-  const { data, error } = await supabase
-    .from("inventory_balance")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("product_name")
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("inventory_balance", "*", query => orgId ? query.eq("org_id", orgId).order("product_name") : query)
+  return { data: data as any[] ?? [], error }
 }
 
 // ─── Categories, Brands, Units ──────────────────────────────
 export async function fetchCategories({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.categories, error: null }
-  const { data, error } = await supabase.from("categories").select("*").eq("org_id", orgId!)
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("categories", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function fetchBrands({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.brands, error: null }
-  const { data, error } = await supabase.from("brands").select("*").eq("org_id", orgId!)
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("brands", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function fetchUnits({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.units, error: null }
-  const { data, error } = await supabase.from("units").select("*").eq("org_id", orgId!)
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("units", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function upsertCategory(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -198,12 +197,8 @@ export async function deleteUnit(id: string, { isDemo }: Ctx) {
 
 export async function fetchGoodsReceipts({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: [], error: null }
-  const { data, error } = await supabase
-    .from("goods_receipts")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("goods_receipts", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function upsertGoodsReceipt(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -220,12 +215,8 @@ export async function deleteGoodsReceipt(id: string, { isDemo }: Ctx) {
 
 export async function fetchCashBook({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: [], error: null }
-  const { data, error } = await supabase
-    .from("cash_book")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("created_at", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("cash_book", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 export async function upsertCashBook(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -243,12 +234,19 @@ export async function deleteCashBook(id: string, { isDemo }: Ctx) {
 // --- Quotations ---
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.quotations, error: null }
-  const { data, error } = await supabase
-    .from("quotations")
-    .select("*")
-    .eq("org_id", orgId!)
-    .order("date", { ascending: false })
-  return { data: data ?? [], error }
+  const { data, error } = await safeSelect("quotations", "*", [() => (orgId ? (this.query as any).eq("org_id", orgId).order("date", { ascending: false }) : this.query)])
+  return {
+    data: (data as any[] ?? []).map((row: any) => ({
+      ...row,
+      customer_name: row.customer_name ?? row.customer ?? "",
+      customer_id: row.customer_id ?? row.customerId ?? "",
+      valid_until: row.valid_until ?? row.validUntil ?? "",
+      discount_val: row.discount_val ?? row.discount ?? 0,
+      total: Number(row.total ?? 0),
+      status: row.status ?? "Draft",
+    })),
+    error,
+  }
 }
 
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
