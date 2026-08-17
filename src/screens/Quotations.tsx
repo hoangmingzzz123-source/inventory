@@ -394,12 +394,45 @@ export default function Quotations() {
   const { lang, t } = useLang()
   const vi = lang === "vi"
   const [data, setData] = useState<any[]>(mockQuotations)
+  const [productOptions, setProductOptions] = useState<Array<{value: string, label: string}>>([])
+  const [supplierOptions, setSupplierOptions] = useState<Array<{value: string, label: string}>>([])
+  const [customerOptions, setCustomerOptions] = useState<Array<{value: string, label: string}>>([])
   const { isDemo } = useDemo()
   const { profile } = useAuth()
 
   useEffect(() => {
-    fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => {
-      if (res.data) setData(res.data)
+    Promise.all([
+      fetchQuotations({ isDemo, orgId: profile?.org_id }),
+      fetchProducts({ isDemo, orgId: profile?.org_id }),
+      fetchSuppliers({ isDemo, orgId: profile?.org_id }),
+      fetchCustomers({ isDemo, orgId: profile?.org_id })
+    ]).then(([quotRes, prodRes, suppRes, custRes]) => {
+      // Load quotations
+      if (quotRes.data) setData(quotRes.data)
+      
+      // Map products to options
+      if (prodRes.data) {
+        setProductOptions(prodRes.data.map((p: any) => ({
+          value: p.id,
+          label: `${p.name} (${p.sku})`
+        })))
+      }
+      
+      // Map suppliers to options
+      if (suppRes.data) {
+        setSupplierOptions(suppRes.data.map((s: any) => ({
+          value: s.id,
+          label: s.name
+        })))
+      }
+      
+      // Map customers to options
+      if (custRes.data) {
+        setCustomerOptions(custRes.data.map((c: any) => ({
+          value: c.id,
+          label: c.name
+        })))
+      }
     })
   }, [isDemo, profile])
   
