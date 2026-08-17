@@ -9,7 +9,7 @@ import StatusBadge from "../components/StatusBadge"
 import { products as initialProducts } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchProducts, upsertProduct, deleteProduct } from "../lib/dataService"
+import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBrands, fetchUnits } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import * as XLSX from "xlsx"
@@ -122,13 +122,13 @@ type Product = typeof initialProducts[0]
 type FormState = {
   name: string; sku: string; barcode: string; category: string; brand: string
   unit: string; purchasePrice: string; sellingPrice: string; tax: string
-  minStock: string; maxStock: string; description: string; status: string
+  qty: string; minStock: string; maxStock: string; description: string; status: string
   trackInventory: boolean; trackSerial: boolean; trackBatch: boolean; allowNegative: boolean
 }
 
 const emptyForm: FormState = {
   name: "", sku: "", barcode: "", category: "", brand: "", unit: "",
-  purchasePrice: "", sellingPrice: "", tax: "", minStock: "", maxStock: "",
+  purchasePrice: "", sellingPrice: "", tax: "", qty: "0", minStock: "", maxStock: "",
   description: "", status: "Active",
   trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
 }
@@ -137,22 +137,27 @@ function productToForm(p: Product): FormState {
   return {
     name: p.name, sku: p.sku, barcode: p.barcode, category: p.category,
     brand: p.brand, unit: p.unit, purchasePrice: String(p.cost),
-    sellingPrice: String(p.price), tax: "", minStock: "", maxStock: "",
+    sellingPrice: String(p.price), tax: "", qty: String(p.qty ?? 0), minStock: "", maxStock: "",
     description: "", status: p.status,
     trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
   }
 }
+
+type MasterOption = { value: string; label: string }
 
 // ---- Top-level ProductFormModal (stable reference, receives all state via props) ----
 interface ProductFormModalProps {
   editingProduct: Product | null
   form: FormState
   setForm: React.Dispatch<React.SetStateAction<FormState>>
+  categoryOptions: MasterOption[]
+  brandOptions: MasterOption[]
+  unitOptions: MasterOption[]
   onSave: () => void
   onClose: () => void
 }
 
-function ProductFormModal({ editingProduct, form, setForm, onSave, onClose }: ProductFormModalProps) {
+function ProductFormModal({ editingProduct, form, setForm, categoryOptions, brandOptions, unitOptions, onSave, onClose }: ProductFormModalProps) {
   const { t, lang } = useLang()
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -195,17 +200,17 @@ function ProductFormModal({ editingProduct, form, setForm, onSave, onClose }: Pr
                 </div>
               ))}
               {([
-                [t("category"), "category", ["Laptop", "Phone", "Monitor", "Keyboard", "Storage", "Memory", "Network", "Security", "Power"]],
-                [t("brand"), "brand", ["Dell", "Samsung", "Apple", "LG", "Logitech", "WD", "Kingston", "TP-Link", "APC"]],
-                [t("unit"), "unit", ["Cái", "Hộp", "Bộ", "Kg", "Mét", "Piece", "Set"]],
-                [t("status"), "status", ["Active", "Draft", "Inactive"]],
-              ] as [string, string, string[]][]).map(([label, key, opts]) => (
+                [t("category"), "category", categoryOptions],
+                [t("brand"), "brand", brandOptions],
+                [t("unit"), "unit", unitOptions],
+                [t("status"), "status", [{ value: "Active", label: lang === "vi" ? "Hoạt động" : "Active" }, { value: "Draft", label: lang === "vi" ? "Nháp" : "Draft" }, { value: "Inactive", label: lang === "vi" ? "Ngừng" : "Inactive" }]],
+              ] as [string, string, MasterOption[]][]).map(([label, key, opts]) => (
                 <div key={key}>
                   <label className="block text-[11px] font-medium text-slate-600 mb-1">{label}</label>
                   <select value={(form as any)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                     className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
                     <option value="">{lang === "vi" ? "Chọn..." : "Select..."}</option>
-                    {opts.map(o => <option key={o}>{o}</option>)}
+                    {opts.map(o => <option key={o.value || o.label} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
               ))}
@@ -236,6 +241,7 @@ function ProductFormModal({ editingProduct, form, setForm, onSave, onClose }: Pr
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">{t("inventorySettings")}</h3>
             <div className="grid grid-cols-2 gap-3 mb-3">
               {([
+                [t("qty") || (lang === "vi" ? "Tồn kho" : "Quantity"), "qty"],
                 [t("minStock"), "minStock"],
                 [t("maxStock"), "maxStock"],
               ] as [string, string][]).map(([label, key]) => (
@@ -377,10 +383,25 @@ export default function Products() {
   const [products, setProducts] = useState<any[]>(initialProducts)
   const { isDemo } = useDemo()
   const { profile } = useAuth()
+  const [categoryOptions, setCategoryOptions] = useState<MasterOption[]>([])
+  const [brandOptions, setBrandOptions] = useState<MasterOption[]>([])
+  const [unitOptions, setUnitOptions] = useState<MasterOption[]>([])
 
   useEffect(() => {
     fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => {
       if (res.data) setProducts(res.data)
+    })
+  }, [isDemo, profile])
+
+  useEffect(() => {
+    Promise.all([
+      fetchCategories({ isDemo, orgId: profile?.org_id }),
+      fetchBrands({ isDemo, orgId: profile?.org_id }),
+      fetchUnits({ isDemo, orgId: profile?.org_id }),
+    ]).then(([catRes, brandRes, unitRes]) => {
+      setCategoryOptions((catRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
+      setBrandOptions((brandRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
+      setUnitOptions((unitRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
     })
   }, [isDemo, profile])
   const [search, setSearch] = useState("")
@@ -448,7 +469,9 @@ export default function Products() {
       unit: form.unit || undefined,
       cost: Number(form.purchasePrice) || 0,
       price: Number(form.sellingPrice) || 0,
+      qty: Number(form.qty) || 0,
       status: form.status,
+      updated_by: profile?.full_name || profile?.email || "system",
     }
     if (editingProduct) payload.id = editingProduct.id
     const res = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
@@ -778,6 +801,9 @@ export default function Products() {
           editingProduct={editingProduct}
           form={form}
           setForm={setForm}
+          categoryOptions={categoryOptions}
+          brandOptions={brandOptions}
+          unitOptions={unitOptions}
           onSave={handleSave}
           onClose={closeForm}
         />

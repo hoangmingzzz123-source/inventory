@@ -5,9 +5,10 @@ import {
   ClipboardList, FileText, Receipt, CreditCard, UserCog,
   KeyRound, ScrollText, Building2, BookOpen,
 } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useAuth } from "../contexts/AuthContext"
 import { useLang } from "../i18n/LangContext"
+import { fetchRolePermissions, fetchRoles } from "../lib/dataService"
 
 type NavChild = { id: string; labelKey: string; icon: React.ReactNode }
 type NavItem = { id: string; labelKey: string; icon: React.ReactNode; children?: NavChild[] }
@@ -82,6 +83,98 @@ interface SidebarProps {
 
 export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps) {
   const { t, lang } = useLang()
+  const { profile } = useAuth()
+  const role = String(profile?.role ?? "staff").toLowerCase()
+  const [permissionMap, setPermissionMap] = useState<Record<string, boolean>>({})
+
+  const screenToModule: Record<string, string> = {
+    dashboard: "Dashboard",
+    products: "Master Data",
+    categories: "Master Data",
+    brands: "Master Data",
+    units: "Master Data",
+    warehouses: "Master Data",
+    customers: "Master Data",
+    suppliers: "Master Data",
+    "stock-balance": "Inventory",
+    "stock-ledger": "Inventory",
+    adjustment: "Inventory",
+    transfer: "Inventory",
+    "purchase-orders": "Purchase",
+    "goods-receipt": "Purchase",
+    "purchase-return": "Purchase",
+    "supplier-payment": "Purchase",
+    quotations: "Sales",
+    "sales-orders": "Sales",
+    delivery: "Sales",
+    invoices: "Sales",
+    "customer-receipt": "Sales",
+    receivable: "Finance",
+    payable: "Finance",
+    cashbook: "Finance",
+    reports: "Reports",
+    users: "Administration",
+    roles: "Administration",
+    "audit-logs": "Administration",
+    settings: "Dashboard",
+    notifications: "Dashboard",
+  }
+  const defaultAllowedByRole: Record<string, string[]> = {
+    admin: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
+    manager: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+    staff: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+  }
+
+  useEffect(() => {
+    if (!profile || !profile.org_id) {
+      setPermissionMap({})
+      return
+    }
+
+    let active = true
+    Promise.all([
+      fetchRoles({ isDemo: false, orgId: profile.org_id }),
+      fetchRolePermissions({ isDemo: false, orgId: profile.org_id }),
+    ]).then(([rolesRes, permsRes]) => {
+      if (!active) return
+      const roles = rolesRes.data ?? []
+      const currentRole = roles.find((row: any) => String(row.code ?? row.name ?? "").toLowerCase() === role || String(row.name ?? row.name_vi ?? row.name_en ?? "").toLowerCase() === role)
+      const roleId = currentRole?.id
+      if (!roleId) {
+        setPermissionMap({})
+        return
+      }
+      const map: Record<string, boolean> = {}
+      for (const row of permsRes.data ?? []) {
+        if (String(row.role_id) !== String(roleId)) continue
+        if (row.allowed) map[`${row.module}:view`] = true
+      }
+      setPermissionMap(map)
+    })
+
+    return () => { active = false }
+  }, [profile, role])
+
+  const canAccess = (screen: string) => {
+    if (!profile) return true
+    if (role === "admin") return true
+
+    const module = screenToModule[screen]
+    if (!module) return false
+
+    const permissionKey = `${module}:view`
+    if (Object.keys(permissionMap).length > 0) {
+      return Boolean(permissionMap[permissionKey])
+    }
+
+    return defaultAllowedByRole[role]?.includes(screen) ?? false
+  }
+
+  const navItemsFiltered = navItems.filter(item => {
+    if (!item.children) return canAccess(item.id)
+    const visibleChildren = item.children.filter(child => canAccess(child.id))
+    return visibleChildren.length > 0
+  })
 
   // Auto-expand parent of active child
   const getInitialExpanded = () => {
@@ -121,8 +214,9 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
 
       {/* Nav */}
       <nav className="flex-1 py-2 overflow-y-auto overflow-x-hidden">
-        {navItems.map(item => {
+        {navItemsFiltered.map(item => {
           const hasChildren = !!item.children
+          const visibleChildren = item.children?.filter(child => canAccess(child.id)) ?? []
           const isExpanded = expanded[item.id]
           const childActive = isChildActive(item)
           const selfActive = active === item.id
@@ -155,7 +249,7 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
 
               {hasChildren && isExpanded && !collapsed && (
                 <div className="ml-5 mt-0.5 mb-1 border-l pl-2.5" style={{ borderColor: "#e2e8f0" }}>
-                  {item.children!.map(child => (
+                  {visibleChildren.map(child => (
                     <button
                       key={child.id}
                       onClick={() => onNavigate(child.id)}

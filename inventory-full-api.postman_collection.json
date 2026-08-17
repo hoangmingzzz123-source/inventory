@@ -1,0 +1,904 @@
+{
+  "info": {
+    "_postman_id": "f3d2644a-3e36-4d37-bd90-8f9ea4afdd88",
+    "name": "Inventory Full API - Supabase + App",
+    "description": "Collection test cho hệ thống inventory. Bao gồm auth, profiles, master data, quotations, purchase orders, dashboard/report endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "GET custom health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/make-server-554d0bf3/health",
+              "protocol": "https",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "make-server-554d0bf3",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Sign Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{anonKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"data\": {\n    \"full_name\": \"{{fullName}}\",\n    \"org_name\": \"{{orgName}}\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/signup",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "signup"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sign In with Email/Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "apikey", "value": "{{anonKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/token?grant_type=password",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "token"
+              ],
+              "query": [
+                { "key": "grant_type", "value": "password" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "apikey", "value": "{{anonKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organizations & Profiles",
+      "item": [
+        {
+          "name": "GET organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/organizations?select=*",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "organizations"
+              ],
+              "query": [
+                { "key": "select", "value": "*" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET profiles by org",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/profiles?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "profiles"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH own profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"{{fullName}}\",\n  \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/profiles?id=eq.{{profileId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "profiles"
+              ],
+              "query": [
+                { "key": "id", "value": "eq.{{profileId}}" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Roles & Permissions",
+      "item": [
+        {
+          "name": "GET roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/roles?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "roles"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST role",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"org_id\": \"{{orgId}}\",\n  \"code\": \"manager\",\n  \"name_vi\": \"Quản lý\",\n  \"name_en\": \"Manager\",\n  \"is_system\": false,\n  \"description\": \"Department manager\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/roles",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "roles"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET role permissions",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/role_permissions?select=*",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "role_permissions"
+              ],
+              "query": [
+                { "key": "select", "value": "*" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Master Data",
+      "item": [
+        {
+          "name": "Products - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/products?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "products"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Products - POST",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"org_id\": \"{{orgId}}\",\n  \"sku\": \"SKU-1001\",\n  \"barcode\": \"8901234567890\",\n  \"name\": \"Laptop Dell XPS 13\",\n  \"category\": \"Laptop\",\n  \"brand\": \"Dell\",\n  \"unit\": \"PCS\",\n  \"cost\": 20000000,\n  \"price\": 26000000,\n  \"qty\": 10,\n  \"status\": \"Active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/products",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "products"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Products - PATCH",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 27500000,\n  \"status\": \"Active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/products?id=eq.{{productId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "products"
+              ],
+              "query": [
+                { "key": "id", "value": "eq.{{productId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Products - DELETE",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/products?id=eq.{{productId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "products"
+              ],
+              "query": [
+                { "key": "id", "value": "eq.{{productId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Categories - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/categories?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "categories"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Customers - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/customers?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "customers"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Customers - POST",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"org_id\": \"{{orgId}}\",\n  \"code\": \"CUST-1001\",\n  \"name\": \"Customer Demo\",\n  \"phone\": \"0901000001\",\n  \"email\": \"demo@customer.vn\",\n  \"tax_code\": \"0100000001\",\n  \"address\": \"HCMC\",\n  \"credit_limit\": 500000000,\n  \"debt\": 0,\n  \"status\": \"Active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/customers",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "customers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Suppliers - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/suppliers?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "suppliers"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Warehouses - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/warehouses?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "warehouses"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Units - GET",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/units?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "units"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Quotations & POs",
+      "item": [
+        {
+          "name": "GET quotations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/quotations?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "quotations"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST quotation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"org_id\": \"{{orgId}}\",\n  \"customer_id\": \"{{customerId}}\",\n  \"customer_name\": \"Customer Demo\",\n  \"date\": \"2026-08-17\",\n  \"valid_until\": \"2026-08-31\",\n  \"status\": \"Draft\",\n  \"discount_val\": 0,\n  \"discount_type\": \"pct\",\n  \"notes\": \"Create from Postman\",\n  \"total\": 26000000,\n  \"created_by\": \"{{profileId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/quotations",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "quotations"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET quotation items",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/quotation_items?select=*&quotation_id=eq.{{quotationId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "quotation_items"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "quotation_id", "value": "eq.{{quotationId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET purchase_orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/purchase_orders?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "purchase_orders"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST purchase_order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"org_id\": \"{{orgId}}\",\n  \"ref\": \"PO-1001\",\n  \"supplier_id\": \"{{supplierId}}\",\n  \"supplier_name\": \"Supplier Demo\",\n  \"warehouse_id\": \"{{warehouseId}}\",\n  \"warehouse_name\": \"Warehouse Demo\",\n  \"status\": \"Draft\",\n  \"total\": 20000000,\n  \"notes\": \"Purchase order from Postman\",\n  \"created_by\": \"{{profileId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/purchase_orders",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "purchase_orders"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports & Dashboard",
+      "item": [
+        {
+          "name": "GET inventory_balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/inventory_balance?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "inventory_balance"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET sales_orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/sales_orders?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "sales_orders"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET goods_receipts",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/goods_receipts?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "goods_receipts"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET cash_book",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{anonKey}}" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rest/v1/cash_book?select=*&org_id=eq.{{orgId}}",
+              "protocol": "https",
+              "host": [
+                "{{projectId}}",
+                "supabase",
+                "co"
+              ],
+              "path": [
+                "rest",
+                "v1",
+                "cash_book"
+              ],
+              "query": [
+                { "key": "select", "value": "*" },
+                { "key": "org_id", "value": "eq.{{orgId}}" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "projectId", "value": "jvyclpseixkqojcdxujp" },
+    { "key": "baseUrl", "value": "https://jvyclpseixkqojcdxujp.supabase.co" },
+    { "key": "anonKey", "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2eWNscHNlaXhrcW9qY2R4dWpwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MzQwNDUsImV4cCI6MjEwMTQxMDA0NX0.1A_N39G2afD1BpjI48R8cZoeYsKnsQo4NN1UCp3UGxA" },
+    { "key": "accessToken", "value": "PASTE_YOUR_SESSION_ACCESS_TOKEN" },
+    { "key": "orgId", "value": "PASTE_ORG_UUID" },
+    { "key": "profileId", "value": "PASTE_PROFILE_UUID" },
+    { "key": "productId", "value": "PASTE_PRODUCT_UUID" },
+    { "key": "customerId", "value": "PASTE_CUSTOMER_UUID" },
+    { "key": "supplierId", "value": "PASTE_SUPPLIER_UUID" },
+    { "key": "warehouseId", "value": "PASTE_WAREHOUSE_UUID" },
+    { "key": "quotationId", "value": "PASTE_QUOTATION_UUID" },
+    { "key": "email", "value": "admin@example.com" },
+    { "key": "password", "value": "Password123!" },
+    { "key": "fullName", "value": "Admin User" },
+    { "key": "orgName", "value": "Demo Company" }
+  ]
+}

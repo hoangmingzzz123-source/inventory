@@ -155,6 +155,42 @@ CREATE POLICY "org_delete_quotation_items" ON quotation_items FOR DELETE
     SELECT id FROM quotations WHERE org_id = (SELECT org_id FROM profiles WHERE id = auth.uid())
   ));
 
+-- Step 12: Normalize remaining tables to the live schema
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS name_vi text;
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS name_en text;
+UPDATE categories SET name_vi = COALESCE(name_vi, name), name_en = COALESCE(name_en, name) WHERE name_vi IS NULL OR name_en IS NULL;
+ALTER TABLE categories ALTER COLUMN name_vi SET DEFAULT '';
+ALTER TABLE categories ALTER COLUMN name_en SET DEFAULT '';
+
+ALTER TABLE units ADD COLUMN IF NOT EXISTS name_vi text;
+ALTER TABLE units ADD COLUMN IF NOT EXISTS name_en text;
+UPDATE units SET name_vi = COALESCE(name_vi, name), name_en = COALESCE(name_en, name) WHERE name_vi IS NULL OR name_en IS NULL;
+ALTER TABLE units ALTER COLUMN name_vi SET DEFAULT '';
+ALTER TABLE units ALTER COLUMN name_en SET DEFAULT '';
+
+ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS address text;
+UPDATE warehouses SET address = COALESCE(address, location) WHERE address IS NULL AND location IS NOT NULL;
+
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS credit_limit numeric(18,0) DEFAULT 0;
+UPDATE customers SET credit_limit = COALESCE(credit_limit, creditLimit) WHERE credit_limit IS NULL AND creditLimit IS NOT NULL;
+
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS tax_code text;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms integer DEFAULT 30;
+
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS name_vi text;
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS name_en text;
+UPDATE roles SET name_vi = COALESCE(name_vi, name), name_en = COALESCE(name_en, name) WHERE name_vi IS NULL OR name_en IS NULL;
+
+-- Step 13: Ensure every functional table keeps org_id filter and basic column guards
+CREATE INDEX IF NOT EXISTS idx_roles_org_id ON roles(org_id);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_role_id ON role_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_categories_org_id ON categories(org_id);
+CREATE INDEX IF NOT EXISTS idx_brands_org_id ON brands(org_id);
+CREATE INDEX IF NOT EXISTS idx_units_org_id ON units(org_id);
+CREATE INDEX IF NOT EXISTS idx_warehouses_org_id ON warehouses(org_id);
+CREATE INDEX IF NOT EXISTS idx_customers_org_id ON customers(org_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_org_id ON suppliers(org_id);
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- ✅ DONE! All tables and policies have been created/updated.
--- ═══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════════════

@@ -6,11 +6,11 @@ import { quotations as mockQuotations, importRecords, products, suppliers, custo
 import { exportCsv, exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchQuotations, upsertQuotation, deleteQuotation } from "../lib/dataService"
+import { fetchQuotations, upsertQuotation, deleteQuotation, fetchProducts, fetchSuppliers, fetchCustomers, upsertGoodsReceipt } from "../lib/dataService"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
-function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void }) {
+function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], supplierOptions = [], customerOptions = [] }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: Array<{value: string, label: string}>, supplierOptions?: Array<{value: string, label: string}>, customerOptions?: Array<{value: string, label: string}> }) {
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
   const [date, setDate] = useState(initialData?.date || new Date().toISOString().split("T")[0])
   const [validUntil, setValidUntil] = useState(initialData?.valid_until || "")
@@ -50,22 +50,21 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
 
   const handleProductChange = (rowId: number, productId: string) => {
     if (isView) return;
-    const prod = products.find(p => p.id === productId)
+    const prod = productOptions.find(p => p.value === productId)
     if (!prod) return;
     
-    const records = importRecords.filter(r => r.product_id === productId).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    const latest = records.length > 0 ? records[0] : null
+    // Default values - could fetch from inventory history later
+    const cost = 0
+    const profit = 20
+    const sell = cost * (1 + profit/100)
+    const unit = "Piece"
     
     setItems(prev => prev.map(i => {
       if (i.id === rowId) {
-        const cost = latest ? latest.cost_price : 0
-        const profit = 20
-        const sell = cost * (1 + profit/100)
-        const unit = prod.unit || latest?.unit || "Piece"
         return {
           ...i,
           product_id: productId,
-          supplier_id: latest ? latest.supplier_id : "",
+          supplier_id: "",
           import_unit: unit,
           sell_unit: unit,
           cost_price: cost,
@@ -153,7 +152,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Khách hàng *" : "Customer *"}</label>
                 <select disabled={isView} value={customerId} onChange={e => setCustomerId(e.target.value)} className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-white disabled:bg-slate-50" style={{ borderColor: "var(--border)" }}>
                   <option value="">-- {vi ? "Chọn khách hàng" : "Select customer"} --</option>
-                  {customers.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  {customerOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
               <div>
@@ -196,13 +195,13 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                       <td className="py-2 px-3">
                         <select disabled={isView} value={it.product_id ?? ""} onChange={e => handleProductChange(it.id, e.target.value)} className="w-full h-8 px-1 text-xs rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }}>
                           <option value="">-- {vi ? "Chọn" : "Select"} --</option>
-                          {products.map(p => <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>)}
+                          {productOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                         </select>
                       </td>
                       <td className="py-2 px-3">
                         <select disabled={isView} value={it.supplier_id ?? ""} onChange={e => handleUpdateItem(it.id, 'supplier_id', e.target.value)} className="w-full h-8 px-1 text-xs rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }}>
                           <option value="">-- {vi ? "Chọn" : "Select"} --</option>
-                          {suppliers.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+                          {supplierOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                         </select>
                       </td>
                       <td className="py-2 px-3">
@@ -418,34 +417,47 @@ export default function Quotations() {
     exportXlsx("Quotations", heads, rows)
   }
 
-  const convertToGoodsReceipt = (id: string) => {
+  const convertToGoodsReceipt = async (id: string) => {
     const q = data.find(x => x.id === id)
-    if (q && q.items) {
-      const newRecords = q.items.map((item: any, idx: number) => {
-        const prod = products.find(p => p.id === item.product_id)
-        const supp = suppliers.find(s => s.code === item.supplier_id)
-        return {
-          id: "IMP-" + Date.now() + idx,
-          receipt_id: "GR-" + Date.now().toString().slice(-4) + idx,
+    if (!q || !q.items) return
+    
+    try {
+      // Create goods receipt record for each item
+      for (let idx = 0; idx < q.items.length; idx++) {
+        const item = q.items[idx]
+        const prodOpt = productOptions.find(p => p.value === item.product_id)
+        const suppOpt = supplierOptions.find(s => s.value === item.supplier_id)
+        
+        const grPayload = {
+          receipt_id: `GR-${Date.now()}-${idx}`,
           product_id: item.product_id,
-          product_name: prod ? prod.name : "",
+          product_name: prodOpt?.label || item.product_name || "",
           supplier_id: item.supplier_id,
-          supplier_name: supp ? supp.name : "",
-          cost_price: item.cost_price,
+          supplier_name: suppOpt?.label || "",
+          cost_price: Number(item.cost_price) || 0,
           unit: item.import_unit || "Piece",
-          quantity: item.qty,
+          qty: Number(item.qty) || 0,
           date: new Date().toISOString().split("T")[0],
           quotation_id: id,
           customer_id: q.customer_id,
-          customer_name: q.customer_name
+          customer_name: q.customer_name,
+          status: "received"
         }
-      })
-      importRecords.unshift(...newRecords)
+        await upsertGoodsReceipt(grPayload, { isDemo, orgId: profile?.org_id })
+      }
+      
+      // Update quotation status
+      await upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id })
+      
+      // Refresh data
+      const res = await fetchQuotations({ isDemo, orgId: profile?.org_id })
+      if (res.data) setData(res.data)
+      
+      alert(vi ? `Đã chuyển báo giá ${id} thành Phiếu nhập kho (Goods Receipt) thành công!` : `Quotation ${id} converted to Goods Receipt successfully!`)
+    } catch (error) {
+      console.error("Error converting quotation:", error)
+      alert(vi ? "Lỗi khi chuyển báo giá" : "Error converting quotation")
     }
-    alert(vi ? `Đã chuyển báo giá ${id} thành Phiếu nhập kho (Goods Receipt) thành công!` : `Quotation ${id} converted to Goods Receipt!`)
-    setData(prev => prev.map(q => q.id === id ? { ...q, status: "converted" } : q))
-    // persist status
-    upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id }).then(() => fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) }))
   }
 
   const updateStatus = (id: string, st: string) => {
@@ -599,9 +611,9 @@ export default function Quotations() {
         </div>
       </div>
 
-      {showCreate && <QuotationForm onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} />}
-      {editingItem && <QuotationForm onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} />}
-      {viewingItem && <QuotationForm onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} />}
+      {showCreate && <QuotationForm onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} />}
+      {editingItem && <QuotationForm onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} />}
+      {viewingItem && <QuotationForm onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} />}
     </div>
   )
 }
