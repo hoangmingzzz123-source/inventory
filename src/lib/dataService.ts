@@ -501,9 +501,19 @@ export async function deleteCashBook(id: string, { isDemo }: Ctx) {
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.quotations, error: null }
   const { data, error } = await safeSelect("quotations", "*", query => orgId ? query.eq("org_id", orgId).order("date", { ascending: false }) : query)
+  const quotationRows = data as any[] ?? []
+  const quotationIds = quotationRows.map(row => row.id).filter(Boolean)
+  const itemsResult = quotationIds.length
+    ? await safeSelect("quotation_items", "*", query => query.in("quotation_id", quotationIds))
+    : { data: [], error: null }
+  const itemsByQuotation = (itemsResult.data as any[] ?? []).reduce((groups, item) => {
+    ;(groups[item.quotation_id] ??= []).push(item)
+    return groups
+  }, {} as Record<string, any[]>)
   return {
-    data: (data as any[] ?? []).map((row: any) => ({
+    data: quotationRows.map((row: any) => ({
       ...row,
+      items: itemsByQuotation[row.id] ?? [],
       customer_name: row.customer_name ?? row.customer ?? "",
       customer_id: row.customer_id ?? row.customerId ?? "",
       valid_until: row.valid_until ?? row.validUntil ?? "",
@@ -517,9 +527,42 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
 
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
-  const row = { ...payload, org_id: orgId }
-  const { error } = await supabase.from("quotations").upsert([row] as any)
-  return { error }
+  const hasItems = Object.prototype.hasOwnProperty.call(payload, "items")
+  const { items, ...quotationPayload } = payload as Record<string, any>
+  const row = { ...quotationPayload, org_id: orgId }
+  const quotationQuery = supabase.from("quotations")
+  const quotationResult = row.id
+    ? await quotationQuery.update(row).eq("id", row.id).eq("org_id", orgId)
+    : await quotationQuery.insert([row]).select("id").single()
+  if (quotationResult.error) return { error: quotationResult.error }
+
+  const quotationId = row.id ?? quotationResult.data?.id
+  if (hasItems && quotationId) {
+    const { error: deleteItemsError } = await supabase.from("quotation_items").delete().eq("quotation_id", quotationId)
+    if (deleteItemsError) return { error: deleteItemsError }
+
+    const itemRows = (Array.isArray(items) ? items : []).map((item: Record<string, any>) => ({
+      quotation_id: quotationId,
+      product_id: item.product_id ?? null,
+      product_name: item.product_name ?? item.productName ?? "",
+      supplier_id: item.supplier_id ?? null,
+      supplier_name: item.supplier_name ?? item.supplierName ?? null,
+      import_unit: item.import_unit ?? null,
+      sell_unit: item.sell_unit ?? null,
+      qty: item.qty ?? 1,
+      cost_price: item.cost_price ?? 0,
+      profit_pct: item.profit_pct ?? 0,
+      selling_price: item.selling_price ?? 0,
+      vat_pct: item.vat_pct ?? 0,
+      total: item.total ?? 0,
+    }))
+    if (itemRows.length) {
+      const { error: insertItemsError } = await supabase.from("quotation_items").insert(itemRows as any)
+      if (insertItemsError) return { error: insertItemsError }
+    }
+  }
+
+  return { error: null }
 }
 
 export async function deleteQuotation(id: string, { isDemo }: Ctx) {
