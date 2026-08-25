@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Plus, Search, FileSpreadsheet, Download, ChevronLeft, ChevronRight, Check, X, FileText, Upload, Save, Printer, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
+import { Plus, Search, FileSpreadsheet, Download, ChevronLeft, ChevronRight, Check, X, FileText, Save, Printer, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { useLang } from "../i18n/LangContext"
 import { quotations as mockQuotations, importRecords, products, suppliers } from "../data/mockData"
@@ -458,29 +458,23 @@ export default function Quotations() {
       // Create goods receipt record for each item
       for (let idx = 0; idx < q.items.length; idx++) {
         const item = q.items[idx]
-        const prodOpt = productOptions.find(p => p.value === item.product_id)
         const suppOpt = supplierOptions.find(s => s.value === item.supplier_id)
         
         const grPayload = {
-          receipt_id: `GR-${Date.now()}-${idx}`,
-          product_id: item.product_id,
-          product_name: prodOpt?.label || item.product_name || "",
-          supplier_id: item.supplier_id,
-          supplier_name: suppOpt?.label || "",
-          cost_price: Number(item.cost_price) || 0,
-          unit: item.import_unit || "Piece",
-          qty: Number(item.qty) || 0,
-          date: new Date().toISOString().split("T")[0],
-          quotation_id: id,
-          customer_id: q.customer_id,
-          customer_name: q.customer_name,
+          ref: `GR-${id}-${idx + 1}`,
+          po_ref: id,
+          supplier_name: suppOpt?.label || item.supplier_name || "Unknown Supplier",
+          warehouse_name: vi ? "Chưa xác định" : "Unassigned",
+          items: 1,
           status: "received"
         }
-        await upsertGoodsReceipt(grPayload, { isDemo, orgId: profile?.org_id })
+        const receiptResult = await upsertGoodsReceipt(grPayload, { isDemo, orgId: profile?.org_id })
+        if (receiptResult.error) throw receiptResult.error
       }
       
       // Update quotation status
-      await upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id })
+      const quotationResult = await upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id })
+      if (quotationResult.error) throw quotationResult.error
       
       // Refresh data
       const res = await fetchQuotations({ isDemo, orgId: profile?.org_id })
@@ -597,7 +591,7 @@ export default function Quotations() {
                     )}
                     {q.status.toLowerCase() === "sent" && (
                       <>
-                        <button onClick={() => updateStatus(q.id, "Accepted")} title={vi ? "Chấp thuận" : "Accept"} className="w-7 h-7 flex items-center justify-center rounded border text-emerald-600 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}>
+                        <button onClick={() => convertToGoodsReceipt(q.id)} title={vi ? "Chấp thuận và tạo phiếu nhập kho" : "Accept and create goods receipt"} className="w-7 h-7 flex items-center justify-center rounded border text-emerald-600 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}>
                           <Check size={14} />
                         </button>
                         <button onClick={() => updateStatus(q.id, "Rejected")} title={vi ? "Từ chối" : "Reject"} className="w-7 h-7 flex items-center justify-center rounded border text-red-600 hover:bg-red-50" style={{ borderColor: "var(--border)" }}>
@@ -606,8 +600,8 @@ export default function Quotations() {
                       </>
                     )}
                     {q.status.toLowerCase() === "accepted" && (
-                      <button onClick={() => convertToGoodsReceipt(q.id)} title={vi ? "Tạo phiếu nhập kho" : "Create PO/Receipt"} className="w-7 h-7 flex items-center justify-center rounded border bg-emerald-50 text-emerald-700 hover:bg-emerald-100" style={{ borderColor: "var(--border)" }}>
-                        <Upload size={14} />
+                      <button onClick={() => convertToGoodsReceipt(q.id)} title={vi ? "Tạo phiếu nhập kho" : "Create goods receipt"} className="w-7 h-7 flex items-center justify-center rounded border bg-emerald-50 text-emerald-700 hover:bg-emerald-100" style={{ borderColor: "var(--border)" }}>
+                        <Check size={14} />
                       </button>
                     )}
                     <button onClick={() => setViewingItem(q)} className="w-7 h-7 flex items-center justify-center rounded border text-slate-400 hover:text-slate-600 hover:bg-white" style={{ borderColor: "var(--border)" }} title={vi ? "Xem chi tiết" : "View Details"}>
