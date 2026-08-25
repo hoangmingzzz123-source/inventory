@@ -528,8 +528,21 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
   const hasItems = Object.prototype.hasOwnProperty.call(payload, "items")
-  const { items, ...quotationPayload } = payload as Record<string, any>
-  const row = { ...quotationPayload, org_id: orgId }
+  const source = payload as Record<string, any>
+  const row = {
+    ...(source.id ? { id: source.id } : {}),
+    ...(source.customer_id !== undefined ? { customer_id: source.customer_id } : {}),
+    ...(source.customer_name !== undefined ? { customer_name: source.customer_name } : {}),
+    ...(source.date !== undefined ? { date: source.date } : {}),
+    ...(source.valid_until !== undefined ? { valid_until: source.valid_until } : {}),
+    ...(source.status !== undefined ? { status: source.status } : {}),
+    ...(source.discount_val !== undefined ? { discount_val: source.discount_val } : {}),
+    ...(source.discount_type !== undefined ? { discount_type: source.discount_type } : {}),
+    ...(source.notes !== undefined ? { notes: source.notes } : {}),
+    ...(source.total !== undefined ? { total: source.total } : {}),
+    ...(source.created_by !== undefined ? { created_by: source.created_by } : {}),
+    org_id: orgId,
+  }
   const quotationQuery = supabase.from("quotations")
   const quotationResult = row.id
     ? await quotationQuery.update(row).eq("id", row.id).eq("org_id", orgId)
@@ -541,7 +554,7 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     const { error: deleteItemsError } = await supabase.from("quotation_items").delete().eq("quotation_id", quotationId)
     if (deleteItemsError) return { error: deleteItemsError }
 
-    const itemRows = (Array.isArray(items) ? items : []).map((item: Record<string, any>) => ({
+    const itemRows = (Array.isArray(source.items) ? source.items : []).map((item: Record<string, any>) => ({
       quotation_id: quotationId,
       product_id: item.product_id ?? null,
       product_name: item.product_name ?? item.productName ?? "",
