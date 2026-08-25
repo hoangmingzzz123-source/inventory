@@ -532,7 +532,11 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
   const row = {
     ...(source.id ? { id: source.id } : {}),
     ...(source.customer_id !== undefined ? { customer_id: source.customer_id } : {}),
-    ...(source.customer_name !== undefined ? { customer_name: source.customer_name } : {}),
+    ...(source.customer_name !== undefined
+      ? { customer_name: source.customer_name ?? "" }
+      : !source.id
+        ? { customer_name: source.customer ?? source.customerName ?? "" }
+        : {}),
     ...(source.date !== undefined ? { date: source.date } : {}),
     ...(source.valid_until !== undefined ? { valid_until: source.valid_until } : {}),
     ...(source.status !== undefined ? { status: source.status } : {}),

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Plus, Search, FileSpreadsheet, Download, ChevronLeft, ChevronRight, Check, X, FileText, Upload, Save, Printer, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { useLang } from "../i18n/LangContext"
-import { quotations as mockQuotations, importRecords, products, suppliers, customers } from "../data/mockData"
+import { quotations as mockQuotations, importRecords, products, suppliers } from "../data/mockData"
 import { exportCsv, exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
@@ -502,9 +502,10 @@ export default function Quotations() {
   }
 
   const handleSave = (form: any) => {
-    const c = customers.find(c => c.code === form.customer_id)
+    const customerName = customerOptions.find(c => c.value === form.customer_id)?.label || ""
+    const normalizedForm = { ...form, customer_name: customerName }
     if (editingItem) {
-      upsertQuotation({ id: editingItem.id, ...form } as any, { isDemo, orgId: profile?.org_id }).then(res => {
+      upsertQuotation({ id: editingItem.id, ...normalizedForm } as any, { isDemo, orgId: profile?.org_id }).then(res => {
         if (res && res.error) alert(vi ? "Lỗi khi lưu" : "Save failed")
         else {
           setEditingItem(null)
@@ -513,7 +514,7 @@ export default function Quotations() {
         }
       })
     } else {
-      const payload: any = { ...form, status: "Draft" }
+      const payload: any = { ...normalizedForm, status: "Draft" }
       upsertQuotation(payload, { isDemo, orgId: profile?.org_id }).then(res => {
         if (res && res.error) alert(vi ? "Lỗi khi tạo báo giá" : "Create failed")
         else {
