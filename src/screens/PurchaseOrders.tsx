@@ -6,7 +6,7 @@ import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable, ImportModal } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder } from "../lib/dataService"
+import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder, receiveQuotation } from "../lib/dataService"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -59,6 +59,25 @@ export default function PurchaseOrders() {
       setShowDetail(null)
       showToast(lang === "vi" ? `Đã duyệt ${po.id}` : `Approved ${po.id}`)
     }
+  }
+
+  const handleStatus = async (po: typeof initPOs[0], status: string) => {
+    const res = await upsertPurchaseOrder({ id: po.id, status } as any, { isDemo, orgId: profile?.org_id })
+    if (res && res.error) showToast(lang === "vi" ? "Cập nhật trạng thái thất bại" : "Status update failed", false)
+    else {
+      const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id })
+      if (r.data) setPOs(normalizePOs(r.data))
+      setShowDetail(null)
+      showToast(lang === "vi" ? "Đã cập nhật trạng thái" : "Status updated")
+    }
+  }
+
+  const handleReceive = async (po: any) => {
+    const items = (po.items ?? []).map((item: any) => ({ ...item, product_id: item.product_id, qty: item.qty, cost_price: item.unit_cost, supplier_name: po.supplier }))
+    if (!items.length) return showToast(lang === "vi" ? "PO chưa có sản phẩm để nhận" : "This PO has no items to receive", false)
+    const receiveResult = await receiveQuotation({ quotationId: po.ref ?? po.id, warehouseId: po.warehouse_id, warehouseName: po.warehouse, items }, { isDemo, orgId: profile?.org_id })
+    if (receiveResult.error) return showToast(lang === "vi" ? "Nhận hàng thất bại" : "Receiving failed", false)
+    await handleStatus(po, "Completed")
   }
 
   const statusOptions = [
@@ -182,7 +201,8 @@ export default function PurchaseOrders() {
                 status: isDraft ? "Draft" : "Pending Approval",
                 total: grand,
                 createdBy: "Current User",
-                date: new Date().toISOString().split("T")[0]
+                date: new Date().toISOString().split("T")[0],
+                items: items.map(item => ({ product: item.product, sku: item.sku, qty: item.qty, price: item.price }))
               }
               const res = await upsertPurchaseOrder(payload, { isDemo, orgId: profile?.org_id })
               if (res && res.error) showToast(lang === "vi" ? "Lỗi khi tạo PO" : "Create PO failed", false)
@@ -296,14 +316,14 @@ export default function PurchaseOrders() {
               </div>
               <div className="flex items-center gap-2">
                 {showDetail.status === "Approved" && (
-                  <button className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận hàng" : "Receive Goods"}</button>
+                  <button onClick={() => handleReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận hàng" : "Receive Goods"}</button>
                 )}
                 {showDetail.status === "Pending Approval" && (
                   <>
                     <button onClick={() => handleApprove(showDetail)} className="h-7 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium flex items-center gap-1 hover:bg-blue-700">
                       <CheckCircle size={12} /> {t("approve")}
                     </button>
-                    <button onClick={() => setShowDetail(null)} className="h-7 px-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium flex items-center gap-1">
+                    <button onClick={() => handleStatus(showDetail, "Cancelled")} className="h-7 px-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium flex items-center gap-1">
                       <XCircle size={12} /> {t("reject")}
                     </button>
                   </>

@@ -26,6 +26,23 @@ function normalizeStatusValue(value: unknown) {
   return String(value)
 }
 
+const demoGoodsReceipts: any[] = []
+const demoGoodsReceiptItems: any[] = []
+const demoInventoryLedger: any[] = []
+
+function demoUpsert(collection: any[], payload: Record<string, any>) {
+  const row: Record<string, any> = { ...payload, id: payload.id ?? payload.code ?? payload.ref ?? `DEMO-${Date.now()}` }
+  const index = collection.findIndex((item: Record<string, any>) => String(item.id ?? item.code ?? item.ref) === String(row.id ?? row.code ?? row.ref))
+  if (index >= 0) collection[index] = { ...collection[index], ...row }
+  else collection.unshift(row)
+  return row
+}
+
+function demoDelete(collection: any[], id: string) {
+  const index = collection.findIndex((item: Record<string, any>) => String(item.id ?? item.code ?? item.ref) === String(id))
+  if (index >= 0) collection.splice(index, 1)
+}
+
 async function safeSelect(table: string, columns = "*", configure?: (query: any) => any) {
   try {
     let query = supabase.from(table).select(columns)
@@ -50,13 +67,13 @@ export async function fetchProducts({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoUpsert(mock.products, { ...payload, cost: payload.cost ?? payload.purchase_price ?? 0, price: payload.price ?? payload.selling_price ?? 0 }); return { error: null } }
   const { error } = await supabase.from("products").upsert([{ ...payload, org_id: orgId }] as any)
   return { error }
 }
 
 export async function deleteProduct(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(mock.products, id); return { error: null } }
   const { error } = await supabase.from("products").delete().eq("id", id)
   return { error }
 }
@@ -77,8 +94,8 @@ export async function fetchCustomers({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertCustomer(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
-  const normalized: Record<string, any> = { ...payload, org_id: orgId }
+  if (isDemo) { demoUpsert(mock.customers, payload); return { error: null } }
+    const normalized: Record<string, any> = { ...payload, org_id: orgId }
   if (normalized.credit_limit == null && normalized.creditLimit != null) normalized.credit_limit = normalized.creditLimit
   if (normalized.tax_code == null && normalized.taxCode != null) normalized.tax_code = normalized.taxCode
   delete normalized.creditLimit
@@ -90,7 +107,7 @@ export async function upsertCustomer(payload: Record<string, unknown>, { isDemo,
 export async function bulkUpsertCustomers(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
   const rows = payloads.map(p => {
-    const normalized: Record<string, any> = { ...p, org_id: orgId }
+     const normalized: Record<string, any> = { ...p, org_id: orgId }
     if (normalized.credit_limit == null && normalized.creditLimit != null) normalized.credit_limit = normalized.creditLimit
     if (normalized.tax_code == null && normalized.taxCode != null) normalized.tax_code = normalized.taxCode
     delete normalized.creditLimit
@@ -102,7 +119,7 @@ export async function bulkUpsertCustomers(payloads: Record<string, unknown>[], {
 }
 
 export async function deleteCustomer(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(mock.customers, id); return { error: null } }
   const { error } = await supabase.from("customers").delete().eq("id", id)
   return { error }
 }
@@ -115,13 +132,13 @@ export async function fetchSuppliers({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertSupplier(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoUpsert(mock.suppliers, payload); return { error: null } }
   const { error } = await supabase.from("suppliers").upsert([{ ...payload, org_id: orgId }] as any)
   return { error }
 }
 
 export async function deleteSupplier(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(mock.suppliers, id); return { error: null } }
   const { error } = await supabase.from("suppliers").delete().eq("id", id)
   return { error }
 }
@@ -161,8 +178,8 @@ export async function fetchWarehouses({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertWarehouse(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
-  const normalized = { ...payload, org_id: orgId }
+  if (isDemo) { demoUpsert(mock.warehouses, payload); return { error: null } }
+  const normalized: Record<string, any> = { ...payload, org_id: orgId }
   if (normalized.address == null && normalized.location != null) normalized.address = normalized.location
   delete normalized.location
   const { error } = await supabase.from("warehouses").upsert([normalized] as any)
@@ -182,7 +199,7 @@ export async function bulkUpsertWarehouses(payloads: Record<string, unknown>[], 
 }
 
 export async function deleteWarehouse(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(mock.warehouses, id); return { error: null } }
   const { error } = await supabase.from("warehouses").delete().eq("id", id)
   return { error }
 }
@@ -191,8 +208,13 @@ export async function deleteWarehouse(id: string, { isDemo }: Ctx) {
 export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.purchaseOrders, error: null }
   const { data, error } = await safeSelect("purchase_orders", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
-  return { data: (data as any[] ?? []).map((row: any) => ({
+  const rows = data as any[] ?? []
+  const ids = rows.map(row => row.id).filter(Boolean)
+  const itemResult = ids.length ? await safeSelect("purchase_order_items", "*", query => query.in("po_id", ids)) : { data: [], error: null }
+  const itemsByPo = (itemResult.data as any[] ?? []).reduce((groups, item) => { ;(groups[item.po_id] ??= []).push(item); return groups }, {} as Record<string, any[]>)
+  return { data: rows.map((row: any) => ({
     ...row,
+    items: itemsByPo[row.id] ?? [],
     createdBy: row.created_by ?? row.createdBy ?? "",
     supplier: row.supplier_name ?? row.supplier ?? "",
     warehouse: row.warehouse_name ?? row.warehouse ?? "",
@@ -200,13 +222,37 @@ export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
-  const { error } = await supabase.from("purchase_orders").upsert([{ ...payload, org_id: orgId }] as any)
+  const normalized: Record<string, any> = {
+    ...payload,
+    ref: payload.ref ?? `PO-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`,
+    supplier_name: payload.supplier_name ?? payload.supplier ?? "Unknown Supplier",
+    warehouse_name: payload.warehouse_name ?? payload.warehouse ?? "Unassigned",
+    created_by: payload.created_by ?? payload.createdBy ?? "system",
+    org_id: orgId,
+  }
+  delete normalized.supplier
+  delete normalized.warehouse
+  delete normalized.createdBy
+  if (isDemo) { demoUpsert(mock.purchaseOrders, { ...normalized, supplier: normalized.supplier_name, warehouse: normalized.warehouse_name, createdBy: normalized.created_by, date: normalized.date ?? new Date().toISOString().slice(0, 10), items: payload.items ?? [] }); return { error: null } }
+  const purchaseOrderResult = normalized.id
+    ? await (supabase as any).from("purchase_orders").update(normalized).eq("id", normalized.id).eq("org_id", orgId)
+    : await (supabase as any).from("purchase_orders").insert([normalized]).select("id").single()
+  const error = purchaseOrderResult.error
+  const purchaseOrderId = normalized.id ?? purchaseOrderResult.data?.id
+  if (!error && purchaseOrderId && Array.isArray(payload.items)) {
+    const deleteResult = await (supabase as any).from("purchase_order_items").delete().eq("po_id", purchaseOrderId)
+    if (deleteResult.error) return { error: deleteResult.error }
+    const itemRows = payload.items.map((item: any) => ({ po_id: purchaseOrderId, product_id: item.product_id ?? null, product_name: item.product_name ?? item.product ?? "", sku: item.sku ?? null, qty: Number(item.qty ?? 1), unit_cost: Number(item.unit_cost ?? item.price ?? 0) }))
+    if (itemRows.length) {
+      const itemResult = await (supabase as any).from("purchase_order_items").insert(itemRows)
+      if (itemResult.error) return { error: itemResult.error }
+    }
+  }
   return { error }
 }
 
 export async function deletePurchaseOrder(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(mock.purchaseOrders, id); return { error: null } }
   const { error } = await supabase.from("purchase_orders").delete().eq("id", id)
   return { error }
 }
@@ -347,7 +393,7 @@ export async function deleteRolePermission(roleId: string, module: string, actio
 }
 
 export async function upsertCategory(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoUpsert(mock.categories, payload); return { error: null } }
   const normalized: Record<string, any> = { ...payload, org_id: orgId }
   const name = String(normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "")
   if (normalized.name_vi == null && normalized.name == null && normalized.name_en == null) {
@@ -382,8 +428,8 @@ export async function bulkUpsertCategories(payloads: Record<string, unknown>[], 
 }
 
 export async function deleteCategory(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
-  const { error } = await supabase.from("categories").delete().eq("code", id)
+  if (isDemo) { demoDelete(mock.categories, id); return { error: null } }
+  const { error } = await supabase.from("categories").delete().eq("id", id)
   return { error }
 }
 
@@ -399,7 +445,7 @@ export async function fetchInventoryAdjustments({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertBrand(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoUpsert(mock.brands, payload); return { error: null } }
   const normalized: Record<string, unknown> = { ...payload, org_id: orgId }
   if (normalized.name == null && normalized.name_vi != null) normalized.name = String(normalized.name_vi)
   if (normalized.status == null || normalized.status === "") normalized.status = "Active"
@@ -415,14 +461,14 @@ export async function bulkUpsertBrands(payloads: Record<string, unknown>[], { is
 }
 
 export async function deleteBrand(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
-  const { error } = await supabase.from("brands").delete().eq("code", id)
+  if (isDemo) { demoDelete(mock.brands, id); return { error: null } }
+  const { error } = await supabase.from("brands").delete().eq("id", id)
   return { error }
 }
 
 export async function upsertUnit(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
-  const normalized = { ...payload, org_id: orgId }
+  if (isDemo) { demoUpsert(mock.units, payload); return { error: null } }
+   const normalized: Record<string, any> = { ...payload, org_id: orgId }
   const name = String(normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "")
   if (normalized.name_vi == null && normalized.name == null && normalized.name_en == null) {
     normalized.name_vi = name
@@ -439,7 +485,7 @@ export async function upsertUnit(payload: Record<string, unknown>, { isDemo, org
 export async function bulkUpsertUnits(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
   const rows = payloads.map(p => {
-    const normalized = { ...p, org_id: orgId }
+     const normalized: Record<string, any> = { ...p, org_id: orgId }
     const name = String(normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "")
     if (normalized.name_vi == null && normalized.name == null && normalized.name_en == null) {
       normalized.name_vi = name
@@ -456,25 +502,85 @@ export async function bulkUpsertUnits(payloads: Record<string, unknown>[], { isD
 }
 
 export async function deleteUnit(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
-  const { error } = await supabase.from("units").delete().eq("code", id)
+  if (isDemo) { demoDelete(mock.units, id); return { error: null } }
+  const { error } = await supabase.from("units").delete().eq("id", id)
   return { error }
 }
 
 export async function fetchGoodsReceipts({ isDemo, orgId }: Ctx) {
-  if (isDemo) return { data: [], error: null }
+  if (isDemo) return { data: demoGoodsReceipts, error: null }
   const { data, error } = await safeSelect("goods_receipts", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
   return { data: data as any[] ?? [], error }
 }
 
 export async function upsertGoodsReceipt(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoUpsert(demoGoodsReceipts, payload); return { error: null } }
   const { error } = await supabase.from("goods_receipts").upsert([{ ...payload, org_id: orgId }] as any)
   return { error }
 }
 
+export async function receiveQuotation(payload: { quotationId: string; warehouseId?: string; warehouseName: string; items: any[] }, { isDemo, orgId }: Ctx) {
+  const receiptRef = `GR-${payload.quotationId}`
+  if (isDemo) {
+    if (demoGoodsReceipts.some((row: any) => row.ref === receiptRef)) return { error: new Error("Quotation has already been received") }
+    const receipt = demoUpsert(demoGoodsReceipts, { ref: receiptRef, po_ref: payload.quotationId, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, supplier_name: payload.items[0]?.supplier_name ?? "", items: payload.items.length, status: "Completed" })
+    for (const item of payload.items) {
+      const product = mock.products.find((row: any) => row.id === item.product_id || row.sku === item.sku || row.id.replace(/^P0/, "P-") === item.product_id)
+      if (product) {
+        product.qty = Number(product.qty ?? 0) + Number(item.qty ?? 0)
+        demoUpsert(demoGoodsReceiptItems, { receipt_id: receipt.id, product_id: product.id, product_name: product.name, sku: product.sku, qty: Number(item.qty ?? 0), unit_cost: Number(item.cost_price ?? product.cost ?? 0), unit: item.sell_unit ?? product.unit })
+        demoUpsert(demoInventoryLedger, { ref: receiptRef, movement_type: "RECEIPT", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, qty_in: Number(item.qty ?? 0), qty_out: 0, unit_cost: Number(item.cost_price ?? product.cost ?? 0) })
+      }
+    }
+    return { error: null }
+  }
+  const existing = await safeSelect("goods_receipts", "id", query => query.eq("ref", receiptRef).eq("org_id", orgId))
+  if ((existing.data as any[]).length) return { error: new Error("Quotation has already been received") }
+  const receiptResult = await (supabase as any).from("goods_receipts").insert([{
+    ref: receiptRef,
+    po_ref: payload.quotationId,
+    warehouse_id: payload.warehouseId ?? null,
+    warehouse_name: payload.warehouseName,
+    supplier_name: payload.items[0]?.supplier_name ?? "Unknown Supplier",
+    items: payload.items.length,
+    status: "Completed",
+    org_id: orgId,
+  }]).select("id").single()
+  if (receiptResult.error) return { error: receiptResult.error }
+  for (const item of payload.items) {
+    if (!item.product_id) continue
+    const productQuery = (supabase as any).from("products").select("id, name, sku, qty, cost").eq("org_id", orgId)
+    const productResult = await (item.product_id ? productQuery.eq("id", item.product_id) : productQuery.eq("sku", item.sku)).maybeSingle()
+    if (productResult.error || !productResult.data) continue
+    const product = productResult.data as any
+    const quantity = Number(item.qty ?? 0)
+    const newQty = Number(product.qty ?? 0) + quantity
+    const productUpdate = await (supabase as any).from("products").update({ qty: newQty, updated_at: new Date().toISOString() }).eq("id", product.id).eq("org_id", orgId)
+    if (productUpdate.error) return { error: productUpdate.error }
+    const existingBalance = await (supabase as any).from("inventory_balance").select("id, qty").eq("org_id", orgId).eq("sku", product.sku).eq("warehouse_id", payload.warehouseId ?? null).maybeSingle()
+    const balanceResult = existingBalance.data?.id
+      ? await (supabase as any).from("inventory_balance").update({ qty: Number(existingBalance.data.qty ?? 0) + quantity, unit_cost: Number(item.cost_price ?? product.cost ?? 0), updated_at: new Date().toISOString() }).eq("id", existingBalance.data.id).eq("org_id", orgId)
+      : await (supabase as any).from("inventory_balance").insert([{
+      org_id: orgId,
+      product_id: product.id,
+      product_name: product.name,
+      sku: product.sku,
+      warehouse_id: payload.warehouseId ?? null,
+      warehouse_name: payload.warehouseName,
+      qty: quantity,
+      unit_cost: Number(item.cost_price ?? product.cost ?? 0),
+      }])
+    if (balanceResult.error) return { error: balanceResult.error }
+    const receiptItemResult = await (supabase as any).from("goods_receipt_items").insert([{ receipt_id: receiptResult.data.id, product_id: product.id, product_name: product.name, sku: product.sku, qty: quantity, unit_cost: Number(item.cost_price ?? product.cost ?? 0), unit: item.sell_unit ?? null }])
+    if (receiptItemResult.error) return { error: receiptItemResult.error }
+    const ledgerResult = await (supabase as any).from("inventory_ledger").insert([{ org_id: orgId, ref: receiptRef, movement_type: "RECEIPT", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouseId ?? null, warehouse_name: payload.warehouseName, qty_in: quantity, qty_out: 0, unit_cost: Number(item.cost_price ?? product.cost ?? 0) }])
+    if (ledgerResult.error) return { error: ledgerResult.error }
+  }
+  return { error: null }
+}
+
 export async function deleteGoodsReceipt(id: string, { isDemo }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) { demoDelete(demoGoodsReceipts, id); return { error: null } }
   const { error } = await supabase.from("goods_receipts").delete().eq("ref", id)
   return { error }
 }
@@ -526,7 +632,11 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
 }
 
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) return { error: null }
+  if (isDemo) {
+    const row = demoUpsert(mock.quotations, payload as Record<string, any>) as any
+    if (Array.isArray(payload.items)) row.items = payload.items
+    return { error: null }
+  }
   const hasItems = Object.prototype.hasOwnProperty.call(payload, "items")
   const source = payload as Record<string, any>
   const row = {
@@ -547,7 +657,7 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     ...(source.created_by !== undefined ? { created_by: source.created_by } : {}),
     org_id: orgId,
   }
-  const quotationQuery = supabase.from("quotations")
+    const quotationQuery = (supabase as any).from("quotations")
   const quotationResult = row.id
     ? await quotationQuery.update(row).eq("id", row.id).eq("org_id", orgId)
     : await quotationQuery.insert([row]).select("id").single()

@@ -13,6 +13,7 @@ import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBran
 import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import * as XLSX from "xlsx"
+import { importFromExcel } from "../lib/excelUtils"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -34,7 +35,7 @@ function downloadXlsxTemplate(filename: string, cols: string[]) {
 
 const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","min_stock","max_stock","description","status"]
 
-function ProductImportModal({ onClose, lang }: { onClose: () => void; lang: string }) {
+function ProductImportModal({ onClose, lang, onImport }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void> }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -93,7 +94,7 @@ function ProductImportModal({ onClose, lang }: { onClose: () => void; lang: stri
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <button onClick={onClose} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{lang === "vi" ? "Hủy" : "Cancel"}</button>
-          <button disabled={!file} onClick={() => { alert(lang === "vi" ? "Nhập dữ liệu thành công!" : "Import successful!"); onClose() }} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">{lang === "vi" ? "Nhập dữ liệu" : "Import"}</button>
+          <button disabled={!file} onClick={async () => { if (file) await onImport(file) }} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">{lang === "vi" ? "Nhập dữ liệu" : "Import"}</button>
         </div>
       </div>
     </div>
@@ -486,6 +487,37 @@ export default function Products() {
     }
   }
 
+  const handleImport = async (file: File) => {
+    try {
+      const rows = await importFromExcel(file)
+      let imported = 0
+      for (const row of rows) {
+        const payload = {
+          sku: row.sku,
+          barcode: row.barcode,
+          name: row.product_name ?? row.name,
+          category: row.category,
+          brand: row.brand,
+          unit: row.unit,
+          cost: Number(row.purchase_price ?? row.cost ?? 0),
+          price: Number(row.selling_price ?? row.price ?? 0),
+          qty: Number(row.qty ?? 0),
+          status: row.status || "Active",
+        }
+        if (!payload.sku || !payload.name) continue
+        const result = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
+        if (!result.error) imported++
+      }
+      const refreshed = await fetchProducts({ isDemo, orgId: profile?.org_id })
+      if (refreshed.data) setProducts(refreshed.data as any[])
+      setShowImportModal(false)
+      showToast(lang === "vi" ? `Đã nhập ${imported} sản phẩm` : `Imported ${imported} products`)
+    } catch (error) {
+      console.error(error)
+      showToast(lang === "vi" ? "Không thể đọc file sản phẩm" : "Could not read product file", false)
+    }
+  }
+
   const handleDelete = async () => {
     if (!deleteTarget) return
     const res = await deleteProduct(deleteTarget.id, { isDemo, orgId: profile?.org_id })
@@ -795,7 +827,7 @@ export default function Products() {
       {deleteTarget && (
         <DeleteConfirmDialog product={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
       )}
-      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} lang={lang} />}
+      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImport} lang={lang} />}
       {(showCreate || editingProduct) && (
         <ProductFormModal
           editingProduct={editingProduct}

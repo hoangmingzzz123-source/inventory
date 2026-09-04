@@ -82,7 +82,8 @@ function AppInner() {
   const { t, lang } = useLang()
   const { user, profile, signOut } = useAuth()
   const { isDemo, setDemo } = useDemo()
-  const [active, setActive] = useState("dashboard")
+  const initialScreen = new URLSearchParams(window.location.search).get("screen") || "dashboard"
+  const [active, setActive] = useState(initialScreen)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [toast, setToast] = useState<ToastPayload | null>(null)
   const [permissionMap, setPermissionMap] = useState<Record<string, boolean>>({})

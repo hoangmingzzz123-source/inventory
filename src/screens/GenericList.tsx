@@ -8,6 +8,7 @@ import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnit
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
 import { importFromExcel } from "../lib/excelUtils"
+import { defaultCompanySettings } from "../lib/companySettings"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
@@ -2218,12 +2219,13 @@ export function Settings() {
           {/* 1 – Company */}
           {active === 1 && (
             <>
-              <SettingField label={vi ? "Tên công ty" : "Company Name"} defaultVal="WarehouseOS Demo Co., Ltd." />
-              <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} defaultVal="0123456789" />
-              <SettingField label={vi ? "Địa chỉ" : "Address"} defaultVal={vi ? "123 Đường ABC, Quận 1, TP.HCM" : "123 ABC Street, District 1, HCMC"} />
-              <SettingField label={vi ? "Điện thoại" : "Phone"} defaultVal="+84 28 1234 5678" />
-              <SettingField label={vi ? "Website" : "Website"} defaultVal="https://warehouseos.vn" />
-              <SettingField label={vi ? "Email liên hệ" : "Contact Email"} defaultVal="contact@warehouseos.vn" type="email" />
+              <SettingField label={vi ? "Tên công ty" : "Company Name"} defaultVal={defaultCompanySettings.name} />
+              <SettingField label={vi ? "Người đại diện" : "Representative"} defaultVal={defaultCompanySettings.representative} />
+              <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} defaultVal={defaultCompanySettings.taxId} />
+              <SettingField label={vi ? "Địa chỉ" : "Address"} defaultVal={defaultCompanySettings.address} />
+              <SettingField label={vi ? "Điện thoại" : "Phone"} defaultVal={defaultCompanySettings.phone} />
+              <SettingField label={vi ? "Website" : "Website"} defaultVal={defaultCompanySettings.website} />
+              <SettingField label={vi ? "Email liên hệ" : "Contact Email"} defaultVal={defaultCompanySettings.email} type="email" />
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Logo công ty" : "Company Logo"}</label>
                 <div className="border-2 border-dashed rounded-xl p-6 text-center" style={{ borderColor: "var(--border)" }}>
