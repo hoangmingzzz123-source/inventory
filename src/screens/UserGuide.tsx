@@ -16,25 +16,25 @@ export default function UserGuide() {
   const { lang } = useLang()
   const vi = lang === "vi"
   return (
-    <div className="h-full overflow-auto bg-slate-50 p-5">
-      <div className="mx-auto max-w-6xl space-y-5">
-        <section className="rounded-2xl border bg-white p-6" style={{ borderColor: "var(--border)" }}>
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white"><BookOpenIcon /></div>
+    <div className="h-full overflow-x-hidden overflow-y-auto bg-slate-50 p-3 sm:p-5">
+      <div className="mx-auto max-w-6xl space-y-3 sm:space-y-5">
+        <section className="rounded-2xl border bg-white p-4 sm:p-6" style={{ borderColor: "var(--border)" }}>
+          <div className="flex items-start gap-3 sm:gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white sm:h-12 sm:w-12"><BookOpenIcon /></div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">{vi ? "Hướng dẫn sử dụng WarehouseOS" : "WarehouseOS User Guide"}</h1>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">{vi ? "Thực hiện theo luồng dưới đây để quản lý dữ liệu, bán hàng, nhập kho và theo dõi hiệu quả vận hành." : "Follow this workflow to manage master data, sales, receiving, inventory, and operational performance."}</p>
+              <h1 className="text-lg font-bold text-slate-900 sm:text-xl">{vi ? "Hướng dẫn sử dụng WarehouseOS" : "WarehouseOS User Guide"}</h1>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500 sm:text-sm sm:leading-6">{vi ? "Thực hiện theo luồng dưới đây để quản lý dữ liệu, bán hàng, nhập kho và theo dõi hiệu quả vận hành." : "Follow this workflow to manage master data, sales, receiving, inventory, and operational performance."}</p>
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border bg-white p-5" style={{ borderColor: "var(--border)" }}>
-          <div className="mb-5 flex items-center justify-between"><div><h2 className="text-sm font-semibold text-slate-900">{vi ? "Sơ đồ luồng nghiệp vụ" : "Business workflow"}</h2><p className="mt-1 text-xs text-slate-400">{vi ? "Từ dữ liệu gốc đến báo cáo quản trị" : "From master data to management reporting"}</p></div><Settings size={18} className="text-slate-400" /></div>
+        <section className="rounded-2xl border bg-white p-4 sm:p-5" style={{ borderColor: "var(--border)" }}>
+          <div className="mb-4 flex items-center justify-between sm:mb-5"><div><h2 className="text-sm font-semibold text-slate-900">{vi ? "Sơ đồ luồng nghiệp vụ" : "Business workflow"}</h2><p className="mt-1 text-xs text-slate-400">{vi ? "Từ dữ liệu gốc đến báo cáo quản trị" : "From master data to management reporting"}</p></div><Settings size={18} className="text-slate-400" /></div>
           <div className="flex flex-col items-stretch gap-3 lg:flex-row lg:items-stretch lg:gap-2">
             {steps.map((step, index) => {
               const Icon = step.icon
               return <div key={step.vi} className="flex flex-1 items-center gap-2 lg:block">
-                <div className={`min-h-[164px] flex-1 rounded-xl border p-4 ${colorMap[step.color]}`}>
+                <div className={`min-h-[132px] flex-1 rounded-xl border p-3 sm:min-h-[164px] sm:p-4 ${colorMap[step.color]}`}>
                   <div className="mb-3 flex items-center justify-between"><Icon size={22} /><span className="text-[10px] font-bold opacity-60">0{index + 1}</span></div>
                   <h3 className="text-sm font-bold">{vi ? step.vi : step.en}</h3>
                   <p className="mt-2 text-xs leading-5 opacity-80">{vi ? step.detailVi : step.detailEn}</p>

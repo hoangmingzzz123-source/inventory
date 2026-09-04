@@ -86,9 +86,15 @@ function AppInner() {
   const { isDemo, setDemo } = useDemo()
   const initialScreen = new URLSearchParams(window.location.search).get("screen") || "dashboard"
   const [active, setActive] = useState(initialScreen)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
   const [toast, setToast] = useState<ToastPayload | null>(null)
   const [permissionMap, setPermissionMap] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    const handleViewportChange = () => setSidebarCollapsed(window.innerWidth < 768)
+    window.addEventListener("resize", handleViewportChange)
+    return () => window.removeEventListener("resize", handleViewportChange)
+  }, [])
 
   const role = String(profile?.role ?? "staff").toLowerCase()
   const screenToModule: Record<string, string> = {
