@@ -4,12 +4,41 @@
  */
 import { supabase } from "./supabase"
 import * as mock from "../data/mockData"
+import { defaultCompanySettings, type CompanySettings } from "./companySettings"
 
 type Ctx = { isDemo: boolean; orgId?: string }
+
+export async function fetchCompanySettings({ isDemo, orgId }: Ctx) {
+  if (isDemo || !orgId) return { data: defaultCompanySettings, error: null }
+  const { data, error } = await safeSelect("company_settings", "*", query => query.eq("org_id", orgId).maybeSingle())
+  const row = (data as any[])[0] ?? data as any
+  return { data: row ? { ...defaultCompanySettings, ...row, taxId: row.tax_id ?? defaultCompanySettings.taxId } : defaultCompanySettings, error }
+}
+
+export async function upsertCompanySettings(settings: CompanySettings, { isDemo, orgId }: Ctx) {
+  if (isDemo || !orgId) return { error: null }
+  const { error } = await (supabase as any).from("company_settings").upsert({
+    org_id: orgId,
+    name: settings.name,
+    representative: settings.representative,
+    tax_id: settings.taxId,
+    address: settings.address,
+    phone: settings.phone,
+    website: settings.website,
+    email: settings.email,
+    logo_url: settings.logoUrl ?? null,
+    updated_at: new Date().toISOString(),
+  })
+  return { error }
+}
 
 function toNumber(value: unknown, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+function formatVnd(value: number) {
+  return new Intl.NumberFormat("vi-VN").format(value)
 }
 
 function isSchemaMissingError(error: any) {
@@ -628,6 +657,69 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
       status: row.status ?? "Draft",
     })),
     error,
+  }
+}
+
+export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
+  if (isDemo) return null
+  const [productsResult, inventoryResult, salesResult, purchaseResult, receiptResult, ledgerResult] = await Promise.all([
+    safeSelect("products", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("inventory_balance", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("sales_orders", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("purchase_orders", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("goods_receipts", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("inventory_ledger", "*", query => orgId ? query.eq("org_id", orgId) : query),
+  ])
+  const products = productsResult.data as any[]
+  const inventory = inventoryResult.data as any[]
+  const sales = salesResult.data as any[]
+  const purchases = purchaseResult.data as any[]
+  const receipts = receiptResult.data as any[]
+  const ledger = ledgerResult.data as any[]
+  const today = new Date().toISOString().slice(0, 10)
+  const activeSales = sales.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
+  const activePurchases = purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
+  const todaySales = activeSales.filter(row => String(row.date ?? row.created_at ?? "").slice(0, 10) === today)
+  const todayPurchases = activePurchases.filter(row => String(row.date ?? row.created_at ?? "").slice(0, 10) === today)
+  const inventoryValue = inventory.length
+    ? inventory.reduce((sum, row) => sum + toNumber(row.value ?? row.qty * row.unit_cost), 0)
+    : products.reduce((sum, row) => sum + toNumber(row.qty) * toNumber(row.cost), 0)
+  const categoryTotals = products.reduce((groups, product) => {
+    const name = product.category || "Other"
+    groups[name] = (groups[name] || 0) + toNumber(product.qty) * toNumber(product.cost)
+    return groups
+  }, {} as Record<string, number>)
+  const categoryColors = ["#2563eb", "#059669", "#d97706", "#dc2626", "#64748b", "#0f766e"]
+  const categoryData = Object.entries(categoryTotals).map(([name, value], index) => ({ name, value, fill: categoryColors[index % categoryColors.length] }))
+  const monthTotals = Array.from({ length: 12 }, (_, index) => ({ date: new Date(2026, index, 1).toLocaleString("en", { month: "short" }), revenue: 0, purchase: 0, sales: 0 }))
+  for (const row of activeSales) {
+    const month = new Date(row.date ?? row.created_at).getMonth()
+    if (month >= 0 && month < 12) { monthTotals[month].revenue += toNumber(row.total); monthTotals[month].sales += toNumber(row.total) }
+  }
+  for (const row of activePurchases) {
+    const month = new Date(row.date ?? row.created_at).getMonth()
+    if (month >= 0 && month < 12) monthTotals[month].purchase += toNumber(row.total)
+  }
+  const activityRows = [
+    ...receipts.map(row => ({ type: "purchase", text: `Goods receipt ${row.ref || row.id} completed`, time: row.created_at, user: row.created_by || "System" })),
+    ...activePurchases.map(row => ({ type: "purchase", text: `Purchase order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
+    ...activeSales.map(row => ({ type: "sales", text: `Sales order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
+    ...ledger.map(row => ({ type: "inventory", text: `${row.movement_type || "Inventory"}: ${row.product_name || row.sku} (${toNumber(row.qty_in) - toNumber(row.qty_out)})`, time: row.created_at, user: row.created_by || "System" })),
+  ].sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime()).slice(0, 6)
+  const lowStock = products.filter(row => toNumber(row.qty) <= toNumber(row.min_qty ?? row.min_stock ?? 0)).map(row => ({ sku: row.sku, name: row.name, qty: toNumber(row.qty), min: toNumber(row.min_qty ?? row.min_stock ?? 0), warehouse: "All warehouses" }))
+  return {
+    kpis: [
+      { label: "Doanh thu hôm nay", value: `₫${formatVnd(todaySales.reduce((sum, row) => sum + toNumber(row.total), 0))}`, change: "", trend: "up", sub: "theo dữ liệu thật" },
+      { label: "Đơn bán hôm nay", value: String(todaySales.length), change: "", trend: "up", sub: "đơn bán hàng" },
+      { label: "Mua hàng hôm nay", value: `₫${formatVnd(todayPurchases.reduce((sum, row) => sum + toNumber(row.total), 0))}`, change: "", trend: "up", sub: "theo dữ liệu thật" },
+      { label: "Giá trị tồn kho", value: `₫${formatVnd(inventoryValue)}`, change: "", trend: "up", sub: "tổng giá trị kho" },
+      { label: "Phải thu", value: "₫0", change: "", trend: "up", sub: "chưa có dữ liệu công nợ" },
+      { label: "Phải trả", value: "₫0", change: "", trend: "up", sub: "chưa có dữ liệu công nợ" },
+    ],
+    revenueData: monthTotals.map(row => ({ ...row, revenue: row.revenue / 1000000, purchase: row.purchase / 1000000, sales: row.sales / 1000000 })),
+    inventoryDonutData: categoryData.length ? categoryData.map(row => ({ ...row, value: inventoryValue ? Math.round(Number(row.value) / inventoryValue * 100) : 0 })) : [],
+    lowStockItems: lowStock,
+    recentActivities: activityRows,
   }
 }
 

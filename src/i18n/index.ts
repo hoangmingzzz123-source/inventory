@@ -4,6 +4,7 @@ export const translations = {
   vi: {
     // Nav
     dashboard: "Tổng quan",
+    userGuide: "Hướng dẫn sử dụng",
     masterData: "Dữ liệu gốc",
     products: "Sản phẩm",
     categories: "Danh mục",
@@ -242,6 +243,7 @@ export const translations = {
   },
   en: {
     dashboard: "Dashboard",
+    userGuide: "User Guide",
     masterData: "Master Data",
     products: "Products",
     categories: "Categories",

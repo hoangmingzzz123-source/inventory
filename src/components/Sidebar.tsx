@@ -15,6 +15,7 @@ type NavItem = { id: string; labelKey: string; icon: React.ReactNode; children?:
 
 const navItems: NavItem[] = [
   { id: "dashboard", labelKey: "dashboard", icon: <LayoutDashboard size={16} /> },
+  { id: "user-guide", labelKey: "userGuide", icon: <BookOpen size={16} /> },
   {
     id: "masterdata", labelKey: "masterData", icon: <Box size={16} />,
     children: [
@@ -89,6 +90,7 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
 
   const screenToModule: Record<string, string> = {
     dashboard: "Dashboard",
+    "user-guide": "Dashboard",
     products: "Master Data",
     categories: "Master Data",
     brands: "Master Data",
@@ -120,9 +122,9 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
     notifications: "Dashboard",
   }
   const defaultAllowedByRole: Record<string, string[]> = {
-    admin: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
-    manager: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-    staff: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+    admin: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
+    manager: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+    staff: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
   }
 
   useEffect(() => {

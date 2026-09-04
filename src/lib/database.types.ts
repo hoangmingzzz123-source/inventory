@@ -23,6 +23,11 @@ export interface Database {
         Insert: { name: string }
         Update: { name?: string }
       }
+      company_settings: {
+        Row: { org_id: string; name: string; representative: string | null; tax_id: string | null; address: string | null; phone: string | null; website: string | null; email: string | null; logo_url: string | null; updated_at: string }
+        Insert: Omit<Database["public"]["Tables"]["company_settings"]["Row"], "updated_at"> & { updated_at?: string }
+        Update: Partial<Database["public"]["Tables"]["company_settings"]["Insert"]>
+      }
       products: {
         Row: { id: string; org_id: string; sku: string; barcode: string | null; name: string; category: string | null; brand: string | null; unit: string | null; cost: number; price: number; qty: number; status: string; updated_at: string; updated_by: string | null }
         Insert: Omit<Database["public"]["Tables"]["products"]["Row"], "id" | "updated_at"> & { id?: string }

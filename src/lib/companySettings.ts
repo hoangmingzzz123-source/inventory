@@ -6,4 +6,20 @@ export const defaultCompanySettings = {
   phone: "+84 28 1234 5678",
   website: "https://warehouseos.vn",
   email: "contact@warehouseos.vn",
+  logoUrl: "",
+}
+
+export type CompanySettings = typeof defaultCompanySettings
+
+export function loadCompanySettings(orgId?: string): CompanySettings {
+  try {
+    const saved = window.localStorage.getItem(`company-settings:${orgId || "demo"}`)
+    return saved ? { ...defaultCompanySettings, ...JSON.parse(saved) } : defaultCompanySettings
+  } catch {
+    return defaultCompanySettings
+  }
+}
+
+export function saveCompanySettings(settings: CompanySettings, orgId?: string) {
+  window.localStorage.setItem(`company-settings:${orgId || "demo"}`, JSON.stringify(settings))
 }

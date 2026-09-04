@@ -21,6 +21,7 @@ import { NotificationProvider } from "./contexts/NotificationContext"
 import { AuthProvider, useAuth } from "./contexts/AuthContext"
 import { DemoProvider, useDemo } from "./contexts/DemoContext"
 import NotificationCenter from "./screens/NotificationCenter"
+import UserGuide from "./screens/UserGuide"
 import { fetchRolePermissions, fetchRoles } from "./lib/dataService"
 import { Check, AlertCircle, Info, LogOut, User } from "lucide-react"
 
@@ -28,6 +29,7 @@ export type ToastPayload = { msg: string; type: "success" | "error" | "info" }
 
 const breadcrumbKeys: Record<string, string[]> = {
   dashboard:          ["dashboard"],
+  "user-guide":       ["userGuide"],
   products:           ["masterData", "products"],
   categories:         ["masterData", "categories"],
   brands:             ["masterData", "brands"],
@@ -91,6 +93,7 @@ function AppInner() {
   const role = String(profile?.role ?? "staff").toLowerCase()
   const screenToModule: Record<string, string> = {
     dashboard: "Dashboard",
+    "user-guide": "Dashboard",
     products: "Master Data",
     categories: "Master Data",
     brands: "Master Data",
@@ -122,9 +125,9 @@ function AppInner() {
     notifications: "Dashboard",
   }
   const defaultAllowedByRole: Record<string, string[]> = {
-    admin: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
-    manager: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-    staff: ["dashboard", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+    admin: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
+    manager: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
+    staff: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
   }
 
   useEffect(() => {
@@ -204,6 +207,7 @@ function AppInner() {
   function renderScreen() {
     switch (active) {
       case "dashboard":        return <Dashboard />
+      case "user-guide":       return canAccess("user-guide") ? <UserGuide /> : null
       case "quotations":       return canAccess("quotations") ? <Quotations /> : null
       case "products":         return canAccess("products") ? <Products /> : null
       case "purchase-orders":  return canAccess("purchase-orders") ? <PurchaseOrders /> : null

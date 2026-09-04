@@ -4,11 +4,11 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchCashBook, fetchRoles, fetchRolePermissions, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchCashBook, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
 import { importFromExcel } from "../lib/excelUtils"
-import { defaultCompanySettings } from "../lib/companySettings"
+import { loadCompanySettings, saveCompanySettings, type CompanySettings } from "../lib/companySettings"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
@@ -2134,11 +2134,11 @@ export function Reports() {
 }
 
 // --- Settings ---
-function SettingField({ label, defaultVal, type = "text", hint }: { label: string; defaultVal: string; type?: string; hint?: string }) {
+function SettingField({ label, defaultVal, value, onChange, type = "text", hint }: { label: string; defaultVal?: string; value?: string; onChange?: (value: string) => void; type?: string; hint?: string }) {
   return (
     <div>
       <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
-      <input type={type} defaultValue={defaultVal} className="w-full h-9 px-3 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-blue-500/20" style={{ borderColor: "var(--border)" }} />
+      <input type={type} defaultValue={onChange ? undefined : defaultVal} value={onChange ? value : undefined} onChange={e => onChange?.(e.target.value)} className="w-full h-9 px-3 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-blue-500/20" style={{ borderColor: "var(--border)" }} />
       {hint && <p className="text-[10px] text-slate-400 mt-1">{hint}</p>}
     </div>
   )
@@ -2167,11 +2167,11 @@ function SettingToggle({ label, hint, defaultChecked }: { label: string; hint?: 
     </div>
   )
 }
-function SaveBtn({ label }: { label: string }) {
+function SaveBtn({ label, onSave }: { label: string; onSave?: () => void }) {
   const [saved, setSaved] = useState(false)
   return (
     <button
-      onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000) }}
+      onClick={() => { onSave?.(); setSaved(true); setTimeout(() => setSaved(false), 2000) }}
       className={`h-9 px-5 rounded-lg text-xs font-medium transition-colors ${saved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"}`}
     >
       {saved ? "✓ Đã lưu" : label}
@@ -2186,6 +2186,17 @@ export function Settings() {
     ? ["Chung", "Công ty", "Giao diện", "Tiền tệ & Số", "Thuế", "Email", "Lưu trữ", "Sao lưu"]
     : ["General", "Company", "Appearance", "Currency & Numbers", "Tax", "Email", "Storage", "Backup"]
   const [active, setActive] = useState(0)
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
+  const [company, setCompany] = useState<CompanySettings>(() => loadCompanySettings(profile?.org_id))
+
+  useEffect(() => {
+    fetchCompanySettings({ isDemo, orgId: profile?.org_id }).then(result => {
+      setCompany(result.error ? loadCompanySettings(profile?.org_id) : result.data)
+    })
+  }, [isDemo, profile?.org_id])
+
+  const updateCompany = (key: keyof CompanySettings, value: string) => setCompany(current => ({ ...current, [key]: value }))
 
   return (
     <div className="flex h-full">
@@ -2219,13 +2230,13 @@ export function Settings() {
           {/* 1 – Company */}
           {active === 1 && (
             <>
-              <SettingField label={vi ? "Tên công ty" : "Company Name"} defaultVal={defaultCompanySettings.name} />
-              <SettingField label={vi ? "Người đại diện" : "Representative"} defaultVal={defaultCompanySettings.representative} />
-              <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} defaultVal={defaultCompanySettings.taxId} />
-              <SettingField label={vi ? "Địa chỉ" : "Address"} defaultVal={defaultCompanySettings.address} />
-              <SettingField label={vi ? "Điện thoại" : "Phone"} defaultVal={defaultCompanySettings.phone} />
-              <SettingField label={vi ? "Website" : "Website"} defaultVal={defaultCompanySettings.website} />
-              <SettingField label={vi ? "Email liên hệ" : "Contact Email"} defaultVal={defaultCompanySettings.email} type="email" />
+              <SettingField label={vi ? "Tên công ty" : "Company Name"} value={company.name} onChange={value => updateCompany("name", value)} />
+              <SettingField label={vi ? "Người đại diện" : "Representative"} value={company.representative} onChange={value => updateCompany("representative", value)} />
+              <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} value={company.taxId} onChange={value => updateCompany("taxId", value)} />
+              <SettingField label={vi ? "Địa chỉ" : "Address"} value={company.address} onChange={value => updateCompany("address", value)} />
+              <SettingField label={vi ? "Điện thoại" : "Phone"} value={company.phone} onChange={value => updateCompany("phone", value)} />
+              <SettingField label={vi ? "Website" : "Website"} value={company.website} onChange={value => updateCompany("website", value)} />
+              <SettingField label={vi ? "Email liên hệ" : "Contact Email"} value={company.email} onChange={value => updateCompany("email", value)} type="email" />
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Logo công ty" : "Company Logo"}</label>
                 <div className="border-2 border-dashed rounded-xl p-6 text-center" style={{ borderColor: "var(--border)" }}>
@@ -2233,7 +2244,11 @@ export function Settings() {
                   <p className="text-xs text-slate-400">{vi ? "Kéo thả hoặc click để thay đổi logo (PNG, SVG — max 2MB)" : "Drag & drop or click to change logo (PNG, SVG — max 2MB)"}</p>
                 </div>
               </div>
-              <SaveBtn label={t("saveSettings")} />
+              <SaveBtn label={t("saveSettings")} onSave={async () => {
+                saveCompanySettings(company, profile?.org_id)
+                const result = await upsertCompanySettings(company, { isDemo, orgId: profile?.org_id })
+                if (result.error) alert(vi ? "Không thể lưu thông tin công ty lên máy chủ" : "Could not save company settings to server")
+              }} />
             </>
           )}
 

@@ -7,10 +7,12 @@ import { exportCsv, exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
 import { fetchQuotations, upsertQuotation, deleteQuotation, fetchProducts, fetchSuppliers, fetchCustomers, fetchWarehouses, receiveQuotation } from "../lib/dataService"
-import { defaultCompanySettings } from "../lib/companySettings"
+import { defaultCompanySettings, loadCompanySettings } from "../lib/companySettings"
 import * as XLSX from "xlsx-js-style"
+import ExcelJS from "exceljs"
 import jsPDF from "jspdf"
 import html2canvas from "html2canvas"
+import logoUrl from "../data/logo.png"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -18,7 +20,7 @@ function quotationFileName(quotationId: string | undefined, extension: string) {
   return `quotation-${quotationId || "new"}.${extension}`
 }
 
-function exportQuotationExcel(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
+function exportQuotationExcelLegacy(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
   const labels = vi
     ? ["BÁO GIÁ", "Mã báo giá", "Khách hàng", "Ngày lập", "Hiệu lực đến", "Ghi chú", "Sản phẩm", "Nhà cung cấp", "Đơn vị", "Số lượng", "Đơn giá", "VAT %", "Thành tiền", "Cộng tiền hàng", "Chiết khấu", "Tiền trước VAT", "Tổng VAT", "Tổng thanh toán"]
     : ["QUOTATION", "Quotation ID", "Customer", "Date", "Valid until", "Notes", "Product", "Supplier", "Unit", "Quantity", "Unit price", "VAT %", "Amount", "Subtotal", "Discount", "Before VAT", "Total VAT", "Grand total"]
@@ -91,6 +93,75 @@ function exportQuotationExcel(data: { id?: string; company: typeof defaultCompan
   XLSX.writeFile(workbook, quotationFileName(data.id, "xlsx"), { cellStyles: true })
 }
 
+async function exportQuotationExcel(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet(vi ? "Báo giá" : "Quotation", { views: [{ state: "frozen", ySplit: 20 }] })
+  sheet.columns = [{ width: 28 }, { width: 24 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 18 }]
+  const response = await fetch(logoUrl)
+  const logoBuffer = await response.arrayBuffer()
+  const logoId = workbook.addImage({ buffer: logoBuffer, extension: "png" })
+  sheet.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 115, height: 48 } })
+  sheet.mergeCells("B1:G2")
+  sheet.getCell("B1").value = vi ? "BÁO GIÁ" : "QUOTATION"
+  sheet.getCell("B1").font = { bold: true, size: 20, color: { argb: "FF1D4ED8" } }
+  sheet.getCell("B1").alignment = { horizontal: "center", vertical: "middle" }
+
+  const border = { top: { style: "thin", color: { argb: "FFD1D5DB" } }, bottom: { style: "thin", color: { argb: "FFD1D5DB" } }, left: { style: "thin", color: { argb: "FFD1D5DB" } }, right: { style: "thin", color: { argb: "FFD1D5DB" } } } as const
+  const styleInfo = (row: number, title: string, value: string) => {
+    sheet.getCell(row, 1).value = title
+    sheet.getCell(row, 2).value = value
+    sheet.mergeCells(row, 2, row, 7)
+    for (let col = 1; col <= 7; col++) sheet.getCell(row, col).border = border
+    sheet.getCell(row, 1).font = { bold: true, color: { argb: "FF475569" } }
+    sheet.getCell(row, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } }
+    sheet.getCell(row, 2).alignment = { wrapText: true, vertical: "middle" }
+  }
+  styleInfo(4, vi ? "CÔNG TY" : "COMPANY", data.company.name)
+  styleInfo(5, vi ? "Người đại diện" : "Representative", data.company.representative)
+  styleInfo(6, "MST", data.company.taxId)
+  styleInfo(7, vi ? "Địa chỉ" : "Address", data.company.address)
+  styleInfo(8, vi ? "Điện thoại" : "Phone", data.company.phone)
+  sheet.mergeCells("A10:G10")
+  sheet.getCell("A10").value = vi ? "THÔNG TIN KHÁCH HÀNG" : "CUSTOMER INFORMATION"
+  sheet.getCell("A10").font = { bold: true, color: { argb: "FFFFFFFF" } }
+  sheet.getCell("A10").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } }
+  sheet.getCell("A10").alignment = { horizontal: "center", vertical: "middle" }
+  styleInfo(11, vi ? "Tên khách hàng" : "Customer", data.customer.name)
+  styleInfo(12, vi ? "Người đại diện" : "Representative", data.customer.representative || "")
+  styleInfo(13, vi ? "Địa chỉ" : "Address", data.customer.address || "")
+  styleInfo(14, vi ? "Điện thoại" : "Phone", data.customer.phone || "")
+  styleInfo(15, "Email", data.customer.email || "")
+  styleInfo(16, "MST", data.customer.tax_code || "")
+  styleInfo(17, vi ? "Mã báo giá" : "Quotation ID", data.id || "")
+  styleInfo(18, vi ? "Ngày lập" : "Date", data.date)
+  styleInfo(19, vi ? "Hiệu lực đến" : "Valid until", data.validUntil)
+  const header = sheet.addRow([vi ? "Sản phẩm" : "Product", vi ? "Nhà cung cấp" : "Supplier", vi ? "Đơn vị" : "Unit", vi ? "Số lượng" : "Quantity", vi ? "Đơn giá" : "Unit price", "VAT %", vi ? "Thành tiền" : "Amount"])
+  header.height = 30
+  header.eachCell(cell => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; cell.border = border })
+  for (const item of data.items) {
+    const row = sheet.addRow([item.productName || item.product_id, item.supplierName || item.supplier_id, item.sell_unit, item.qty, item.selling_price, item.vat_pct, item.total])
+    row.eachCell((cell, col) => { cell.border = border; cell.alignment = { vertical: "middle", horizontal: col >= 4 ? "right" : "left" }; if (col === 5 || col === 7) cell.numFmt = "#,##0" })
+  }
+  const summary = [[vi ? "Cộng tiền hàng" : "Subtotal", data.subtotal], [vi ? "Chiết khấu" : "Discount", data.discountAmount], [vi ? "Tiền trước VAT" : "Before VAT", data.totalBeforeVat], [vi ? "Tổng VAT" : "Total VAT", data.totalVat], [vi ? "Tổng thanh toán" : "Grand total", data.finalTotal]]
+  sheet.addRow([])
+  summary.forEach(([label, value], index) => {
+    const row = sheet.addRow([label, value])
+    row.getCell(1).alignment = { horizontal: "right" }
+    row.getCell(2).alignment = { horizontal: "right" }
+    row.getCell(2).numFmt = "#,##0"
+    row.getCell(1).font = { bold: index === summary.length - 1, color: { argb: index === summary.length - 1 ? "FF1D4ED8" : "FF475569" } }
+    row.getCell(2).font = { bold: true, color: { argb: index === summary.length - 1 ? "FF1D4ED8" : "FF0F172A" } }
+  })
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+  const url = URL.createObjectURL(blob)
+  const link = window.document.createElement("a")
+  link.href = url
+  link.download = quotationFileName(data.id, "xlsx")
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 async function exportQuotationPdf(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
   const labels = vi ? { title: "BÁO GIÁ", id: "Mã báo giá", customer: "Khách hàng", date: "Ngày lập", valid: "Hiệu lực đến", product: "Sản phẩm", unit: "Đơn vị", qty: "Số lượng", price: "Đơn giá", vat: "VAT %", amount: "Thành tiền", subtotal: "Cộng tiền hàng", discount: "Chiết khấu", beforeVat: "Tiền trước VAT", totalVat: "Tổng VAT", total: "Tổng thanh toán" } : { title: "QUOTATION", id: "Quotation ID", customer: "Customer", date: "Date", valid: "Valid until", product: "Product", unit: "Unit", qty: "Quantity", price: "Unit price", vat: "VAT %", amount: "Amount", subtotal: "Subtotal", discount: "Discount", beforeVat: "Before VAT", totalVat: "Total VAT", total: "Grand total" }
   const escape = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character] || character))
@@ -98,7 +169,7 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
   const html = `<div style="width:794px; padding:42px; background:#fff; color:#0f172a; font-family:Arial,sans-serif; font-size:14px; line-height:1.45;">
     <h1 style="margin:0 0 24px; text-align:center; color:#1d4ed8; font-size:28px;">${labels.title}</h1>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:28px; margin-bottom:22px;">
-      <div><strong style="font-size:17px;">${escape(data.company.name)}</strong><div>${vi ? "Người đại diện" : "Representative"}: ${escape(data.company.representative)}</div><div>${vi ? "MST" : "Tax ID"}: ${escape(data.company.taxId)}</div><div>${vi ? "Địa chỉ" : "Address"}: ${escape(data.company.address)}</div><div>${vi ? "Điện thoại" : "Phone"}: ${escape(data.company.phone)}</div></div>
+      <div style="display:flex; gap:14px; align-items:flex-start;"><img src="${logoUrl}" alt="Logo" style="width:86px; height:58px; object-fit:contain;" /><div><strong style="font-size:17px;">${escape(data.company.name)}</strong><div>${vi ? "Người đại diện" : "Representative"}: ${escape(data.company.representative)}</div><div>${vi ? "MST" : "Tax ID"}: ${escape(data.company.taxId)}</div><div>${vi ? "Địa chỉ" : "Address"}: ${escape(data.company.address)}</div><div>${vi ? "Điện thoại" : "Phone"}: ${escape(data.company.phone)}</div></div></div>
       <div><strong>${vi ? "THÔNG TIN KHÁCH HÀNG" : "CUSTOMER INFORMATION"}</strong><div>${escape(data.customer.name)}</div><div>${vi ? "Người đại diện" : "Representative"}: ${escape(data.customer.representative)}</div><div>${vi ? "MST" : "Tax ID"}: ${escape(data.customer.tax_code)}</div><div>${vi ? "Địa chỉ" : "Address"}: ${escape(data.customer.address)}</div><div>${vi ? "Điện thoại" : "Phone"}: ${escape(data.customer.phone)}</div><div>${vi ? "Email" : "Email"}: ${escape(data.customer.email)}</div></div>
     </div>
     <div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span><strong>${labels.id}:</strong> ${escape(data.id)}</span><span><strong>${labels.date}:</strong> ${escape(data.date)}</span><span><strong>${labels.valid}:</strong> ${escape(data.validUntil)}</span></div>
@@ -132,6 +203,7 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
 }
 
 function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], supplierOptions = [], customerOptions = [], warehouseOptions = [] }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: Array<{value: string, label: string}>, supplierOptions?: Array<{value: string, label: string}>, customerOptions?: Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>, warehouseOptions?: Array<{value: string, label: string}> }) {
+  const { profile } = useAuth()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
   const [date, setDate] = useState(initialData?.date || new Date().toISOString().split("T")[0])
   const [validUntil, setValidUntil] = useState(initialData?.valid_until || "")
@@ -233,15 +305,15 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const totalBeforeVat = subtotal - discountAmount
   const finalTotal = totalBeforeVat + totalVat
 
-  const exportData = (format: "xlsx" | "pdf") => {
+  const exportData = async (format: "xlsx" | "pdf") => {
     const customer = customerOptions.find(option => option.value === customerId) || { label: initialData?.customer_name || "" }
     const exportItems = items.map(item => ({
       ...item,
       productName: productOptions.find(product => product.value === item.product_id)?.label || item.product_name,
       supplierName: supplierOptions.find(supplier => supplier.value === item.supplier_id)?.label || item.supplier_name,
     }))
-    const payload = { id: initialData?.id, company: defaultCompanySettings, customer: { ...customer, name: customer.label }, date, validUntil, notes, items: exportItems, subtotal, discountAmount, totalBeforeVat, totalVat, finalTotal }
-    if (format === "xlsx") exportQuotationExcel(payload, vi)
+    const payload = { id: initialData?.id, company: loadCompanySettings(profile?.org_id), customer: { ...customer, name: customer.label }, date, validUntil, notes, items: exportItems, subtotal, discountAmount, totalBeforeVat, totalVat, finalTotal }
+    if (format === "xlsx") await exportQuotationExcel(payload, vi)
     else exportQuotationPdf(payload, vi)
     setExportMenuOpen(false)
   }

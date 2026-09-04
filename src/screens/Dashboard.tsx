@@ -5,7 +5,7 @@ import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActiviti
 import { useLang } from "../i18n/LangContext"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchQuotations } from "../lib/dataService"
+import { fetchDashboardData, fetchQuotations } from "../lib/dataService"
 
 function fmt(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n)
@@ -30,9 +30,16 @@ export default function Dashboard() {
   const { profile } = useAuth()
 
   const [quotationsData, setQuotationsData] = useState<any[]>([])
+  const [liveDashboard, setLiveDashboard] = useState<any>(null)
 
   useEffect(() => {
-    fetchQuotations({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setQuotationsData(res.data) })
+    Promise.all([
+      fetchQuotations({ isDemo, orgId: profile?.org_id }),
+      fetchDashboardData({ isDemo, orgId: profile?.org_id }),
+    ]).then(([quotationResult, dashboardResult]) => {
+      if (quotationResult.data) setQuotationsData(quotationResult.data)
+      if (dashboardResult) setLiveDashboard(dashboardResult)
+    })
   }, [isDemo, profile])
 
   const kpiLabels = {
@@ -47,7 +54,11 @@ export default function Dashboard() {
     en: kpiData,
   }
 
-  const kpis = kpiLabels[lang]
+  const kpis = liveDashboard?.kpis ?? kpiLabels[lang]
+  const dashboardRevenueData = liveDashboard?.revenueData ?? revenueData
+  const dashboardInventoryData = liveDashboard?.inventoryDonutData ?? inventoryDonutData
+  const dashboardLowStockItems = liveDashboard?.lowStockItems ?? lowStockItems
+  const dashboardActivities = liveDashboard?.recentActivities ?? recentActivities
 
   return (
     <div className="p-5 space-y-4 max-w-screen-2xl">
@@ -70,7 +81,7 @@ export default function Dashboard() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {kpis.map((k) => (
+        {kpis.map((k: any) => (
           <div key={k.label} className="bg-white rounded-xl border p-4 flex flex-col gap-2" style={{ borderColor: "var(--border)" }}>
             <div className="text-[11px] text-slate-500 font-medium leading-tight">{k.label}</div>
             <div className="text-lg font-bold text-slate-900 mono leading-none">{k.value}</div>
@@ -110,7 +121,7 @@ export default function Dashboard() {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={196}>
-            <AreaChart data={revenueData} margin={{ top: 0, right: 0, left: -22, bottom: 0 }}>
+            <AreaChart data={dashboardRevenueData} margin={{ top: 0, right: 0, left: -22, bottom: 0 }}>
               <defs>
                 <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#2563eb" stopOpacity={0.12} />
@@ -138,14 +149,14 @@ export default function Dashboard() {
           <p className="text-[11px] text-slate-400 mb-2">{lang === "vi" ? "Theo % giá trị tồn kho" : "By stock value %"}</p>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
-              <Pie data={inventoryDonutData} cx="50%" cy="50%" innerRadius={48} outerRadius={68} dataKey="value" paddingAngle={2}>
-                {inventoryDonutData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+              <Pie data={dashboardInventoryData} cx="50%" cy="50%" innerRadius={48} outerRadius={68} dataKey="value" paddingAngle={2}>
+                {dashboardInventoryData.map((entry: any, i: number) => <Cell key={i} fill={entry.fill} />)}
               </Pie>
               <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0" }} />
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-1.5 mt-1">
-            {inventoryDonutData.map(d => (
+            {dashboardInventoryData.map((d: any) => (
               <div key={d.name} className="flex items-center justify-between text-[11px]">
                 <span className="flex items-center gap-1.5 text-slate-600">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: d.fill }} />
@@ -198,11 +209,11 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <AlertTriangle size={14} className="text-amber-500" />
               <h3 className="text-sm font-semibold text-slate-800">{t("lowStockAlert")}</h3>
-              <span className="text-[11px] bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-semibold">{lowStockItems.length}</span>
+              <span className="text-[11px] bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-semibold">{dashboardLowStockItems.length}</span>
             </div>
             <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
-          {lowStockItems.map(item => (
+          {dashboardLowStockItems.map((item: any) => (
             <div key={item.sku} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
               <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
                 <Package size={14} className="text-amber-600" />
@@ -228,7 +239,7 @@ export default function Dashboard() {
             </div>
             <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
-          {recentActivities.map((act, i) => (
+          {dashboardActivities.map((act: any, i: number) => (
             <div key={i} className="flex items-start gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
               <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                 {activityIcon[act.type]}
