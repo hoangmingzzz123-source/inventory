@@ -4,9 +4,10 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchCashBook, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchCashBook, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
+import ExcelJS from "exceljs"
 import { importFromExcel } from "../lib/excelUtils"
 import { loadCompanySettings, saveCompanySettings, type CompanySettings } from "../lib/companySettings"
 import {
@@ -856,14 +857,14 @@ export function StockLedger() {
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
-    fetchInventoryBalance({ isDemo, orgId: profile?.org_id }).then(res => {
+    fetchInventoryLedger({ isDemo, orgId: profile?.org_id }).then(res => {
       if (res.data) setData(res.data.map((row: any) => ({
-        date: row.updated_at ? new Date(row.updated_at).toLocaleDateString("vi-VN") : "",
-        doc_no: row.sku,
+        date: row.created_at ? new Date(row.created_at).toLocaleDateString("vi-VN") : "",
+        doc_no: row.ref ?? row.sku,
         product: row.product_name,
-        type: "Balance",
-        qty: row.qty,
-        balance: row.qty,
+        type: row.movement_type,
+        qty: row.qty_in || -row.qty_out,
+        balance: row.balance,
       })))
     })
   }, [isDemo, profile]);
@@ -1348,7 +1349,7 @@ export function exportCsv(filename: string, heads: string[], rows: (string | num
   URL.revokeObjectURL(url)
 }
 
-export function exportXlsx(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
+export async function exportXlsx(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS", chartData: { label: string; value: number; value2?: number; color: string }[] = [], chartLabel = "") {
   const exportDate = getExportDate()
   const wsRows = [
     ["Company", companyName],
@@ -1358,10 +1359,66 @@ export function exportXlsx(filename: string, heads: string[], rows: (string | nu
     heads,
     ...rows,
   ]
-  const ws = XLSX.utils.aoa_to_sheet(wsRows)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Report")
-  XLSX.writeFile(wb, filename + ".xlsx")
+  if (!chartData.length) {
+    const ws = XLSX.utils.aoa_to_sheet(wsRows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Report")
+    XLSX.writeFile(wb, filename + ".xlsx")
+    return
+  }
+  const workbook = new ExcelJS.Workbook()
+  const reportSheet = workbook.addWorksheet("Report")
+  wsRows.forEach(row => reportSheet.addRow(row))
+  reportSheet.getRow(5).font = { bold: true, color: { argb: "FFFFFFFF" } }
+  reportSheet.getRow(5).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } }
+  reportSheet.columns.forEach(column => { column.width = 18 })
+  const chartSheet = workbook.addWorksheet("Chart")
+  chartSheet.addRow([chartLabel])
+  chartSheet.addRow(["Label", "Value", ...(chartData.some(item => item.value2 !== undefined) ? ["Value 2"] : [])])
+  chartData.forEach(item => chartSheet.addRow([item.label, item.value, ...(item.value2 !== undefined ? [item.value2] : [])]))
+  chartSheet.getRow(2).font = { bold: true }
+  chartSheet.columns.forEach(column => { column.width = 18 })
+  const canvas = document.createElement("canvas")
+  canvas.width = 1000
+  canvas.height = 480
+  const context = canvas.getContext("2d")
+  if (context) {
+    context.fillStyle = "#ffffff"
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = "#0f172a"
+    context.font = "bold 22px sans-serif"
+    context.fillText(chartLabel, 48, 42)
+    const max = Math.max(...chartData.flatMap(item => [item.value, item.value2 ?? 0]), 1)
+    const plotHeight = 350
+    const barWidth = Math.max(16, Math.min(56, 720 / chartData.length))
+    chartData.forEach((item, index) => {
+      const x = 60 + index * (880 / chartData.length)
+      const height = item.value / max * plotHeight
+      context.fillStyle = item.color || "#2563eb"
+      context.fillRect(x, 410 - height, barWidth, height)
+      if (item.value2 !== undefined) {
+        context.fillStyle = "#10b981"
+        context.fillRect(x + barWidth + 4, 410 - item.value2 / max * plotHeight, barWidth, item.value2 / max * plotHeight)
+      }
+      context.fillStyle = "#475569"
+      context.font = "12px sans-serif"
+      context.save()
+      context.translate(x + barWidth / 2, 432)
+      context.rotate(-0.35)
+      context.fillText(item.label, 0, 0)
+      context.restore()
+    })
+    const imageId = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" })
+    chartSheet.addImage(imageId, { tl: { col: 4, row: 0 }, ext: { width: 720, height: 345 } })
+  }
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename + ".xlsx"
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export function printTable(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
@@ -1419,7 +1476,12 @@ interface ReportData {
   tableRows: (string | number)[][]
 }
 
-function buildReportData(key: string, lang: string): ReportData {
+interface LiveReportContext {
+  balance: any[]
+  ledger: any[]
+}
+
+function buildReportData(key: string, lang: string, live?: LiveReportContext): ReportData {
   const vi = lang === "vi"
   const all: Record<string, ReportData> = {
     "Doanh thu tổng hợp": {
@@ -1897,7 +1959,51 @@ function buildReportData(key: string, lang: string): ReportData {
       ],
     },
   }
-  return all[key] ?? {
+  const report = all[key]
+  if (live && (key === "Tồn kho hiện tại" || key === "Stock Balance")) {
+    const rows = live.balance
+    const totalQty = rows.reduce((sum, row) => sum + Number(row.qty ?? 0), 0)
+    const totalValue = rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0)
+    const grouped = rows.reduce<Record<string, number>>((groups, row) => {
+      const label = String(row.product_name ?? row.product ?? "Unknown")
+      groups[label] = (groups[label] ?? 0) + Number(row.qty ?? 0)
+      return groups
+    }, {})
+    return {
+      ...report,
+      kpis: [
+        { label: lang === "vi" ? "Tổng SKU" : "Total SKUs", value: String(new Set(rows.map(row => row.sku)).size) },
+        { label: lang === "vi" ? "Tổng số lượng" : "Total Units", value: fmt(totalQty) },
+        { label: lang === "vi" ? "Giá trị tồn kho" : "Inventory Value", value: `${fmt(totalValue)} ₫` },
+        { label: lang === "vi" ? "Hết hàng" : "Out of Stock", value: String(rows.filter(row => Number(row.qty ?? 0) <= 0).length) },
+      ],
+      chartData: Object.entries(grouped).slice(0, 8).map(([label, value], index) => ({ label, value, color: ["#2563eb", "#10b981", "#f59e0b", "#ef4444"][index % 4] })),
+      tableRows: rows.map(row => [row.sku ?? "", row.product_name ?? "", row.warehouse_name ?? "", Number(row.qty ?? 0), Number(row.min_qty ?? 0), Number(row.value ?? 0)]),
+    }
+  }
+  if (live && (key === "Sổ kho" || key === "Stock Ledger")) {
+    const rows = live.ledger
+    const daily = rows.reduce<Record<string, { value: number; value2: number }>>((groups, row) => {
+      const label = row.created_at ? new Date(row.created_at).toLocaleDateString(lang === "vi" ? "vi-VN" : "en-US") : "-"
+      groups[label] ??= { value: 0, value2: 0 }
+      groups[label].value += Number(row.qty_in ?? 0)
+      groups[label].value2 += Number(row.qty_out ?? 0)
+      return groups
+    }, {})
+    const closing = rows.length ? rows[rows.length - 1].balance : 0
+    return {
+      ...report,
+      kpis: [
+        { label: lang === "vi" ? "Số giao dịch" : "Transactions", value: fmt(rows.length) },
+        { label: lang === "vi" ? "Nhập kho" : "Stock In", value: fmt(rows.reduce((sum, row) => sum + Number(row.qty_in ?? 0), 0)) },
+        { label: lang === "vi" ? "Xuất kho" : "Stock Out", value: fmt(rows.reduce((sum, row) => sum + Number(row.qty_out ?? 0), 0)) },
+        { label: lang === "vi" ? "Tồn cuối kỳ" : "Closing Stock", value: fmt(closing) },
+      ],
+      chartData: Object.entries(daily).slice(-14).map(([label, values]) => ({ label, value: values.value, value2: values.value2, color: "#2563eb" })),
+      tableRows: rows.slice(0, 200).map(row => [row.created_at ? new Date(row.created_at).toLocaleDateString("vi-VN") : "", row.ref ?? "", row.product_name ?? "", Number(row.qty_in ?? 0), Number(row.qty_out ?? 0), Number(row.balance ?? 0)]),
+    }
+  }
+  return report ?? {
     title: key,
     kpis: [{ label: lang === "vi" ? "Đang phát triển" : "Coming soon", value: "—" }],
     chartLabel: "", chartType: "bar" as const, chartData: [],
@@ -1905,8 +2011,8 @@ function buildReportData(key: string, lang: string): ReportData {
   }
 }
 
-function ReportDetailModal({ reportKey, onClose, lang }: { reportKey: string; onClose: () => void; lang: string }) {
-  const data = buildReportData(reportKey, lang)
+function ReportDetailModal({ reportKey, onClose, lang, live }: { reportKey: string; onClose: () => void; lang: string; live?: LiveReportContext }) {
+  const data = buildReportData(reportKey, lang, live)
   const vi = lang === "vi"
   const chartRows = data.chartData.map(d => ({ name: d.label, [vi ? "Giá trị" : "Value"]: d.value, ...(d.value2 !== undefined ? { [vi ? "Giá trị 2" : "Value 2"]: d.value2 } : {}) }))
   const hasValue2 = data.chartData.some(d => d.value2 !== undefined)
@@ -1929,7 +2035,7 @@ function ReportDetailModal({ reportKey, onClose, lang }: { reportKey: string; on
               <Download size={12} /> CSV
             </button>
             <button
-              onClick={() => exportXlsx(filename, data.tableHeads, data.tableRows)}
+              onClick={() => exportXlsx(filename, data.tableHeads, data.tableRows, "WarehouseOS", data.chartData, data.chartLabel)}
               className="flex items-center gap-1 h-7 px-2.5 rounded-lg border text-xs text-emerald-700 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}
             >
               <FileSpreadsheet size={12} /> Excel
@@ -2018,8 +2124,22 @@ function ReportDetailModal({ reportKey, onClose, lang }: { reportKey: string; on
 // --- Reports ---
 export function Reports() {
   const { t, lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
   const [period, setPeriod] = useState(0)
   const [activeReport, setActiveReport] = useState<string | null>(null)
+  const [liveReports, setLiveReports] = useState<LiveReportContext>({ balance: [], ledger: [] })
+
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      fetchInventoryBalance({ isDemo, orgId: profile?.org_id }),
+      fetchInventoryLedger({ isDemo, orgId: profile?.org_id }),
+    ]).then(([balance, ledger]) => {
+      if (active) setLiveReports({ balance: balance.data ?? [], ledger: ledger.data ?? [] })
+    })
+    return () => { active = false }
+  }, [isDemo, profile?.org_id])
 
   const reportCategories = [
     {
@@ -2127,7 +2247,7 @@ export function Reports() {
       </div>
 
       {activeReport && (
-        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} />
+        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} live={liveReports} />
       )}
     </div>
   )

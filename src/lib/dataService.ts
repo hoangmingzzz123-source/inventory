@@ -321,6 +321,39 @@ export async function fetchInventoryBalance({ isDemo, orgId }: Ctx) {
   }
 }
 
+export async function fetchInventoryLedger({ isDemo, orgId }: Ctx) {
+  if (isDemo) {
+    const balances = new Map<string, number>()
+    return {
+      data: demoInventoryLedger.map((row: any) => {
+        const key = `${row.product_id ?? row.sku}:${row.warehouse_id ?? row.warehouse_name ?? ""}`
+        const balance = (balances.get(key) ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
+        balances.set(key, balance)
+        return { ...row, qty_in: toNumber(row.qty_in), qty_out: toNumber(row.qty_out), balance }
+      }),
+      error: null,
+    }
+  }
+
+  const { data, error } = await safeSelect("inventory_ledger", "*", query =>
+    orgId ? query.eq("org_id", orgId).order("created_at", { ascending: true }) : query,
+  )
+  const balances = new Map<string, number>()
+  const rows = (data as any[] ?? []).map((row: any) => {
+    const key = `${row.product_id ?? row.sku}:${row.warehouse_id ?? row.warehouse_name ?? ""}`
+    const balance = (balances.get(key) ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
+    balances.set(key, balance)
+    return {
+      ...row,
+      qty_in: toNumber(row.qty_in),
+      qty_out: toNumber(row.qty_out),
+      unit_cost: toNumber(row.unit_cost),
+      balance,
+    }
+  })
+  return { data: rows.reverse(), error }
+}
+
 // ─── Categories, Brands, Units ──────────────────────────────
 export async function fetchCategories({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.categories, error: null }
