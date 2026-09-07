@@ -32,6 +32,15 @@ create table if not exists inventory_ledger (
 alter table goods_receipt_items enable row level security;
 alter table inventory_ledger enable row level security;
 
+drop policy if exists "org_isolation" on goods_receipt_items;
+drop policy if exists "org_isolation" on inventory_ledger;
+drop policy if exists "org_insert_goods_receipt_items" on goods_receipt_items;
+drop policy if exists "org_update_goods_receipt_items" on goods_receipt_items;
+drop policy if exists "org_delete_goods_receipt_items" on goods_receipt_items;
+drop policy if exists "org_insert_inventory_ledger" on inventory_ledger;
+drop policy if exists "org_update_inventory_ledger" on inventory_ledger;
+drop policy if exists "org_delete_inventory_ledger" on inventory_ledger;
+
 create policy "org_isolation" on goods_receipt_items
   using (receipt_id in (select id from goods_receipts where org_id = get_org_id()));
 create policy "org_isolation" on inventory_ledger using (org_id = get_org_id());

@@ -221,15 +221,25 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const isView = mode === "view"
   
   const [latestImport, setLatestImport] = useState<any>(null)
+  const [latestImportLoading, setLatestImportLoading] = useState(false)
+
+  useEffect(() => {
+    if (activeRowId == null && items.length > 0) setActiveRowId(items[0].id)
+  }, [activeRowId, items])
 
   useEffect(() => {
     if (!activeItem?.product_id) {
       setLatestImport(null)
+      setLatestImportLoading(false)
       return
     }
     let mounted = true
+    setLatestImportLoading(true)
     fetchLatestImport(activeItem.product_id, { isDemo, orgId: profile?.org_id }).then(result => {
-      if (mounted) setLatestImport(result.data)
+      if (mounted) {
+        setLatestImport(result.data)
+        setLatestImportLoading(false)
+      }
     })
     return () => { mounted = false }
   }, [activeItem?.product_id, isDemo, profile?.org_id])
@@ -542,6 +552,11 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center text-xs px-4">
                 <FileText size={24} className="mb-2 opacity-50" />
                 {vi ? "Chọn một sản phẩm ở danh sách để xem lịch sử nhập kho." : "Select a product to view import history."}
+              </div>
+            ) : latestImportLoading ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center text-xs px-4">
+                <Info size={24} className="mb-2 opacity-50" />
+                {vi ? "Đang tải lịch sử nhập kho..." : "Loading import history..."}
               </div>
             ) : latestImport ? (
               <div className="space-y-4">
