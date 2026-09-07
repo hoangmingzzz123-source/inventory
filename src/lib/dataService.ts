@@ -575,6 +575,50 @@ export async function fetchGoodsReceipts({ isDemo, orgId }: Ctx) {
   return { data: data as any[] ?? [], error }
 }
 
+export async function fetchLatestImport(productId: string, { isDemo, orgId }: Ctx) {
+  if (isDemo) {
+    const rows = (mock.importRecords as any[])
+      .filter(row => String(row.product_id) === String(productId))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    return { data: rows[0] ?? null, error: null }
+  }
+  if (!orgId || !productId) return { data: null, error: null }
+
+  const itemResult = await safeSelect("goods_receipt_items", "*", query =>
+    query.eq("product_id", productId).order("created_at", { ascending: false }).limit(1),
+  )
+  const item = (itemResult.data as any[] ?? [])[0]
+  if (!item) return { data: null, error: itemResult.error }
+
+  const receiptResult = await safeSelect("goods_receipts", "*", query =>
+    query.eq("id", item.receipt_id).eq("org_id", orgId).maybeSingle(),
+  )
+  const receipt = (receiptResult.data as any[] ?? [])[0] ?? receiptResult.data as any
+  if (!receipt) return { data: null, error: receiptResult.error }
+  const quotationResult = receipt.po_ref
+    ? await safeSelect("quotations", "id, customer_id, customer_name", query => query.eq("id", receipt.po_ref).eq("org_id", orgId).maybeSingle())
+    : { data: null, error: null }
+  const quotation = (quotationResult.data as any[] ?? [])[0] ?? quotationResult.data as any
+
+  return {
+    data: {
+      id: item.id,
+      receipt_id: receipt.ref ?? receipt.id,
+      product_id: item.product_id,
+      product_name: item.product_name,
+      supplier_name: receipt.supplier_name ?? "",
+      cost_price: toNumber(item.unit_cost),
+      unit: item.unit ?? "",
+      quantity: toNumber(item.qty),
+      date: receipt.created_at ?? item.created_at,
+      quotation_id: receipt.po_ref ?? "",
+      customer_id: quotation?.customer_id ?? "",
+      customer_name: quotation?.customer_name ?? "",
+    },
+    error: receiptResult.error,
+  }
+}
+
 export async function upsertGoodsReceipt(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) { demoUpsert(demoGoodsReceipts, payload); return { error: null } }
   const { error } = await supabase.from("goods_receipts").upsert([{ ...payload, org_id: orgId }] as any)

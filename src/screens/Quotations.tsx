@@ -2,11 +2,11 @@ import { useState, useEffect, useMemo } from "react"
 import { Plus, Search, FileSpreadsheet, Download, ChevronLeft, ChevronRight, Check, X, FileText, Save, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { useLang } from "../i18n/LangContext"
-import { quotations as mockQuotations, importRecords, products, suppliers } from "../data/mockData"
+import { quotations as mockQuotations, products, suppliers } from "../data/mockData"
 import { exportCsv, exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchQuotations, upsertQuotation, deleteQuotation, fetchProducts, fetchSuppliers, fetchCustomers, fetchWarehouses, receiveQuotation } from "../lib/dataService"
+import { fetchQuotations, upsertQuotation, deleteQuotation, fetchProducts, fetchSuppliers, fetchCustomers, fetchWarehouses, fetchLatestImport, receiveQuotation } from "../lib/dataService"
 import { defaultCompanySettings, loadCompanySettings } from "../lib/companySettings"
 import * as XLSX from "xlsx-js-style"
 import ExcelJS from "exceljs"
@@ -204,6 +204,7 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
 
 function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], supplierOptions = [], customerOptions = [], warehouseOptions = [] }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: Array<{value: string, label: string}>, supplierOptions?: Array<{value: string, label: string}>, customerOptions?: Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>, warehouseOptions?: Array<{value: string, label: string}> }) {
   const { profile } = useAuth()
+  const { isDemo } = useDemo()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
   const [date, setDate] = useState(initialData?.date || new Date().toISOString().split("T")[0])
   const [validUntil, setValidUntil] = useState(initialData?.valid_until || "")
@@ -219,11 +220,19 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const activeItem = items.find(i => i.id === activeRowId)
   const isView = mode === "view"
   
-  const latestImport = useMemo(() => {
-    if (!activeItem || !activeItem.product_id) return null;
-    const records = importRecords.filter(r => r.product_id === activeItem.product_id).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    return records.length > 0 ? records[0] : null
-  }, [activeItem?.product_id, customerId])
+  const [latestImport, setLatestImport] = useState<any>(null)
+
+  useEffect(() => {
+    if (!activeItem?.product_id) {
+      setLatestImport(null)
+      return
+    }
+    let mounted = true
+    fetchLatestImport(activeItem.product_id, { isDemo, orgId: profile?.org_id }).then(result => {
+      if (mounted) setLatestImport(result.data)
+    })
+    return () => { mounted = false }
+  }, [activeItem?.product_id, isDemo, profile?.org_id])
 
   const latestQuotation = useMemo(() => {
     if (!activeItem || !activeItem.product_id) return null;
