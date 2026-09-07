@@ -709,6 +709,14 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const purchases = purchaseResult.data as any[]
   const receipts = receiptResult.data as any[]
   const ledger = ledgerResult.data as any[]
+  const receiptIds = receipts.map(row => row.id).filter(Boolean)
+  const receiptItemsResult = receiptIds.length
+    ? await safeSelect("goods_receipt_items", "*", query => query.in("receipt_id", receiptIds))
+    : { data: [], error: null }
+  const receiptItemsByReceipt = (receiptItemsResult.data as any[] ?? []).reduce((groups, item) => {
+    ;(groups[item.receipt_id] ??= []).push(item)
+    return groups
+  }, {} as Record<string, any[]>)
   const today = new Date().toISOString().slice(0, 10)
   const activeSales = sales.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
   const activePurchases = purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
@@ -734,7 +742,19 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
     if (month >= 0 && month < 12) monthTotals[month].purchase += toNumber(row.total)
   }
   const activityRows = [
-    ...receipts.map(row => ({ type: "purchase", text: `Goods receipt ${row.ref || row.id} completed`, time: row.created_at, user: row.created_by || "System" })),
+    ...receipts.map(row => {
+      const items = receiptItemsByReceipt[row.id] ?? []
+      const itemSummary = items.length
+        ? items.slice(0, 2).map((item: any) => `${item.product_name} x${toNumber(item.qty)}`).join(", ")
+        : `${toNumber(row.items)} items`
+      const extra = items.length > 2 ? ` +${items.length - 2} more` : ""
+      return {
+        type: "purchase",
+        text: `Goods receipt ${row.ref || row.id} completed: ${itemSummary}${extra} at ${row.warehouse_name || "warehouse"}`,
+        time: row.created_at,
+        user: row.created_by || "System",
+      }
+    }),
     ...activePurchases.map(row => ({ type: "purchase", text: `Purchase order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
     ...activeSales.map(row => ({ type: "sales", text: `Sales order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
     ...ledger.map(row => ({ type: "inventory", text: `${row.movement_type || "Inventory"}: ${row.product_name || row.sku} (${toNumber(row.qty_in) - toNumber(row.qty_out)})`, time: row.created_at, user: row.created_by || "System" })),
