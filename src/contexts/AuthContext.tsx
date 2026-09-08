@@ -15,6 +15,7 @@ interface AuthCtx {
   user: User | null
   profile: Profile | null
   loading: boolean
+  permissions: Record<string, boolean>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string, fullName: string, orgName: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
@@ -27,10 +28,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [permissions, setPermissions] = useState<Record<string, boolean>>({})
 
   async function loadProfile(userId: string) {
-    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single()
-    if (data) setProfile(data as Profile)
+    const { data } = await (supabase as any).from("profiles").select("*").eq("id", userId).single()
+    if (data) {
+      setProfile(data as Profile)
+      if (String(data.role).toLowerCase() === "admin") {
+        setPermissions({ "Finance:create": true, "Inventory:create": true, "Sales:create": true })
+      } else if (data.org_id) {
+        const { data: roleRows } = await (supabase as any).from("roles").select("id").eq("org_id", data.org_id).eq("code", data.role).limit(1)
+        const roleId = roleRows?.[0]?.id
+        if (roleId) {
+          const { data: permissionRows } = await (supabase as any).from("role_permissions").select("module, action, allowed").eq("role_id", roleId)
+          setPermissions(Object.fromEntries((permissionRows ?? []).filter((row: any) => row.allowed).map((row: any) => [`${row.module}:${row.action}`, true])))
+        }
+      }
+    }
   }
 
   useEffect(() => {
@@ -45,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) loadProfile(session.user.id)
-      else setProfile(null)
+      else { setProfile(null); setPermissions({}) }
     })
 
     return () => subscription.unsubscribe()
@@ -76,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Ctx.Provider value={{ session, user, profile, loading, signIn, signUp, signOut }}>
+    <Ctx.Provider value={{ session, user, profile, loading, permissions, signIn, signUp, signOut }}>
       {children}
     </Ctx.Provider>
   )

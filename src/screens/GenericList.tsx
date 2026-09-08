@@ -4,12 +4,15 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchCashBook, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import * as XLSX from "xlsx"
 import ExcelJS from "exceljs"
 import { importFromExcel } from "../lib/excelUtils"
 import { loadCompanySettings, saveCompanySettings, type CompanySettings } from "../lib/companySettings"
+import { formatDateTimeUtc7 } from "../lib/dateUtils"
+import { buildAgingBuckets, calculateCashBalance, deriveLedgerBalance, filterReportRows } from "../lib/reportService"
+import { getReportCatalog } from "../lib/reportCatalog"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
@@ -79,13 +82,7 @@ function getReportTitle(filename: string) {
 }
 
 function getExportDate() {
-  return new Intl.DateTimeFormat("vi-VN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date())
+  return formatDateTimeUtc7(new Date())
 }
 
 function escapeHtml(value: string | number) {
@@ -824,13 +821,34 @@ export function Warehouses() {
 // --- Sales Orders ---
 export function SalesOrders() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", total: "Sample total", status: "Sample status" }]);
+  const [data, setData] = useState<any[]>([]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  const [showCreate, setShowCreate] = useState(false);
+  const reload = async () => { const res = await fetchSalesOrders({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : row.date ?? "", doc_no: row.ref ?? row.doc_no ?? "", customer: row.customer_name ?? row.customer ?? "" }))) }
+  useEffect(() => {
+    reload()
+  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "đơn hàng" : "sales order"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="salesorders" />;
+  return <><div className="h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} /><div className="p-5"><GenericCrudList title={lang === "vi" ? "đơn hàng" : "sales order"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="salesorders" /></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
+}
+
+function SalesDocumentModal({ kind, salesOrders, deliveries, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile } = useAuth()
+  const [products, setProducts] = useState<any[]>([]); const [warehouses, setWarehouses] = useState<any[]>([]); const [form, setForm] = useState<any>({ ref: "", customer_name: "", warehouse_id: "", warehouse_name: "", sales_order_id: "", sales_order_ref: "", delivery_ref: "", reason: "" }); const [items, setItems] = useState<any[]>([{ product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }]); const [saving, setSaving] = useState(false)
+  useEffect(() => { Promise.all([fetchProducts({ isDemo, orgId: profile?.org_id }), fetchWarehouses({ isDemo, orgId: profile?.org_id })]).then(([p, w]) => { setProducts(p.data ?? []); setWarehouses(w.data ?? []) }) }, [isDemo, profile])
+  const title = kind === "order" ? (lang === "vi" ? "Tạo đơn bán" : "Create sales order") : kind === "delivery" ? (lang === "vi" ? "Tạo phiếu giao hàng" : "Create delivery") : (lang === "vi" ? "Tạo phiếu trả hàng" : "Create return")
+  const setItem = (index: number, key: string, value: any) => setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item))
+  const chooseProduct = (index: number, id: string) => { const product = products.find(row => String(row.id) === String(id)); setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_id: id, product_name: product?.name ?? "", unit_cost: Number(product?.cost ?? 0), unit_price: Number(product?.price ?? 0) } : item)) }
+  const chooseWarehouse = (id: string) => { const warehouse = warehouses.find(row => String(row.id) === String(id)); setForm({ ...form, warehouse_id: id, warehouse_name: warehouse?.name ?? "" }) }
+  const chooseOrder = (id: string) => { const order = salesOrders.find(row => String(row.id) === String(id)); setForm({ ...form, sales_order_id: id, sales_order_ref: order?.ref ?? "", customer_name: order?.customer_name ?? order?.customer ?? "" }); if (order?.items?.length) setItems(order.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: kind === "delivery" ? Number(item.remaining_qty ?? item.qty ?? 0) : Number(item.qty ?? 0), unit_price: Number(item.unit_price ?? item.price ?? 0), unit_cost: Number(item.unit_cost ?? item.cost ?? 0) }))) }
+  const chooseDelivery = (ref: string) => { const delivery = deliveries.find(row => row.ref === ref); setForm({ ...form, delivery_ref: ref, customer_name: delivery?.customer_name ?? "", warehouse_id: delivery?.warehouse_id ?? "", warehouse_name: delivery?.warehouse_name ?? "" }); if (delivery?.items?.length) setItems(delivery.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: item.qty }))) }
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const validItems = items.filter(item => item.product_id && Number(item.qty) > 0); const payload = { ...form, items: validItems }; const result = kind === "order" ? await upsertSalesOrder({ ...payload, subtotal: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0), total: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0) }, { isDemo, orgId: profile?.org_id }) : kind === "delivery" ? await deliverSalesOrder(payload, { isDemo, orgId: profile?.org_id }) : await createSalesReturn(payload, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
+  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"><div className="flex items-center justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{title}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto"><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">{lang === "vi" ? "Số chứng từ" : "Reference"}<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label>{kind === "order" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Khách hàng" : "Customer"}<input required value={form.customer_name} onChange={event => setForm({ ...form, customer_name: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label> : kind === "delivery" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Đơn bán" : "Sales order"}<select required value={form.sales_order_id} onChange={event => chooseOrder(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{salesOrders.filter(row => !["Delivered", "Cancelled"].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.ref} · {row.customer_name ?? row.customer}</option>)}</select></label> : <label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu giao" : "Delivery"}<select required value={form.delivery_ref} onChange={event => chooseDelivery(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{deliveries.filter(row => row.status !== "Reversed").map(row => <option key={row.ref} value={row.ref}>{row.ref} · {row.customer_name}</option>)}</select></label>}<label className="text-[11px] font-medium">{lang === "vi" ? "Kho" : "Warehouse"}<select required value={form.warehouse_id} onChange={event => chooseWarehouse(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div><div className="border rounded-xl overflow-hidden"><div className="flex justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold"><span>{lang === "vi" ? "Sản phẩm" : "Items"}</span><button type="button" onClick={() => setItems([...items, { product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])} className="text-blue-600">+ Add</button></div>{items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_100px_110px_28px] gap-2 p-3 border-t"><select required value={item.product_id ?? ""} onChange={event => chooseProduct(index, event.target.value)} className="h-8 rounded-lg border text-xs"><option value="">Select product</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select><input required min="0.01" step="0.01" type="number" value={item.qty} onChange={event => setItem(index, "qty", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" />{kind === "order" ? <input min="0" type="number" value={item.unit_price} onChange={event => setItem(index, "unit_price", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" /> : <span className="text-[11px] text-slate-500 self-center truncate">{item.product_name}</span>}<button type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}</div></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
 }
 
 // --- NEXT ---
@@ -859,7 +877,7 @@ export function StockLedger() {
   useEffect(() => {
     fetchInventoryLedger({ isDemo, orgId: profile?.org_id }).then(res => {
       if (res.data) setData(res.data.map((row: any) => ({
-        date: row.created_at ? new Date(row.created_at).toLocaleDateString("vi-VN") : "",
+        date: row.created_at ? formatDateTimeUtc7(row.created_at) : "",
         doc_no: row.ref ?? row.sku,
         product: row.product_name,
         type: row.movement_type,
@@ -877,28 +895,33 @@ export function StockLedger() {
 }
 
 // --- NEXT ---
+function InventoryMovementModal({ mode, onClose, onSaved }: { mode: "adjustment" | "transfer"; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { isDemo } = useDemo(); const { profile } = useAuth(); const { lang } = useLang(); const [products, setProducts] = useState<any[]>([]); const [warehouses, setWarehouses] = useState<any[]>([]); const [ledger, setLedger] = useState<any[]>([]); const [form, setForm] = useState<any>({ ref: "", warehouse_id: "", warehouse_name: "", from_warehouse_id: "", from_warehouse_name: "", to_warehouse_id: "", to_warehouse_name: "", product_id: "", product_name: "", qty: 1, reason: "" }); const [saving, setSaving] = useState(false)
+  useEffect(() => { Promise.all([fetchProducts({ isDemo, orgId: profile?.org_id }), fetchWarehouses({ isDemo, orgId: profile?.org_id }), fetchInventoryLedger({ isDemo, orgId: profile?.org_id })]).then(([p, w, l]) => { setProducts(p.data ?? []); setWarehouses(w.data ?? []); setLedger(l.data ?? []) }) }, [isDemo, profile])
+  const chooseWarehouse = (key: string, id: string) => { const row = warehouses.find(item => String(item.id) === String(id)); setForm({ ...form, [`${key}_id`]: id, [`${key}_name`]: row?.name ?? "" }) }
+  const chooseProduct = (id: string) => { const row = products.find(item => String(item.id) === String(id)); setForm({ ...form, product_id: id, product_name: row?.name ?? "" }) }
+  const currentQty = ledger.filter(row => String(row.product_id) === String(form.product_id) && String(row.warehouse_id) === String(form.warehouse_id)).reduce((sum, row) => sum + Number(row.qty_in ?? 0) - Number(row.qty_out ?? 0), 0)
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const delta = Number(form.qty) - currentQty; const result = mode === "adjustment" ? await upsertInventoryAdjustment({ ref: form.ref, warehouse_id: form.warehouse_id, warehouse_name: form.warehouse_name, reason: form.reason, items: [{ product_id: form.product_id, product_name: form.product_name, qty_delta: delta }] }, { isDemo, orgId: profile?.org_id }) : await upsertInventoryTransfer({ ref: form.ref, from_warehouse_id: form.from_warehouse_id, from_warehouse_name: form.from_warehouse_name, to_warehouse_id: form.to_warehouse_id, to_warehouse_name: form.to_warehouse_name, items: [{ product_id: form.product_id, product_name: form.product_name, qty: Number(form.qty) }] }, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
+  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"><div className="flex justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{mode === "adjustment" ? (lang === "vi" ? "Tạo điều chỉnh kho" : "Create adjustment") : (lang === "vi" ? "Tạo chuyển kho" : "Create transfer")}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Product<select required value={form.product_id} onChange={event => chooseProduct(event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select></label>{mode === "adjustment" ? <label className="text-[11px] font-medium">Actual quantity<input required min="0" type="number" step="0.01" value={form.qty} onChange={event => setForm({ ...form, qty: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /><span className="text-[10px] text-slate-400">Current ledger: {currentQty}</span></label> : <label className="text-[11px] font-medium">Quantity<input required min="0.01" type="number" step="0.01" value={form.qty} onChange={event => setForm({ ...form, qty: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label>}{mode === "adjustment" ? <label className="text-[11px] font-medium">Warehouse<select required value={form.warehouse_id} onChange={event => chooseWarehouse("warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label> : <><label className="text-[11px] font-medium">From<select required value={form.from_warehouse_id} onChange={event => chooseWarehouse("from_warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label className="text-[11px] font-medium">To<select required value={form.to_warehouse_id} onChange={event => chooseWarehouse("to_warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></>}<label className="text-[11px] font-medium col-span-2">Reason<input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">Save</button></div></form></div>
+}
+
 export function InventoryAdjustment() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
+  const [showCreate, setShowCreate] = useState(false);
+  const reload = async () => { const res = await fetchInventoryAdjustments({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.doc_no ?? row.ref ?? "", warehouse: row.warehouse_name ?? row.warehouse ?? "", reason: row.reason ?? "Manual adjustment" }))) }
   useEffect(() => {
-    fetchInventoryBalance({ isDemo, orgId: profile?.org_id }).then(res => {
-      if (res.data) setData(res.data.map((row: any) => ({
-        date: row.updated_at ? new Date(row.updated_at).toLocaleDateString("vi-VN") : "",
-        doc_no: row.sku,
-        warehouse: row.warehouse_name,
-        reason: "Stock update",
-        status: "Completed",
-      })))
-    })
+    reload()
   }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "reason", label: "REASON", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "reason", label: "REASON", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "điều chỉnh kho" : "adjustment"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","warehouse","reason","status"]} templateFile="inventoryadjustment" />;
+  const reverse = async (ref: string) => { const result = await reverseInventoryAdjustment(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
+  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo điều chỉnh" : "Create adjustment"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "WAREHOUSE", "REASON", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.warehouse}</td><td className="px-4 py-2.5">{row.reason}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button></td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="adjustment" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
 }
 
 // --- NEXT ---
@@ -1128,6 +1151,13 @@ export function AuditLogs() {
   const [dataList, setDataList] = useState(auditLogs)
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
+  useEffect(() => {
+    if (!isDemo) fetchAuditEvents({ isDemo, orgId: profile?.org_id }).then(result => {
+      if (result.data) setDataList(result.data.map((row: any) => ({ entity: row.entity, action: row.action, field: row.entity_ref ?? "", oldVal: row.old_value ? JSON.stringify(row.old_value) : "", newVal: row.new_value ? JSON.stringify(row.new_value) : "", user: row.actor_id ?? "System", time: row.created_at, ip: "", device: "" })))
+    })
+  }, [isDemo, profile])
 
   const filtered = dataList.filter(log => search === "" || log.entity.toLowerCase().includes(search.toLowerCase()) || log.user.toLowerCase().includes(search.toLowerCase()))
   const heads = lang === "vi"
@@ -1167,7 +1197,7 @@ export function AuditLogs() {
                 <td className="px-4 py-2.5 mono text-slate-400 line-through">{log.oldVal}</td>
                 <td className="px-4 py-2.5 mono font-medium text-slate-800">{log.newVal}</td>
                 <td className="px-4 py-2.5 text-blue-600 font-medium">{log.user}</td>
-                <td className="px-4 py-2.5 mono text-slate-400 whitespace-nowrap text-[10px]">{log.time}</td>
+                <td className="px-4 py-2.5 mono text-slate-400 whitespace-nowrap text-[10px]">{formatDateTimeUtc7(log.time)}</td>
                 <td className="px-4 py-2.5 mono text-slate-400 text-[10px]">{log.ip}</td>
                 <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{log.device}</td>
                 <td className="px-4 py-2.5">
@@ -1200,7 +1230,7 @@ export function AuditLogs() {
                 oldVal: fd.get("oldVal") as string || "-",
                 newVal: fd.get("newVal") as string || "-",
                 user: "Current User",
-                time: new Date().toISOString().replace("T", " ").substring(0, 19),
+                time: new Date().toISOString(),
                 ip: "127.0.0.1",
                 device: "Web Browser"
               }, ...dataList]);
@@ -1479,6 +1509,11 @@ interface ReportData {
 interface LiveReportContext {
   balance: any[]
   ledger: any[]
+  salesOrders: any[]
+  purchases: any[]
+  deliveries: any[]
+  invoices: any[]
+  cashBook: any[]
 }
 
 function buildReportData(key: string, lang: string, live?: LiveReportContext): ReportData {
@@ -1984,7 +2019,7 @@ function buildReportData(key: string, lang: string, live?: LiveReportContext): R
   if (live && (key === "Sổ kho" || key === "Stock Ledger")) {
     const rows = live.ledger
     const daily = rows.reduce<Record<string, { value: number; value2: number }>>((groups, row) => {
-      const label = row.created_at ? new Date(row.created_at).toLocaleDateString(lang === "vi" ? "vi-VN" : "en-US") : "-"
+      const label = row.created_at ? formatDateTimeUtc7(row.created_at) : "-"
       groups[label] ??= { value: 0, value2: 0 }
       groups[label].value += Number(row.qty_in ?? 0)
       groups[label].value2 += Number(row.qty_out ?? 0)
@@ -2000,8 +2035,44 @@ function buildReportData(key: string, lang: string, live?: LiveReportContext): R
         { label: lang === "vi" ? "Tồn cuối kỳ" : "Closing Stock", value: fmt(closing) },
       ],
       chartData: Object.entries(daily).slice(-14).map(([label, values]) => ({ label, value: values.value, value2: values.value2, color: "#2563eb" })),
-      tableRows: rows.slice(0, 200).map(row => [row.created_at ? new Date(row.created_at).toLocaleDateString("vi-VN") : "", row.ref ?? "", row.product_name ?? "", Number(row.qty_in ?? 0), Number(row.qty_out ?? 0), Number(row.balance ?? 0)]),
+      tableRows: rows.slice(0, 200).map(row => [row.created_at ? formatDateTimeUtc7(row.created_at) : "", row.ref ?? "", row.product_name ?? "", Number(row.qty_in ?? 0), Number(row.qty_out ?? 0), Number(row.balance ?? 0)]),
     }
+  }
+  if (live && (key === "Doanh thu tổng hợp" || key === "Revenue Summary")) {
+    const rows = live.invoices.filter(row => !["cancelled", "void"].includes(String(row.status).toLowerCase()))
+    const total = rows.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0)
+    const daily = rows.reduce<Record<string, number>>((groups, row) => { const label = row.created_at ? formatDateTimeUtc7(row.created_at).slice(0, 10) : "-"; groups[label] = (groups[label] ?? 0) + Number(row.total ?? row.amount ?? 0); return groups }, {})
+    return { ...report, kpis: [{ label: vi ? "Tổng doanh thu" : "Total Revenue", value: `${fmt(total)} ₫` }, { label: vi ? "Số hóa đơn" : "Invoices", value: fmt(rows.length) }, { label: vi ? "Giá trị trung bình" : "Average", value: `${fmt(rows.length ? total / rows.length : 0)} ₫` }, { label: vi ? "Phiếu giao" : "Deliveries", value: fmt(live.deliveries.length) }], chartData: Object.entries(daily).slice(-14).map(([label, value]) => ({ label, value: value / 1000000, color: "#2563eb" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.delivery_ref ?? "", fmt(Number(row.total ?? row.amount ?? 0)), row.status ?? ""]) }
+  }
+  if (live && (key === "Lãi gộp" || key === "Gross Profit")) {
+    const lines = live.deliveries.flatMap(row => (row.items ?? []).map((item: any) => ({ ...item, date: row.created_at })))
+    const revenue = lines.reduce((sum, item) => sum + Number(item.qty ?? 0) * Number(item.unit_price ?? 0), 0)
+    const cost = lines.reduce((sum, item) => sum + Number(item.qty ?? 0) * Number(item.unit_cost ?? 0), 0)
+    const profit = revenue - cost
+    return { ...report, kpis: [{ label: vi ? "Doanh thu" : "Revenue", value: `${fmt(revenue)} ₫` }, { label: vi ? "Giá vốn" : "COGS", value: `${fmt(cost)} ₫` }, { label: vi ? "Lãi gộp" : "Gross Profit", value: `${fmt(profit)} ₫` }, { label: vi ? "Biên lợi nhuận" : "Margin", value: `${revenue ? (profit / revenue * 100).toFixed(1) : "0.0"}%` }], chartData: [{ label: vi ? "Doanh thu" : "Revenue", value: revenue / 1000000, value2: profit / 1000000, color: "#2563eb" }], tableRows: lines.slice(0, 200).map(item => [item.product_name ?? "", fmt(Number(item.qty ?? 0) * Number(item.unit_price ?? 0)), fmt(Number(item.qty ?? 0) * Number(item.unit_cost ?? 0)), fmt(Number(item.qty ?? 0) * (Number(item.unit_price ?? 0) - Number(item.unit_cost ?? 0)))]) }
+  }
+  if (live && (key === "Tổng hợp mua hàng" || key === "Purchase Summary")) {
+    const rows = live.purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
+    const total = rows.reduce((sum, row) => sum + Number(row.total ?? 0), 0)
+    return { ...report, kpis: [{ label: vi ? "Tổng mua hàng" : "Purchase Value", value: `${fmt(total)} ₫` }, { label: vi ? "Số đơn mua" : "Purchase Orders", value: fmt(rows.length) }, { label: vi ? "Đã nhập kho" : "Received", value: fmt(live.deliveries.length) }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.total ?? 0) / 1000000, color: "#7c3aed" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.warehouse_name ?? row.warehouse ?? "", fmt(Number(row.total ?? 0)), row.status ?? ""]) }
+  }
+  if (live && (key === "Lưu chuyển tiền tệ" || key === "Cash Flow" || key === "Sổ quỹ ngày" || key === "Daily Cash Book")) {
+    const rows = live.cashBook
+    const receipts = rows.filter(row => String(row.type).toLowerCase() === "receipt").reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+    const payments = rows.filter(row => String(row.type).toLowerCase() === "payment").reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+    return { ...report, kpis: [{ label: vi ? "Thu" : "Receipts", value: `${fmt(receipts)} ₫` }, { label: vi ? "Chi" : "Payments", value: `${fmt(payments)} ₫` }, { label: vi ? "Số dư" : "Balance", value: `${fmt(receipts - payments)} ₫` }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.amount ?? 0), color: String(row.type).toLowerCase() === "receipt" ? "#10b981" : "#ef4444" })), tableRows: rows.slice(0, 200).map(row => [row.created_at ? formatDateTimeUtc7(row.created_at) : "", row.type ?? "", row.description ?? "", String(row.type).toLowerCase() === "receipt" ? fmt(Number(row.amount ?? 0)) : "", String(row.type).toLowerCase() === "payment" ? fmt(Number(row.amount ?? 0)) : "", fmt(Number(row.balance ?? 0))]) }
+  }
+  if (live && (key === "Tuổi nợ phải thu" || key === "Receivable Aging")) {
+    const rows = live.invoices.filter(row => !["paid", "cancelled", "void"].includes(String(row.status).toLowerCase()))
+    const buckets = buildAgingBuckets(rows, ["remaining", "outstanding", "total", "amount"])
+    const total = Object.values(buckets).reduce((sum, value) => sum + value, 0)
+    return { ...report, kpis: [{ label: vi ? "Tổng phải thu" : "Total Receivable", value: `${fmt(total)} ₫` }, { label: vi ? "Hóa đơn mở" : "Open Invoices", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#f59e0b" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.remaining ?? row.outstanding ?? row.total ?? row.amount ?? 0)), row.status ?? ""]) }
+  }
+  if (live && (key === "Tuổi nợ phải trả" || key === "Payable Aging")) {
+    const rows = live.purchases.filter(row => !["paid", "cancelled", "rejected"].includes(String(row.status).toLowerCase()))
+    const buckets = buildAgingBuckets(rows, ["remaining", "outstanding", "total"])
+    const total = Object.values(buckets).reduce((sum, value) => sum + value, 0)
+    return { ...report, kpis: [{ label: vi ? "Tổng phải trả" : "Total Payable", value: `${fmt(total)} ₫` }, { label: vi ? "Đơn mua mở" : "Open POs", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#ef4444" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.remaining ?? row.outstanding ?? row.total ?? 0)), row.status ?? ""]) }
   }
   return report ?? {
     title: key,
@@ -2103,7 +2174,9 @@ function ReportDetailModal({ reportKey, onClose, lang, live }: { reportKey: stri
                     </tr>
                   </thead>
                   <tbody>
-                    {data.tableRows.map((row, i) => (
+                    {data.tableRows.length === 0 ? (
+                      <tr><td colSpan={data.tableHeads.length} className="px-3 py-8 text-center text-xs text-slate-400">{vi ? "Không có dữ liệu trong phạm vi đã chọn" : "No data for the selected filters"}</td></tr>
+                    ) : data.tableRows.map((row, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
                         {row.map((cell, j) => (
                           <td key={j} className={`px-3 py-2 text-slate-700 ${j === 0 ? "mono text-blue-600 font-medium" : ""}`}>{cell}</td>
@@ -2128,59 +2201,68 @@ export function Reports() {
   const { profile } = useAuth()
   const [period, setPeriod] = useState(0)
   const [activeReport, setActiveReport] = useState<string | null>(null)
-  const [liveReports, setLiveReports] = useState<LiveReportContext>({ balance: [], ledger: [] })
+  const [liveReports, setLiveReports] = useState<LiveReportContext>({ balance: [], ledger: [], salesOrders: [], purchases: [], deliveries: [], invoices: [], cashBook: [] })
+  const [warehouses, setWarehouses] = useState<any[]>([])
+  const [products, setProducts] = useState<any[]>([])
+  const [filters, setFilters] = useState({ from: "", to: "", warehouseId: "", productId: "", status: "" })
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const liveMode = !isDemo && Boolean(profile?.org_id)
 
   useEffect(() => {
     let active = true
+    setLoading(true)
+    setLoadError(null)
     Promise.all([
       fetchInventoryBalance({ isDemo, orgId: profile?.org_id }),
       fetchInventoryLedger({ isDemo, orgId: profile?.org_id }),
-    ]).then(([balance, ledger]) => {
-      if (active) setLiveReports({ balance: balance.data ?? [], ledger: ledger.data ?? [] })
+      fetchSalesOrders({ isDemo, orgId: profile?.org_id }),
+      fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }),
+      fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }),
+      fetchInvoices({ isDemo, orgId: profile?.org_id }),
+      fetchCashBook({ isDemo, orgId: profile?.org_id }),
+      fetchWarehouses({ isDemo, orgId: profile?.org_id }),
+      fetchProducts({ isDemo, orgId: profile?.org_id }),
+    ]).then(([balance, ledger, salesOrders, purchases, deliveries, invoices, cashBook, warehouseResult, productResult]) => {
+      const ledgerRows = ledger.data ?? []
+      const warehouseMatches = (row: any) => !filters.warehouseId || String(row.warehouse_id ?? "") === filters.warehouseId
+      const productMatches = (row: any) => !filters.productId || String(row.product_id ?? "") === filters.productId
+      const filteredLedger = filterReportRows(ledgerRows, { ...filters, status: "" })
+      const filteredBalanceSource = (balance.data ?? []).filter((row: any) => warehouseMatches(row) && productMatches(row))
+      const filteredPurchases = filterReportRows(purchases.data ?? [], filters)
+      const filteredDeliveries = (deliveries.data ?? []).filter((row: any) => filterReportRows([row], filters).length > 0 && (!filters.productId || (row.items ?? []).some((item: any) => String(item.product_id ?? "") === filters.productId)))
+      const filteredInvoices = filterReportRows(invoices.data ?? [], { ...filters, warehouseId: "", productId: "" })
+      const filteredCashBook = filterReportRows(cashBook.data ?? [], { ...filters, warehouseId: "", productId: "", status: "" })
+      const derivedBalance = deriveLedgerBalance(ledgerRows)
+      const filteredDerivedBalance = derivedBalance.filter((row: any) => warehouseMatches(row) && productMatches(row))
+      if (active) {
+        setWarehouses(warehouseResult.data ?? [])
+        setProducts(productResult.data ?? [])
+        setLiveReports({ balance: filteredDerivedBalance.length ? filteredDerivedBalance : filteredBalanceSource, ledger: filteredLedger.filter(productMatches), salesOrders: salesOrders.data ?? [], purchases: filteredPurchases, deliveries: filteredDeliveries, invoices: filteredInvoices, cashBook: filteredCashBook })
+        setLoading(false)
+      }
+    }).catch(error => {
+      if (active) { setLoadError(error?.message ?? String(error)); setLoading(false) }
     })
     return () => { active = false }
-  }, [isDemo, profile?.org_id])
+  }, [isDemo, profile?.org_id, filters.from, filters.to, filters.warehouseId, filters.productId, filters.status])
 
-  const reportCategories = [
-    {
-      name: t("inventoryReports"), color: "text-blue-700", bg: "bg-blue-50", border: "#dbeafe", icon: <Layers size={14} className="text-blue-500" />,
-      kpi: { label: lang === "vi" ? "86 SKU đang hoạt động" : "86 active SKUs", trend: "up" as const },
-      reports: lang === "vi"
-        ? ["Tồn kho hiện tại", "Sổ kho", "Giá trị tồn kho", "Tồn kho thấp", "Hàng chậm luân chuyển", "Hàng nhanh luân chuyển"]
-        : ["Stock Balance", "Stock Ledger", "Inventory Value", "Low Stock", "Slow Moving", "Fast Moving"],
-      reportKeys: ["Tồn kho hiện tại", "Sổ kho", "Giá trị tồn kho", "Tồn kho thấp", "Hàng chậm luân chuyển", "Hàng nhanh luân chuyển"],
-    },
-    {
-      name: t("salesReports"), color: "text-emerald-700", bg: "bg-emerald-50", border: "#d1fae5", icon: <TrendingUp size={14} className="text-emerald-500" />,
-      kpi: { label: lang === "vi" ? "405 triệu doanh thu T8" : "405M revenue in Aug", trend: "up" as const },
-      reports: lang === "vi"
-        ? ["Doanh thu tổng hợp", "Lãi gộp", "Xếp hạng khách hàng", "Xếp hạng sản phẩm", "Doanh thu theo nhân viên"]
-        : ["Revenue Summary", "Gross Profit", "Customer Ranking", "Product Ranking", "Sales by Employee"],
-      reportKeys: ["Doanh thu tổng hợp", "Lãi gộp", "Xếp hạng khách hàng", "Xếp hạng sản phẩm", "Doanh thu theo nhân viên"],
-    },
-    {
-      name: t("purchaseReports"), color: "text-violet-700", bg: "bg-violet-50", border: "#ede9fe", icon: <ShoppingCart size={14} className="text-violet-500" />,
-      kpi: { label: lang === "vi" ? "12 đơn mua trong tháng" : "12 POs this month", trend: "up" as const },
-      reports: lang === "vi"
-        ? ["Tổng hợp mua hàng", "Xếp hạng nhà cung cấp", "Xu hướng mua hàng", "Tổng hợp nhập kho"]
-        : ["Purchase Summary", "Supplier Ranking", "Purchase Trend", "GRN Summary"],
-      reportKeys: ["Tổng hợp mua hàng", "Xếp hạng nhà cung cấp", "Xu hướng mua hàng", "Tổng hợp nhập kho"],
-    },
-    {
-      name: t("financeReports"), color: "text-amber-700", bg: "bg-amber-50", border: "#fef3c7", icon: <CreditCard size={14} className="text-amber-500" />,
-      kpi: { label: lang === "vi" ? "185 triệu số dư quỹ" : "185M cash balance", trend: "up" as const },
-      reports: lang === "vi"
-        ? ["Lưu chuyển tiền tệ", "Tuổi nợ phải thu", "Tuổi nợ phải trả", "Sổ quỹ ngày", "Tổng hợp chi phí"]
-        : ["Cash Flow", "Receivable Aging", "Payable Aging", "Daily Cash Book", "Expense Summary"],
-      reportKeys: ["Lưu chuyển tiền tệ", "Tuổi nợ phải thu", "Tuổi nợ phải trả", "Sổ quỹ ngày", "Tổng hợp chi phí"],
-    },
-  ]
+  const reportCatalog = getReportCatalog(lang, t, {
+    skuCount: new Set(liveReports.balance.map(row => row.sku)).size,
+    revenueMillions: Math.round(liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) / 1000000),
+    purchaseCount: liveReports.purchases.length,
+    cashMillions: Math.round(calculateCashBalance(liveReports.cashBook) / 1000000),
+  })
+  const reportCategories = reportCatalog.map(category => ({
+    ...category,
+    icon: category.icon === "inventory" ? <Layers size={14} className="text-blue-500" /> : category.icon === "sales" ? <TrendingUp size={14} className="text-emerald-500" /> : category.icon === "purchase" ? <ShoppingCart size={14} className="text-violet-500" /> : <CreditCard size={14} className="text-amber-500" />,
+  }))
 
   const summaryKpis = [
-    { label: lang === "vi" ? "Doanh thu tháng này" : "Monthly Revenue", value: "405 triệu", icon: <TrendingUp size={14} />, color: "text-emerald-600", bg: "bg-emerald-50", trend: "+18%" },
-    { label: lang === "vi" ? "Giá trị tồn kho" : "Inventory Value", value: "8.42 tỷ", icon: <Layers size={14} />, color: "text-blue-600", bg: "bg-blue-50", trend: "+5%" },
-    { label: lang === "vi" ? "Tổng mua hàng" : "Purchase Value", value: "3.09 tỷ", icon: <ShoppingCart size={14} />, color: "text-violet-600", bg: "bg-violet-50", trend: "+24%" },
-    { label: lang === "vi" ? "Số dư quỹ" : "Cash Balance", value: "185 triệu", icon: <CreditCard size={14} />, color: "text-amber-600", bg: "bg-amber-50", trend: "+20%" },
+    { label: lang === "vi" ? "Doanh thu tháng này" : "Monthly Revenue", value: liveMode ? `${fmt(liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) / 1000000)} triệu` : "405 triệu", icon: <TrendingUp size={14} />, color: "text-emerald-600", bg: "bg-emerald-50", trend: liveMode ? "live" : "+18%" },
+    { label: lang === "vi" ? "Giá trị tồn kho" : "Inventory Value", value: liveMode ? `${fmt(liveReports.balance.reduce((sum, row) => sum + Number(row.value ?? 0), 0) / 1000000)} triệu` : "8.42 tỷ", icon: <Layers size={14} />, color: "text-blue-600", bg: "bg-blue-50", trend: liveMode ? "live" : "+5%" },
+    { label: lang === "vi" ? "Tổng mua hàng" : "Purchase Value", value: liveMode ? `${fmt(liveReports.purchases.reduce((sum, row) => sum + Number(row.total ?? 0), 0) / 1000000)} triệu` : "3.09 tỷ", icon: <ShoppingCart size={14} />, color: "text-violet-600", bg: "bg-violet-50", trend: liveMode ? "live" : "+24%" },
+    { label: lang === "vi" ? "Số dư quỹ" : "Cash Balance", value: liveMode ? `${fmt(calculateCashBalance(liveReports.cashBook) / 1000000)} triệu` : "185 triệu", icon: <CreditCard size={14} />, color: "text-amber-600", bg: "bg-amber-50", trend: liveMode ? "live" : "+20%" },
   ]
 
   return (
@@ -2193,14 +2275,30 @@ export function Reports() {
             <span>{lang === "vi" ? "Kỳ:" : "Period:"}</span>
             <div className="flex rounded-lg overflow-hidden border text-xs" style={{ borderColor: "var(--border)" }}>
               {(lang === "vi" ? ["T8/2026", "Q3/2026", "2026"] : ["Aug 2026", "Q3 2026", "FY 2026"]).map((o, i) => (
-                <button key={o} onClick={() => setPeriod(i)} className={`h-7 px-3 whitespace-nowrap ${period === i ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{o}</button>
+                <button key={o} onClick={() => { setPeriod(i); setFilters({ ...filters, from: i === 0 ? "2026-08-01" : i === 1 ? "2026-07-01" : "2026-01-01", to: i === 0 ? "2026-08-31" : i === 1 ? "2026-09-30" : "2026-12-31" }) }} className={`h-7 px-3 whitespace-nowrap ${period === i ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{o}</button>
               ))}
             </div>
           </div>
-          <button className="flex items-center gap-1.5 h-7 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+          <button onClick={() => exportXlsx("reports-summary", [lang === "vi" ? "Báo cáo" : "Report", lang === "vi" ? "Giá trị" : "Value"], [
+            [lang === "vi" ? "Doanh thu" : "Revenue", liveMode ? liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) : 0],
+            [lang === "vi" ? "Tồn kho" : "Inventory", liveMode ? liveReports.balance.reduce((sum, row) => sum + Number(row.value ?? 0), 0) : 0],
+            [lang === "vi" ? "Mua hàng" : "Purchases", liveMode ? liveReports.purchases.reduce((sum, row) => sum + Number(row.total ?? 0), 0) : 0],
+            [lang === "vi" ? "Số dư quỹ" : "Cash Balance", liveMode ? calculateCashBalance(liveReports.cashBook) : 0],
+          ])} className="flex items-center gap-1.5 h-7 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={12} /> {lang === "vi" ? "Xuất tất cả" : "Export All"}
           </button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 bg-white border rounded-xl p-3" style={{ borderColor: "var(--border)" }}>
+        <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Từ ngày" : "From"}<input type="date" value={filters.from} onChange={event => setFilters({ ...filters, from: event.target.value })} className="block mt-1 h-8 rounded-lg border px-2 text-xs font-normal" /></label>
+        <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Đến ngày" : "To"}<input type="date" value={filters.to} onChange={event => setFilters({ ...filters, to: event.target.value })} className="block mt-1 h-8 rounded-lg border px-2 text-xs font-normal" /></label>
+        <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Kho" : "Warehouse"}<select value={filters.warehouseId} onChange={event => setFilters({ ...filters, warehouseId: event.target.value })} className="block mt-1 h-8 min-w-44 rounded-lg border px-2 text-xs font-normal"><option value="">{lang === "vi" ? "Tất cả kho" : "All warehouses"}</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+        <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Sản phẩm" : "Product"}<select value={filters.productId} onChange={event => setFilters({ ...filters, productId: event.target.value })} className="block mt-1 h-8 min-w-48 rounded-lg border px-2 text-xs font-normal"><option value="">{lang === "vi" ? "Tất cả sản phẩm" : "All products"}</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select></label>
+        <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Trạng thái" : "Status"}<select value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })} className="block mt-1 h-8 min-w-32 rounded-lg border px-2 text-xs font-normal"><option value="">{lang === "vi" ? "Tất cả" : "All"}</option>{["Draft", "Partial", "Completed", "Delivered", "Paid", "Overdue", "Cancelled", "Reversed"].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
+        <button onClick={() => setFilters({ from: "", to: "", warehouseId: "", productId: "", status: "" })} className="h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50">{lang === "vi" ? "Xóa lọc" : "Clear"}</button>
+        {loading && <span className="text-[11px] text-slate-400">{lang === "vi" ? "Đang tải dữ liệu..." : "Loading live data..."}</span>}
+        {loadError && <span className="text-[11px] text-red-600">{loadError}</span>}
       </div>
 
       {/* Summary KPI Cards */}
@@ -2247,7 +2345,7 @@ export function Reports() {
       </div>
 
       {activeReport && (
-        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} live={liveReports} />
+        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} live={liveMode ? liveReports : undefined} />
       )}
     </div>
   )
@@ -2615,49 +2713,75 @@ export function PurchaseReturn() {
 
 // --- NEXT ---
 export function SupplierPayment() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", supplier: "Sample supplier", amount: "Sample amount", method: "Sample method" }]);
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "thanh toán NCC" : "supplier payment"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","supplier","amount","method"]} templateFile="supplierpayment" />;
+  return <FinanceTransactionList transactionType="SUPPLIER_PAYMENT" />
+}
+
+function FinanceTransactionList({ transactionType }: { transactionType: "CUSTOMER_RECEIPT" | "SUPPLIER_PAYMENT" }) {
+  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile, permissions } = useAuth(); const [data, setData] = useState<any[]>([]); const [showCreate, setShowCreate] = useState(false)
+  const reload = async () => { const result = await fetchFinanceTransactions({ isDemo, orgId: profile?.org_id }); if (result.data) setData(result.data.filter(row => row.transaction_type === transactionType)) }
+  useEffect(() => { reload() }, [isDemo, profile])
+  const isReceipt = transactionType === "CUSTOMER_RECEIPT"
+  const canCreate = isDemo || Boolean(permissions["Finance:create"])
+  return <div className="flex flex-col h-full"><Toolbar onCreate={canCreate ? () => setShowCreate(true) : undefined} createLabel={isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền" : "Record receipt") : (lang === "vi" ? "Ghi nhận thanh toán" : "Record payment")} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", isReceipt ? "CUSTOMER" : "SUPPLIER", "SOURCE", "AMOUNT", "METHOD"].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.ref} className="border-b"><td className="px-4 py-2.5">{row.created_at ? formatDateTimeUtc7(row.created_at) : ""}</td><td className="px-4 py-2.5 font-medium">{row.ref}</td><td className="px-4 py-2.5">{isReceipt ? row.customer_name : row.supplier_name}</td><td className="px-4 py-2.5">{row.source_ref ?? "-"}</td><td className="px-4 py-2.5 font-semibold">{fmt(Number(row.amount ?? 0))}</td><td className="px-4 py-2.5">{row.method}</td></tr>)}</tbody></table></div>{showCreate && <FinanceTransactionModal transactionType={transactionType} onClose={() => setShowCreate(false)} onSaved={reload} />}</div>
+}
+
+function FinanceTransactionModal({ transactionType, onClose, onSaved }: { transactionType: "CUSTOMER_RECEIPT" | "SUPPLIER_PAYMENT"; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile } = useAuth(); const [form, setForm] = useState({ ref: "", source_ref: "", party: "", amount: "", method: "Cash", description: "" }); const [saving, setSaving] = useState(false); const isReceipt = transactionType === "CUSTOMER_RECEIPT"
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const result = await recordFinanceTransaction({ ref: form.ref, source_ref: form.source_ref, amount: form.amount, method: form.method, description: form.description, ...(isReceipt ? { customer_name: form.party } : { supplier_name: form.party }), transaction_type: transactionType }, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
+  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"><div className="flex justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền khách hàng" : "Record customer receipt") : (lang === "vi" ? "Ghi nhận thanh toán nhà cung cấp" : "Record supplier payment")}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">{isReceipt ? "Customer" : "Supplier"}<input required value={form.party} onChange={event => setForm({ ...form, party: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Source reference<input value={form.source_ref} onChange={event => setForm({ ...form, source_ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Amount<input required min="1" type="number" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Method<select value={form.method} onChange={event => setForm({ ...form, method: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option>Cash</option><option>Bank transfer</option><option>Card</option></select></label><label className="text-[11px] font-medium">Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
 }
 
 // --- NEXT ---
 export function InventoryTransfer() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", from: "Sample from", to: "Sample to", status: "Sample status" }]);
+  const [data, setData] = useState<any[]>([]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  const [showCreate, setShowCreate] = useState(false);
+  const reload = async () => { const res = await fetchInventoryTransfers({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.doc_no ?? row.ref ?? "", from: row.from_warehouse_name ?? row.from_warehouse ?? "", to: row.to_warehouse_name ?? row.to_warehouse ?? "" }))) }
+  useEffect(() => {
+    reload()
+  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "from", label: "FROM", isStatus: false }, { key: "to", label: "TO", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "from", label: "FROM", isStatus: false }, { key: "to", label: "TO", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "chuyển kho" : "transfer"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","from","to","status"]} templateFile="inventorytransfer" />;
+  const reverse = async (ref: string) => { const result = await reverseInventoryTransfer(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
+  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo chuyển kho" : "Create transfer"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "FROM", "TO", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.from}</td><td className="px-4 py-2.5">{row.to}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button></td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="transfer" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
 }
 
 // --- NEXT ---
 export function DeliveryNotes() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", so_no: "Sample so_no", customer: "Sample customer", status: "Sample status" }]);
+  const [data, setData] = useState<any[]>([]);
+  const { isDemo } = useDemo();
+  const { profile } = useAuth();
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showReturn, setShowReturn] = useState(false);
+  useEffect(() => {
+    reload()
+  }, [isDemo, profile]);
+  const reload = async () => {
+    const [deliveryResult, orderResult] = await Promise.all([fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }), fetchSalesOrders({ isDemo, orgId: profile?.org_id })])
+    if (deliveryResult.data) setData(deliveryResult.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref ?? "", so_no: row.sales_order_ref ?? "", customer: row.customer_name ?? "" })))
+    if (orderResult.data) setSalesOrders(orderResult.data)
+  }
+  const reverse = async (ref: string) => { const result = await reverseDeliveryNote(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "phiếu giao hàng" : "delivery note"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","so_no","customer","status"]} templateFile="deliverynotes" />;
+  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo phiếu giao" : "Create delivery"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs border-collapse min-w-[900px]"><thead><tr className="bg-slate-50 border-b">{["DATE", "DOC_NO", "SO_NO", "CUSTOMER", "STATUS", "INVOICE", ""].map(head => <th key={head} className="px-4 py-2.5 text-left font-semibold text-slate-500 text-[10px]">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.ref} className="border-b hover:bg-slate-50/60"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium">{row.doc_no}</td><td className="px-4 py-2.5">{row.so_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5 text-blue-600">{row.invoice_ref ?? "-"}</td><td className="px-4 py-2.5 flex gap-1"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">{lang === "vi" ? "Đảo" : "Reverse"}</button><button disabled={row.status === "Reversed"} onClick={() => { setShowReturn(true); }} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">{lang === "vi" ? "Trả" : "Return"}</button></td></tr>)}</tbody></table></div>{showCreate && <SalesDocumentModal kind="delivery" salesOrders={salesOrders} deliveries={data} onClose={() => setShowCreate(false)} onSaved={reload} />}{showReturn && <SalesDocumentModal kind="return" salesOrders={salesOrders} deliveries={data} onClose={() => setShowReturn(false)} onSaved={reload} />}</div>;
 }
 
 // --- NEXT ---
 export function Invoices() {
   const { lang } = useLang()
-  const invoices = [
-    { id: "INV-202608-001", so: "SO-202608-000048", customer: "FPT Telecom", amount: 52000000, tax: 5200000, total: 57200000, status: "Paid", date: "2026-08-03" },
-    { id: "INV-202608-002", so: "SO-202608-000047", customer: "VNPT Group", amount: 98500000, tax: 9850000, total: 108350000, status: "Partial", date: "2026-08-03" },
-    { id: "INV-202608-003", so: "SO-202608-000044", customer: "Nguyen Kim Corp", amount: 43000000, tax: 4300000, total: 47300000, status: "Overdue", date: "2026-08-01" },
-    { id: "INV-202608-004", so: "SO-202608-000043", customer: "Viettel Store", amount: 175000000, tax: 17500000, total: 192500000, status: "Draft", date: "2026-08-04" },
-  ]
+  const { isDemo } = useDemo(); const { profile } = useAuth(); const [invoices, setInvoices] = useState<any[]>([])
+  useEffect(() => { fetchInvoices({ isDemo, orgId: profile?.org_id }).then(result => { if (result.data) setInvoices(result.data.map((row: any) => ({ ...row, id: row.ref, so: row.so_ref ?? "", customer: row.customer_name, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "" }))) }) }, [isDemo, profile])
   const heads = lang === "vi"
     ? ["Số HĐ", "Đơn bán", "Khách hàng", "Tiền hàng", "Thuế", "Tổng TT", "Trạng thái", "Ngày HĐ", ""]
     : ["Invoice #", "SO", "Customer", "Amount", "Tax", "Total", "Status", "Date", ""]
@@ -2698,7 +2822,7 @@ export function Invoices() {
                 <td className="px-4 py-2.5 mono text-right font-bold text-slate-900">{fmt(inv.total)}</td>
                 <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
                 <td className="px-4 py-2.5 mono text-slate-400">{inv.date}</td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 opacity-0 group-hover:opacity-100"><MoreHorizontal size={14} /></button></td>
+                <td className="px-4 py-2.5"><span className="text-[10px] text-blue-600">{inv.delivery_ref ?? "-"}</span></td>
               </tr>
             ))}
           </tbody>
@@ -2711,14 +2835,7 @@ export function Invoices() {
 
 // --- NEXT ---
 export function CustomerReceipts() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", customer: "Sample customer", amount: "Sample amount", method: "Sample method" }]);
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "method", label: "METHOD", isStatus: false }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "thu tiền KH" : "customer receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","amount","method"]} templateFile="customerreceipts" />;
+  return <FinanceTransactionList transactionType="CUSTOMER_RECEIPT" />
 }
 
 // --- NEXT ---
@@ -2782,12 +2899,9 @@ export function Payables() {
 // --- NEXT ---
 export function CashBook() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", type: "Sample type", amount: "Sample amount", balance: "Sample balance" }]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchCashBook({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))) })
-  }, [isDemo, profile]);
+  const [data, setData] = useState<any[]>([]);
+  const { isDemo } = useDemo(); const { profile } = useAuth();
+  useEffect(() => { fetchCashBook({ isDemo, orgId: profile?.org_id }).then(result => { if (result.data) setData(result.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref, type: row.type, amount: row.amount, balance: row.balance }))) }) }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
   ] : [

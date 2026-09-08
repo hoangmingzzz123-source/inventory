@@ -3,10 +3,11 @@ import { Plus, Search, Download, Printer, RefreshCw, CheckCircle, XCircle, MoreH
 import StatusBadge from "../components/StatusBadge"
 import { purchaseOrders as initPOs, suppliers, warehouses } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
+import { formatDateTimeUtc7 } from "../lib/dateUtils"
 import { exportCsv, exportXlsx, printTable, ImportModal } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder, receiveQuotation } from "../lib/dataService"
+import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder, fetchProducts, receiveQuotation } from "../lib/dataService"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -20,6 +21,7 @@ export default function PurchaseOrders() {
   const [pos, setPOs] = useState<any[]>(initPOs)
   const { isDemo } = useDemo()
   const { profile } = useAuth()
+  const [products, setProducts] = useState<any[]>([])
 
   const normalizePOs = (rows: any[]) => rows.map((r: any) => ({
     ...r,
@@ -31,12 +33,15 @@ export default function PurchaseOrders() {
 
   useEffect(() => {
     fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setPOs(normalizePOs(res.data)) })
+    fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setProducts(res.data) })
   }, [isDemo, profile])
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState("all")
   const [showCreate, setShowCreate] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [showDetail, setShowDetail] = useState<typeof initPOs[0] | null>(null)
+  const [showDetail, setShowDetail] = useState<any | null>(null)
+  const [showReceive, setShowReceive] = useState<any | null>(null)
+  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({})
   const [items, setItems] = useState(defaultItems)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -72,12 +77,31 @@ export default function PurchaseOrders() {
     }
   }
 
-  const handleReceive = async (po: any) => {
-    const items = (po.items ?? []).map((item: any) => ({ ...item, product_id: item.product_id, qty: item.qty, cost_price: item.unit_cost, supplier_name: po.supplier }))
+  const openReceive = (po: any) => {
+    const quantities: Record<string, number> = {}
+    for (const item of po.items ?? []) quantities[String(item.product_id ?? item.sku)] = Number(item.remaining_qty ?? item.qty ?? 0)
+    setReceiveQuantities(quantities)
+    setShowReceive(po)
+  }
+
+  const handleReceive = async (po: any, requestedQuantities = receiveQuantities) => {
+    const items = (po.items ?? []).map((item: any) => {
+      const product = products.find(row => String(row.id) === String(item.product_id) || (item.sku && String(row.sku) === String(item.sku)))
+      const key = String(item.product_id ?? item.sku)
+      const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
+      return { ...item, product_id: item.product_id ?? product?.id, product_name: item.product_name ?? product?.name, qty: Math.min(remaining, Math.max(0, Number(requestedQuantities[key] ?? 0))), cost_price: item.unit_cost, supplier_name: po.supplier }
+    }).filter((item: any) => item.qty > 0)
     if (!items.length) return showToast(lang === "vi" ? "PO chưa có sản phẩm để nhận" : "This PO has no items to receive", false)
-    const receiveResult = await receiveQuotation({ quotationId: po.ref ?? po.id, warehouseId: po.warehouse_id, warehouseName: po.warehouse, items }, { isDemo, orgId: profile?.org_id })
+    if (items.some((item: any) => !item.product_id)) return showToast(lang === "vi" ? "Không tìm thấy sản phẩm trong danh mục" : "A PO product was not found in the product master", false)
+    const receiveResult = await receiveQuotation({ quotationId: po.ref ?? po.id, receiptRef: `GR-${po.ref ?? po.id}-${Date.now()}`, warehouseId: po.warehouse_id, warehouseName: po.warehouse, items }, { isDemo, orgId: profile?.org_id })
     if (receiveResult.error) return showToast(lang === "vi" ? "Nhận hàng thất bại" : "Receiving failed", false)
-    await handleStatus(po, "Completed")
+    const hasRemaining = (po.items ?? []).some((item: any) => {
+      const key = String(item.product_id ?? item.sku)
+      const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
+      return remaining - Math.max(0, Number(requestedQuantities[key] ?? 0)) > 0
+    })
+    setShowReceive(null)
+    await handleStatus(po, hasRemaining ? "Receiving" : "Completed")
   }
 
   const statusOptions = [
@@ -305,6 +329,44 @@ export default function PurchaseOrders() {
         </div>
       )}
 
+      {showReceive && (
+        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => setShowReceive(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Nhận hàng theo PO" : "Receive against PO"}</h2>
+                <p className="text-[10px] text-slate-400 mono mt-0.5">{showReceive.ref ?? showReceive.id} · {showReceive.warehouse}</p>
+              </div>
+              <button onClick={() => setShowReceive(null)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
+            </div>
+            <div className="p-5">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>
+                  {[t("product"), "SKU", lang === "vi" ? "Đặt mua" : "Ordered", lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Nhập lần này" : "Receive now"].map(header => <th key={header} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}
+                </tr></thead>
+                <tbody>
+                  {(showReceive.items ?? []).map((item: any) => {
+                    const key = String(item.product_id ?? item.sku)
+                    const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
+                    return <tr key={key} className="border-b" style={{ borderColor: "var(--border)" }}>
+                      <td className="px-2 py-2 font-medium">{item.product_name ?? item.product}</td>
+                      <td className="px-2 py-2 mono text-slate-500">{item.sku}</td>
+                      <td className="px-2 py-2 mono">{item.qty}</td>
+                      <td className="px-2 py-2 mono text-emerald-600">{item.received_qty ?? 0}</td>
+                      <td className="px-2 py-2"><input type="number" min={0} max={remaining} value={receiveQuantities[key] ?? 0} onChange={e => setReceiveQuantities(prev => ({ ...prev, [key]: Math.min(remaining, Math.max(0, Number(e.target.value))) }))} className="w-24 h-7 px-2 border rounded text-xs mono text-right" style={{ borderColor: "var(--border)" }} /></td>
+                    </tr>
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
+              <button onClick={() => setShowReceive(null)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
+              <button onClick={() => handleReceive(showReceive)} className="h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-medium">{lang === "vi" ? "Xác nhận nhập" : "Confirm Receipt"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Detail Dialog */}
       {showDetail && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDetail(null)}>
@@ -316,7 +378,10 @@ export default function PurchaseOrders() {
               </div>
               <div className="flex items-center gap-2">
                 {showDetail.status === "Approved" && (
-                  <button onClick={() => handleReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận hàng" : "Receive Goods"}</button>
+                  <button onClick={() => openReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận hàng" : "Receive Goods"}</button>
+                )}
+                {showDetail.status === "Receiving" && (
+                  <button onClick={() => openReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận tiếp" : "Receive More"}</button>
                 )}
                 {showDetail.status === "Pending Approval" && (
                   <>
@@ -352,23 +417,25 @@ export default function PurchaseOrders() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-                      {[t("product"), "SKU", t("qty"), t("unitPrice"), t("lineTotal")].map(h => (
+                      {[t("product"), "SKU", t("qty"), lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Còn lại" : "Remaining", t("unitPrice"), t("lineTotal")].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {defaultItems.map((item, i) => (
+                    {(showDetail.items ?? []).map((item: any, i: number) => (
                       <tr key={i} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
-                        <td className="px-3 py-2 font-medium text-slate-800">{item.product}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{item.product_name ?? item.product}</td>
                         <td className="px-3 py-2 mono text-slate-500">{item.sku}</td>
                         <td className="px-3 py-2 mono text-center">{item.qty}</td>
+                        <td className="px-3 py-2 mono text-center text-emerald-600">{item.received_qty ?? 0}</td>
+                        <td className="px-3 py-2 mono text-center text-amber-600">{item.remaining_qty ?? item.qty}</td>
                         <td className="px-3 py-2 mono text-right">{fmt(item.price)}</td>
-                        <td className="px-3 py-2 mono font-semibold text-right">{fmt(item.qty * item.price)}</td>
+                        <td className="px-3 py-2 mono font-semibold text-right">{fmt(item.qty * (item.unit_cost ?? item.price))}</td>
                       </tr>
                     ))}
                     <tr className="bg-slate-50">
-                      <td colSpan={4} className="px-3 py-2 font-bold text-right text-slate-700">{t("grandTotal")}</td>
+                      <td colSpan={6} className="px-3 py-2 font-bold text-right text-slate-700">{t("grandTotal")}</td>
                       <td className="px-3 py-2 mono font-bold text-blue-600 text-right">{fmt(showDetail.total)}</td>
                     </tr>
                   </tbody>
@@ -387,7 +454,7 @@ export default function PurchaseOrders() {
                       <div>
                         <span className="text-slate-700 font-medium">{e.action}</span>
                         <span className="text-slate-400"> · {lang === "vi" ? "bởi" : "by"} {e.user} · </span>
-                        <span className="text-slate-400 mono">{e.time}</span>
+                        <span className="text-slate-400 mono">{formatDateTimeUtc7(e.time)}</span>
                       </div>
                     </div>
                   ))}

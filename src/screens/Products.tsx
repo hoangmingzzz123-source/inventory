@@ -9,11 +9,12 @@ import StatusBadge from "../components/StatusBadge"
 import { products as initialProducts } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBrands, fetchUnits } from "../lib/dataService"
+import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBrands, fetchUnits, fetchWarehouses } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import * as XLSX from "xlsx"
 import { importFromExcel } from "../lib/excelUtils"
+import { formatDateTimeUtc7 } from "../lib/dateUtils"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -35,7 +36,7 @@ function downloadXlsxTemplate(filename: string, cols: string[]) {
 
 const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","min_stock","max_stock","description","status"]
 
-function ProductImportModal({ onClose, lang, onImport }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void> }) {
+function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehouseId, onWarehouseChange }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void>; warehouseOptions: MasterOption[]; warehouseId: string; onWarehouseChange: (value: string) => void }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -47,6 +48,13 @@ function ProductImportModal({ onClose, lang, onImport }: { onClose: () => void; 
           <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
         </div>
         <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho nhập đầu kỳ *" : "Opening warehouse *"}</label>
+            <select value={warehouseId} onChange={e => onWarehouseChange(e.target.value)} className="w-full h-8 px-3 rounded-lg border text-xs bg-white" style={{ borderColor: "var(--border)" }}>
+              <option value="">{lang === "vi" ? "Chọn kho" : "Select warehouse"}</option>
+              {warehouseOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
           <div className="rounded-xl border p-4" style={{ borderColor: "var(--border)" }}>
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
@@ -125,6 +133,7 @@ type FormState = {
   unit: string; purchasePrice: string; sellingPrice: string; tax: string
   qty: string; minStock: string; maxStock: string; description: string; status: string
   trackInventory: boolean; trackSerial: boolean; trackBatch: boolean; allowNegative: boolean
+  warehouseId: string
 }
 
 const emptyForm: FormState = {
@@ -132,6 +141,7 @@ const emptyForm: FormState = {
   purchasePrice: "", sellingPrice: "", tax: "", qty: "0", minStock: "", maxStock: "",
   description: "", status: "Active",
   trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
+  warehouseId: "",
 }
 
 function productToForm(p: Product): FormState {
@@ -141,6 +151,7 @@ function productToForm(p: Product): FormState {
     sellingPrice: String(p.price), tax: "", qty: String(p.qty ?? 0), minStock: "", maxStock: "",
     description: "", status: p.status,
     trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
+    warehouseId: "",
   }
 }
 
@@ -154,11 +165,12 @@ interface ProductFormModalProps {
   categoryOptions: MasterOption[]
   brandOptions: MasterOption[]
   unitOptions: MasterOption[]
+  warehouseOptions: MasterOption[]
   onSave: () => void
   onClose: () => void
 }
 
-function ProductFormModal({ editingProduct, form, setForm, categoryOptions, brandOptions, unitOptions, onSave, onClose }: ProductFormModalProps) {
+function ProductFormModal({ editingProduct, form, setForm, categoryOptions, brandOptions, unitOptions, warehouseOptions, onSave, onClose }: ProductFormModalProps) {
   const { t, lang } = useLang()
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -181,6 +193,15 @@ function ProductFormModal({ editingProduct, form, setForm, categoryOptions, bran
                 <><Package size={20} /><span className="text-[9px] mt-1">{lang === "vi" ? "Thêm ảnh" : "Add Image"}</span></>
               )}
             </div>
+            {!editingProduct && Number(form.qty) > 0 && (
+              <div className="mt-3">
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho nhập đầu kỳ *" : "Opening warehouse *"}</label>
+                <select value={form.warehouseId} onChange={e => setForm(f => ({ ...f, warehouseId: e.target.value }))} className="w-full h-8 px-3 rounded-lg border text-xs bg-white" style={{ borderColor: "var(--border)" }}>
+                  <option value="">{lang === "vi" ? "Chọn kho" : "Select warehouse"}</option>
+                  {warehouseOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+            )}
             <p className="text-xs text-slate-400">{lang === "vi" ? "JPG, PNG, WebP tối đa 5MB" : "JPG, PNG, WebP up to 5MB"}</p>
           </div>
 
@@ -229,9 +250,9 @@ function ProductFormModal({ editingProduct, form, setForm, categoryOptions, bran
               ] as [string, string][]).map(([label, key]) => (
                 <div key={key}>
                   <label className="block text-[11px] font-medium text-slate-600 mb-1">{label}</label>
-                  <input type="number" placeholder="0" value={(form as any)[key]}
-                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                    className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 mono" style={{ borderColor: "var(--border)" }} />
+                  <input type="number" placeholder="0" value={(form as any)[key]} readOnly={key === "qty"}
+                    onChange={e => key !== "qty" && setForm(f => ({ ...f, [key]: e.target.value }))}
+                    className={`w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 mono ${key === "qty" ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`} style={{ borderColor: "var(--border)" }} />
                 </div>
               ))}
             </div>
@@ -360,7 +381,7 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetai
               ))}
             </div>
             <div className="text-[10px] text-slate-400 flex gap-4 pt-1">
-              <span>{lang === "vi" ? "Cập nhật" : "Updated"}: <span className="mono text-slate-600">{product.updated}</span></span>
+              <span>{lang === "vi" ? "Cập nhật" : "Updated"}: <span className="mono text-slate-600">{formatDateTimeUtc7(product.updated)}</span></span>
               <span>{lang === "vi" ? "Bởi" : "By"}: <span className="text-blue-600">{product.updatedBy}</span></span>
             </div>
           </div>
@@ -387,6 +408,7 @@ export default function Products() {
   const [categoryOptions, setCategoryOptions] = useState<MasterOption[]>([])
   const [brandOptions, setBrandOptions] = useState<MasterOption[]>([])
   const [unitOptions, setUnitOptions] = useState<MasterOption[]>([])
+  const [warehouseOptions, setWarehouseOptions] = useState<MasterOption[]>([])
 
   useEffect(() => {
     fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => {
@@ -399,10 +421,12 @@ export default function Products() {
       fetchCategories({ isDemo, orgId: profile?.org_id }),
       fetchBrands({ isDemo, orgId: profile?.org_id }),
       fetchUnits({ isDemo, orgId: profile?.org_id }),
-    ]).then(([catRes, brandRes, unitRes]) => {
+      fetchWarehouses({ isDemo, orgId: profile?.org_id }),
+    ]).then(([catRes, brandRes, unitRes, warehouseRes]) => {
       setCategoryOptions((catRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
       setBrandOptions((brandRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
       setUnitOptions((unitRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
+      setWarehouseOptions((warehouseRes.data ?? []).map((row: any) => ({ value: String(row.id ?? row.code ?? ""), label: row.name ?? row.code ?? "" })))
     })
   }, [isDemo, profile])
   const [search, setSearch] = useState("")
@@ -419,6 +443,7 @@ export default function Products() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [importWarehouseId, setImportWarehouseId] = useState("")
   const actionMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -471,10 +496,16 @@ export default function Products() {
       cost: Number(form.purchasePrice) || 0,
       price: Number(form.sellingPrice) || 0,
       qty: Number(form.qty) || 0,
+      warehouse_id: form.warehouseId || undefined,
+      warehouse_name: warehouseOptions.find(option => option.value === form.warehouseId)?.label || undefined,
       status: form.status,
       updated_by: profile?.full_name || profile?.email || "system",
     }
     if (editingProduct) payload.id = editingProduct.id
+    if (!editingProduct && Number(payload.qty) > 0 && !payload.warehouse_id) {
+      showToast(lang === "vi" ? "Vui lòng chọn kho nhập đầu kỳ" : "Please select an opening warehouse", false)
+      return
+    }
     const res = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
     if (res && res.error) {
       showToast(lang === "vi" ? "Lỗi khi lưu" : "Save failed", false)
@@ -488,6 +519,11 @@ export default function Products() {
   }
 
   const handleImport = async (file: File) => {
+    if (!importWarehouseId) {
+      showToast(lang === "vi" ? "Vui lòng chọn kho nhập đầu kỳ" : "Please select an opening warehouse", false)
+      return
+    }
+    const importWarehouse = warehouseOptions.find(option => option.value === importWarehouseId)
     try {
       const rows = await importFromExcel(file)
       let imported = 0
@@ -502,6 +538,8 @@ export default function Products() {
           cost: Number(row.purchase_price ?? row.cost ?? 0),
           price: Number(row.selling_price ?? row.price ?? 0),
           qty: Number(row.qty ?? 0),
+          warehouse_id: importWarehouseId,
+          warehouse_name: importWarehouse?.label,
           status: row.status || "Active",
         }
         if (!payload.sku || !payload.name) continue
@@ -710,7 +748,7 @@ export default function Products() {
                     <span className={`font-bold ${p.qty === 0 ? "text-red-500" : p.qty < 10 ? "text-amber-600" : "text-slate-800"}`}>{p.qty}</span>
                   </td>
                   <td className="px-3 py-2"><StatusBadge status={p.status} /></td>
-                  <td className="px-3 py-2 mono text-slate-400 text-[10px] whitespace-nowrap">{p.updated}</td>
+                  <td className="px-3 py-2 mono text-slate-400 text-[10px] whitespace-nowrap">{formatDateTimeUtc7(p.updated)}</td>
                   <td className="px-3 py-2">
                     <div className="relative flex items-center justify-end" ref={actionRow === p.id ? actionMenuRef : null}>
                       <button onClick={() => setActionRow(actionRow === p.id ? null : p.id)}
@@ -827,7 +865,7 @@ export default function Products() {
       {deleteTarget && (
         <DeleteConfirmDialog product={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
       )}
-      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImport} lang={lang} />}
+      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImport} lang={lang} warehouseOptions={warehouseOptions} warehouseId={importWarehouseId} onWarehouseChange={setImportWarehouseId} />}
       {(showCreate || editingProduct) && (
         <ProductFormModal
           editingProduct={editingProduct}
@@ -836,6 +874,7 @@ export default function Products() {
           categoryOptions={categoryOptions}
           brandOptions={brandOptions}
           unitOptions={unitOptions}
+          warehouseOptions={warehouseOptions}
           onSave={handleSave}
           onClose={closeForm}
         />

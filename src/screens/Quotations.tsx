@@ -13,6 +13,7 @@ import ExcelJS from "exceljs"
 import jsPDF from "jspdf"
 import html2canvas from "html2canvas"
 import logoUrl from "../data/logo.png"
+import { formatDateTimeUtc7 } from "../lib/dateUtils"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -569,7 +570,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Ngày nhập:</span>
-                      <span className="font-medium text-slate-900">{latestImport.date}</span>
+                      <span className="font-medium text-slate-900">{formatDateTimeUtc7(latestImport.date)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Nhà cung cấp:</span>
@@ -611,7 +612,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Ngày báo giá:</span>
-                        <span className="font-medium text-slate-900">{latestQuotation.date}</span>
+                        <span className="font-medium text-slate-900">{formatDateTimeUtc7(latestQuotation.date)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Khách hàng:</span>

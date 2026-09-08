@@ -6,6 +6,7 @@ import { useLang } from "../i18n/LangContext"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
 import { fetchDashboardData, fetchQuotations } from "../lib/dataService"
+import { formatDateTimeUtc7 } from "../lib/dateUtils"
 
 function fmt(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n)
@@ -247,7 +248,7 @@ export default function Dashboard() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-slate-700 leading-relaxed">{act.text}</div>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[11px] text-slate-400">{act.time}</span>
+                  <span className="text-[11px] text-slate-400">{formatDateTimeUtc7(act.time)}</span>
                   <span className="text-[11px] text-slate-300">·</span>
                   <span className="text-[11px] text-blue-600">{act.user}</span>
                 </div>

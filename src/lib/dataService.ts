@@ -92,13 +92,89 @@ async function safeSelect(table: string, columns = "*", configure?: (query: any)
 export async function fetchProducts({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.products, error: null }
   const { data, error } = await safeSelect("products", "*", query => orgId ? query.eq("org_id", orgId) : query)
-  return { data: data as any[] ?? [], error }
+  const products = data as any[] ?? []
+  const ledgerResult = orgId
+    ? await safeSelect("inventory_ledger", "product_id, qty_in, qty_out", query => query.eq("org_id", orgId))
+    : { data: [], error: null }
+  const ledgerQty = (ledgerResult.data as any[] ?? []).reduce<Record<string, number>>((totals, row) => {
+    if (row.product_id) totals[row.product_id] = (totals[row.product_id] ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
+    return totals
+  }, {})
+  return { data: products.map(product => ({
+    ...product,
+    qty: ledgerQty[product.id] ?? 0,
+    updated: product.updated_at,
+    updatedBy: product.updated_by,
+  })), error }
 }
 
 export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) { demoUpsert(mock.products, { ...payload, cost: payload.cost ?? payload.purchase_price ?? 0, price: payload.price ?? payload.selling_price ?? 0 }); return { error: null } }
-  const { error } = await supabase.from("products").upsert([{ ...payload, org_id: orgId }] as any)
-  return { error }
+  const initialQty = toNumber(payload.qty)
+  const normalized = { ...payload }
+  delete normalized.qty
+  if (isDemo) {
+    const existing = mock.products.find((row: any) => (payload.id && String(row.id) === String(payload.id)) || (!payload.id && payload.sku && row.sku === payload.sku)) as any
+    const product = demoUpsert(mock.products, { ...normalized, qty: existing ? existing.qty : 0, cost: normalized.cost ?? normalized.purchase_price ?? 0, price: normalized.price ?? normalized.selling_price ?? 0 }) as any
+    if (!existing && initialQty > 0) {
+      const receiptRef = `INIT-${product.sku || product.id}-${Date.now()}`
+      const warehouseName = String(payload.warehouse_name ?? "")
+      demoUpsert(demoGoodsReceipts, { ref: receiptRef, po_ref: "", warehouse_id: payload.warehouse_id ?? null, warehouse_name: warehouseName, supplier_name: "Opening Balance", items: 1, status: "Completed" })
+      demoUpsert(demoGoodsReceiptItems, { receipt_id: receiptRef, product_id: product.id, product_name: product.name, sku: product.sku, qty: initialQty, unit_cost: toNumber(product.cost), unit: product.unit })
+      demoUpsert(demoInventoryLedger, { ref: receiptRef, movement_type: "OPENING_BALANCE", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouse_id ?? null, warehouse_name: warehouseName, qty_in: initialQty, qty_out: 0, unit_cost: toNumber(product.cost) })
+      product.qty = initialQty
+    }
+    return { error: null }
+  }
+
+  let existingProduct: any = null
+  if (!payload.id && payload.sku && orgId) {
+    const existingResult = await (supabase as any).from("products").select("id, sku").eq("org_id", orgId).eq("sku", payload.sku).maybeSingle()
+    existingProduct = existingResult.data
+  }
+  const { data: savedProduct, error } = await (supabase as any).from("products").upsert([{ ...normalized, qty: 0, org_id: orgId }] as any).select("id, name, sku, unit, cost").single()
+  if (error) return { error }
+  const productId = savedProduct?.id ?? existingProduct?.id ?? payload.id
+  if (!existingProduct && !payload.id && productId && initialQty > 0) {
+    const receiptRef = `INIT-${savedProduct.sku || productId}-${Date.now()}`
+    const warehouseName = String(payload.warehouse_name ?? "")
+    const receiptResult = await (supabase as any).from("goods_receipts").insert([{
+      ref: receiptRef,
+      po_ref: "",
+      warehouse_id: payload.warehouse_id ?? null,
+      warehouse_name: warehouseName,
+      supplier_name: "Opening Balance",
+      items: 1,
+      status: "Completed",
+      org_id: orgId,
+    }]).select("id").single()
+    if (receiptResult.error) return { error: receiptResult.error }
+    const unitCost = toNumber(savedProduct.cost)
+    const itemResult = await (supabase as any).from("goods_receipt_items").insert([{
+      receipt_id: receiptResult.data.id,
+      product_id: productId,
+      product_name: savedProduct.name,
+      sku: savedProduct.sku,
+      qty: initialQty,
+      unit_cost: unitCost,
+      unit: savedProduct.unit ?? null,
+    }])
+    if (itemResult.error) return { error: itemResult.error }
+    const ledgerResult = await (supabase as any).from("inventory_ledger").insert([{
+      org_id: orgId,
+      ref: receiptRef,
+      movement_type: "OPENING_BALANCE",
+      product_id: productId,
+      product_name: savedProduct.name,
+      sku: savedProduct.sku,
+      warehouse_id: null,
+      warehouse_name: warehouseName,
+      qty_in: initialQty,
+      qty_out: 0,
+      unit_cost: unitCost,
+    }])
+    if (ledgerResult.error) return { error: ledgerResult.error }
+  }
+  return { error: null }
 }
 
 export async function deleteProduct(id: string, { isDemo }: Ctx) {
@@ -241,13 +317,32 @@ export async function fetchPurchaseOrders({ isDemo, orgId }: Ctx) {
   const ids = rows.map(row => row.id).filter(Boolean)
   const itemResult = ids.length ? await safeSelect("purchase_order_items", "*", query => query.in("po_id", ids)) : { data: [], error: null }
   const itemsByPo = (itemResult.data as any[] ?? []).reduce((groups, item) => { ;(groups[item.po_id] ??= []).push(item); return groups }, {} as Record<string, any[]>)
-  return { data: rows.map((row: any) => ({
+  const refs = rows.map(row => row.ref).filter(Boolean)
+  const receiptResult = refs.length ? await safeSelect("goods_receipts", "id, po_ref, ref", query => query.in("po_ref", refs).eq("org_id", orgId)) : { data: [], error: null }
+  const receiptIds = (receiptResult.data as any[] ?? []).map(row => row.id).filter(Boolean)
+  const receiptItemResult = receiptIds.length ? await safeSelect("goods_receipt_items", "receipt_id, product_id, sku, qty", query => query.in("receipt_id", receiptIds)) : { data: [], error: null }
+  const receiptByPo = (receiptResult.data as any[] ?? []).reduce((groups, receipt) => { ;(groups[receipt.po_ref] ??= []).push(receipt); return groups }, {} as Record<string, any[]>)
+  const receiptItemsByReceipt = (receiptItemResult.data as any[] ?? []).reduce((groups, item) => { ;(groups[item.receipt_id] ??= []).push(item); return groups }, {} as Record<string, any[]>)
+  return { data: rows.map((row: any) => {
+    const receivedByProduct = (receiptByPo[row.ref] ?? []).flatMap((receipt: any) => receiptItemsByReceipt[receipt.id] ?? []).reduce((totals: Record<string, number>, item: any) => {
+      const key = String(item.product_id ?? item.sku ?? "")
+      totals[key] = (totals[key] ?? 0) + toNumber(item.qty)
+      return totals
+    }, {} as Record<string, number>)
+    const items = (itemsByPo[row.id] ?? []).map((item: any) => ({
+      ...item,
+      received_qty: receivedByProduct[String(item.product_id ?? item.sku ?? "")] ?? 0,
+      remaining_qty: Math.max(0, toNumber(item.qty) - (receivedByProduct[String(item.product_id ?? item.sku ?? "")] ?? 0)),
+    }))
+    return {
     ...row,
-    items: itemsByPo[row.id] ?? [],
+    items,
+    received_items: items.reduce((sum: number, item: any) => sum + toNumber(item.received_qty), 0),
     createdBy: row.created_by ?? row.createdBy ?? "",
     supplier: row.supplier_name ?? row.supplier ?? "",
     warehouse: row.warehouse_name ?? row.warehouse ?? "",
-  })), error }
+  }
+  }), error }
 }
 
 export async function upsertPurchaseOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -290,19 +385,130 @@ export async function deletePurchaseOrder(id: string, { isDemo }: Ctx) {
 export async function fetchSalesOrders({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.salesOrders, error: null }
   const { data, error } = await safeSelect("sales_orders", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
-  return { data: data as any[] ?? [], error }
+  const orders = data as any[] ?? []
+  const ids = orders.map(row => row.id).filter(Boolean)
+  const itemResult = ids.length ? await safeSelect("sales_order_items", "*", query => query.in("sales_order_id", ids)) : { data: [], error: null }
+  const itemsByOrder = (itemResult.data as any[] ?? []).reduce((groups, item) => {
+    ;(groups[item.sales_order_id] ??= []).push(item)
+    return groups
+  }, {} as Record<string, any[]>)
+  return { data: orders.map(row => ({ ...row, items: itemsByOrder[row.id] ?? [] })), error }
 }
 
 export async function upsertSalesOrder(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
+  const source = payload as Record<string, any>
+  const normalized = {
+    ...(source.id ? { id: source.id } : {}),
+    ref: source.ref ?? `SO-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`,
+    customer_id: source.customer_id ?? null,
+    customer_name: source.customer_name ?? source.customer ?? "",
+    warehouse_id: source.warehouse_id ?? null,
+    warehouse_name: source.warehouse_name ?? source.warehouse ?? "",
+    status: source.status ?? "Draft",
+    subtotal: Number(source.subtotal ?? 0),
+    tax: Number(source.tax ?? 0),
+    total: Number(source.total ?? 0),
+    notes: source.notes ?? null,
+    created_by: source.created_by ?? source.createdBy ?? "system",
+    org_id: orgId,
+  }
   if (isDemo) return { error: null }
-  const { error } = await supabase.from("sales_orders").upsert([{ ...payload, org_id: orgId }] as any)
-  return { error }
+  const orderResult = normalized.id
+    ? await (supabase as any).from("sales_orders").update(normalized).eq("id", normalized.id).eq("org_id", orgId).select("id").single()
+    : await (supabase as any).from("sales_orders").insert([normalized]).select("id").single()
+  if (orderResult.error) return { error: orderResult.error }
+  if (Array.isArray(source.items)) {
+    const orderId = normalized.id ?? orderResult.data?.id
+    const deleteResult = await (supabase as any).from("sales_order_items").delete().eq("sales_order_id", orderId)
+    if (deleteResult.error) return { error: deleteResult.error }
+    const itemRows = source.items.map((item: any) => ({
+      sales_order_id: orderId,
+      product_id: item.product_id ?? item.productId ?? null,
+      product_name: item.product_name ?? item.product ?? "",
+      sku: item.sku ?? null,
+      qty: Number(item.qty ?? 0),
+      unit_price: Number(item.unit_price ?? item.price ?? 0),
+      unit_cost: Number(item.unit_cost ?? item.cost ?? 0),
+    }))
+    if (itemRows.length) {
+      const itemResult = await (supabase as any).from("sales_order_items").insert(itemRows)
+      if (itemResult.error) return { error: itemResult.error }
+    }
+  }
+  return { error: null }
 }
 
 export async function deleteSalesOrder(id: string, { isDemo }: Ctx) {
   if (isDemo) return { error: null }
   const { error } = await supabase.from("sales_orders").delete().eq("id", id)
   return { error }
+}
+
+export async function fetchDeliveryNotes({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await safeSelect("delivery_notes", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  const deliveries = data as any[] ?? []
+  const ids = deliveries.map(row => row.id).filter(Boolean)
+  const itemResult = ids.length ? await safeSelect("delivery_note_items", "*", query => query.in("delivery_id", ids)) : { data: [], error: null }
+  const itemsByDelivery = (itemResult.data as any[] ?? []).reduce((groups, item) => {
+    ;(groups[item.delivery_id] ??= []).push(item)
+    return groups
+  }, {} as Record<string, any[]>)
+  return { data: deliveries.map(row => ({ ...row, items: itemsByDelivery[row.id] ?? [] })), error }
+}
+
+export async function deliverSalesOrder(payload: Record<string, any>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const items = (Array.isArray(payload.items) ? payload.items : []).map((item: any) => ({
+    product_id: item.product_id ?? item.productId,
+    product_name: item.product_name ?? item.product ?? "",
+    qty: Number(item.qty ?? item.quantity ?? 0),
+    unit_cost: Number(item.unit_cost ?? item.cost ?? 0),
+    unit_price: Number(item.unit_price ?? item.price ?? 0),
+  }))
+  const { error } = await (supabase as any).rpc("deliver_sales_order", {
+    p_ref: String(payload.ref ?? payload.doc_no ?? `DN-${Date.now()}`),
+    p_sales_order_id: payload.sales_order_id ?? payload.salesOrderId ?? null,
+    p_sales_order_ref: payload.sales_order_ref ?? payload.salesOrderRef ?? null,
+    p_customer_id: payload.customer_id ?? null,
+    p_customer_name: payload.customer_name ?? payload.customer ?? "",
+    p_warehouse_id: payload.warehouse_id ?? payload.warehouseId ?? null,
+    p_warehouse_name: payload.warehouse_name ?? payload.warehouse ?? "",
+    p_items: items,
+    p_created_by: payload.created_by ?? payload.createdBy ?? "system",
+    p_note: payload.note ?? null,
+  })
+  return { error }
+}
+
+export async function reverseDeliveryNote(ref: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await (supabase as any).rpc("reverse_delivery_note", { p_ref: ref, p_created_by: "system" })
+  return { error }
+}
+
+export async function createSalesReturn(payload: Record<string, any>, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const items = (Array.isArray(payload.items) ? payload.items : []).map((item: any) => ({
+    product_id: item.product_id ?? item.productId,
+    qty: Number(item.qty ?? item.quantity ?? 0),
+  }))
+  const { error } = await (supabase as any).rpc("create_sales_return", {
+    p_ref: String(payload.ref ?? payload.doc_no ?? `RET-${Date.now()}`),
+    p_delivery_ref: payload.delivery_ref ?? payload.deliveryRef ?? "",
+    p_warehouse_id: payload.warehouse_id ?? payload.warehouseId ?? null,
+    p_warehouse_name: payload.warehouse_name ?? payload.warehouse ?? "",
+    p_items: items,
+    p_reason: payload.reason ?? "",
+    p_created_by: payload.created_by ?? payload.createdBy ?? "system",
+  })
+  return { error }
+}
+
+export async function fetchInvoices({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await safeSelect("invoices", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
 }
 
 // ─── Inventory Balance ───────────────────────────────────────
@@ -497,13 +703,79 @@ export async function deleteCategory(id: string, { isDemo }: Ctx) {
 
 export async function fetchInventoryAdjustments({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: [], error: null }
-  const { data, error } = await safeSelect("inventory_adjustments", "*", query => orgId ? query.eq("org_id", orgId) : query)
+  const { data, error } = await safeSelect("inventory_adjustments", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
   return { data: (data as any[] ?? []).map((row: any) => ({
     ...row,
     doc_no: row.doc_no ?? row.ref ?? "",
     warehouse: row.warehouse_name ?? row.warehouse ?? "",
     status: row.status ?? "Draft",
   })), error }
+}
+
+export async function fetchInventoryTransfers({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await safeSelect("inventory_transfers", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return {
+    data: (data as any[] ?? []).map((row: any) => ({
+      ...row,
+      doc_no: row.doc_no ?? row.ref ?? "",
+      from: row.from_warehouse_name ?? row.from_warehouse ?? "",
+      to: row.to_warehouse_name ?? row.to_warehouse ?? "",
+      status: row.status ?? "Draft",
+    })),
+    error,
+  }
+}
+
+export async function upsertInventoryAdjustment(payload: Record<string, any>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const items = (Array.isArray(payload.items) ? payload.items : []).map((item: any) => ({
+    product_id: item.product_id ?? item.productId,
+    product_name: item.product_name ?? item.product ?? "",
+    qty_delta: Number(item.qty_delta ?? item.delta ?? item.qty ?? 0),
+    unit_cost: Number(item.unit_cost ?? item.cost_price ?? item.cost ?? 0),
+  }))
+  const { error } = await (supabase as any).rpc("create_inventory_adjustment", {
+    p_ref: String(payload.ref ?? payload.doc_no ?? `ADJ-${Date.now()}`),
+    p_warehouse_id: payload.warehouse_id ?? payload.warehouseId ?? null,
+    p_warehouse_name: String(payload.warehouse_name ?? payload.warehouse ?? "").trim(),
+    p_reason: payload.reason ?? payload.type ?? "Manual adjustment",
+    p_items: items,
+    p_created_by: payload.created_by ?? payload.createdBy ?? "system",
+  })
+  return { error }
+}
+
+export async function upsertInventoryTransfer(payload: Record<string, any>, { isDemo, orgId }: Ctx) {
+  if (isDemo) return { error: null }
+  const items = (Array.isArray(payload.items) ? payload.items : []).map((item: any) => ({
+    product_id: item.product_id ?? item.productId,
+    product_name: item.product_name ?? item.product ?? "",
+    qty: Number(item.qty ?? item.quantity ?? 0),
+    unit_cost: Number(item.unit_cost ?? item.cost_price ?? item.cost ?? 0),
+  }))
+  const { error } = await (supabase as any).rpc("create_inventory_transfer", {
+    p_ref: String(payload.ref ?? payload.doc_no ?? `TRF-${Date.now()}`),
+    p_from_warehouse_id: payload.from_warehouse_id ?? payload.fromWarehouseId ?? null,
+    p_from_warehouse_name: String(payload.from_warehouse_name ?? payload.fromWarehouse ?? "").trim(),
+    p_to_warehouse_id: payload.to_warehouse_id ?? payload.toWarehouseId ?? null,
+    p_to_warehouse_name: String(payload.to_warehouse_name ?? payload.toWarehouse ?? "").trim(),
+    p_items: items,
+    p_created_by: payload.created_by ?? payload.createdBy ?? "system",
+  })
+  return { error }
+}
+
+export async function reverseInventoryAdjustment(ref: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await (supabase as any).rpc("reverse_inventory_adjustment", { p_ref: ref, p_created_by: "system" })
+  return { error }
+}
+
+export async function reverseInventoryTransfer(ref: string, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await (supabase as any).rpc("reverse_inventory_transfer", { p_ref: ref, p_created_by: "system" })
+  return { error }
 }
 
 export async function upsertBrand(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -625,10 +897,10 @@ export async function upsertGoodsReceipt(payload: Record<string, unknown>, { isD
   return { error }
 }
 
-export async function receiveQuotation(payload: { quotationId: string; warehouseId?: string; warehouseName: string; items: any[] }, { isDemo, orgId }: Ctx) {
-  const receiptRef = `GR-${payload.quotationId}`
+export async function receiveQuotation(payload: { quotationId: string; receiptRef?: string; warehouseId?: string; warehouseName: string; items: any[] }, { isDemo, orgId }: Ctx) {
+  const receiptRef = payload.receiptRef ?? `GR-${payload.quotationId}`
   if (isDemo) {
-    if (demoGoodsReceipts.some((row: any) => row.ref === receiptRef)) return { error: new Error("Quotation has already been received") }
+    if (demoGoodsReceipts.some((row: any) => row.ref === receiptRef)) return { error: new Error("Goods receipt already exists") }
     const receipt = demoUpsert(demoGoodsReceipts, { ref: receiptRef, po_ref: payload.quotationId, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, supplier_name: payload.items[0]?.supplier_name ?? "", items: payload.items.length, status: "Completed" })
     for (const item of payload.items) {
       const product = mock.products.find((row: any) => row.id === item.product_id || row.sku === item.sku || row.id.replace(/^P0/, "P-") === item.product_id)
@@ -640,49 +912,23 @@ export async function receiveQuotation(payload: { quotationId: string; warehouse
     }
     return { error: null }
   }
-  const existing = await safeSelect("goods_receipts", "id", query => query.eq("ref", receiptRef).eq("org_id", orgId))
-  if ((existing.data as any[]).length) return { error: new Error("Quotation has already been received") }
-  const receiptResult = await (supabase as any).from("goods_receipts").insert([{
-    ref: receiptRef,
-    po_ref: payload.quotationId,
-    warehouse_id: payload.warehouseId ?? null,
-    warehouse_name: payload.warehouseName,
-    supplier_name: payload.items[0]?.supplier_name ?? "Unknown Supplier",
-    items: payload.items.length,
-    status: "Completed",
-    org_id: orgId,
-  }]).select("id").single()
-  if (receiptResult.error) return { error: receiptResult.error }
-  for (const item of payload.items) {
-    if (!item.product_id) continue
-    const productQuery = (supabase as any).from("products").select("id, name, sku, qty, cost").eq("org_id", orgId)
-    const productResult = await (item.product_id ? productQuery.eq("id", item.product_id) : productQuery.eq("sku", item.sku)).maybeSingle()
-    if (productResult.error || !productResult.data) continue
-    const product = productResult.data as any
-    const quantity = Number(item.qty ?? 0)
-    const newQty = Number(product.qty ?? 0) + quantity
-    const productUpdate = await (supabase as any).from("products").update({ qty: newQty, updated_at: new Date().toISOString() }).eq("id", product.id).eq("org_id", orgId)
-    if (productUpdate.error) return { error: productUpdate.error }
-    const existingBalance = await (supabase as any).from("inventory_balance").select("id, qty").eq("org_id", orgId).eq("sku", product.sku).eq("warehouse_id", payload.warehouseId ?? null).maybeSingle()
-    const balanceResult = existingBalance.data?.id
-      ? await (supabase as any).from("inventory_balance").update({ qty: Number(existingBalance.data.qty ?? 0) + quantity, unit_cost: Number(item.cost_price ?? product.cost ?? 0), updated_at: new Date().toISOString() }).eq("id", existingBalance.data.id).eq("org_id", orgId)
-      : await (supabase as any).from("inventory_balance").insert([{
-      org_id: orgId,
-      product_id: product.id,
-      product_name: product.name,
-      sku: product.sku,
-      warehouse_id: payload.warehouseId ?? null,
-      warehouse_name: payload.warehouseName,
-      qty: quantity,
-      unit_cost: Number(item.cost_price ?? product.cost ?? 0),
-      }])
-    if (balanceResult.error) return { error: balanceResult.error }
-    const receiptItemResult = await (supabase as any).from("goods_receipt_items").insert([{ receipt_id: receiptResult.data.id, product_id: product.id, product_name: product.name, sku: product.sku, qty: quantity, unit_cost: Number(item.cost_price ?? product.cost ?? 0), unit: item.sell_unit ?? null }])
-    if (receiptItemResult.error) return { error: receiptItemResult.error }
-    const ledgerResult = await (supabase as any).from("inventory_ledger").insert([{ org_id: orgId, ref: receiptRef, movement_type: "RECEIPT", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouseId ?? null, warehouse_name: payload.warehouseName, qty_in: quantity, qty_out: 0, unit_cost: Number(item.cost_price ?? product.cost ?? 0) }])
-    if (ledgerResult.error) return { error: ledgerResult.error }
-  }
-  return { error: null }
+  const rpcItems = payload.items.map(item => ({
+    product_id: item.product_id ?? null,
+    product_name: item.product_name ?? "",
+    sku: item.sku ?? "",
+    qty: Number(item.qty ?? 0),
+    unit_cost: Number(item.cost_price ?? item.unit_cost ?? 0),
+    unit: item.sell_unit ?? item.unit ?? null,
+  }))
+  const { error } = await (supabase as any).rpc("receive_goods_receipt", {
+    p_ref: receiptRef,
+    p_po_ref: payload.quotationId,
+    p_warehouse_id: payload.warehouseId ?? null,
+    p_warehouse_name: payload.warehouseName,
+    p_supplier_name: payload.items[0]?.supplier_name ?? "Unknown Supplier",
+    p_items: rpcItems,
+  })
+  return { error }
 }
 
 export async function deleteGoodsReceipt(id: string, { isDemo }: Ctx) {
@@ -695,6 +941,36 @@ export async function fetchCashBook({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: [], error: null }
   const { data, error } = await safeSelect("cash_book", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
   return { data: data as any[] ?? [], error }
+}
+
+export async function fetchFinanceTransactions({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await safeSelect("finance_transactions", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
+}
+
+export async function fetchAuditEvents({ isDemo, orgId }: Ctx) {
+  if (isDemo) return { data: [], error: null }
+  const { data, error } = await safeSelect("audit_events", "*", query => orgId ? query.eq("org_id", orgId).order("created_at", { ascending: false }) : query)
+  return { data: data as any[] ?? [], error }
+}
+
+export async function recordFinanceTransaction(payload: Record<string, any>, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await (supabase as any).rpc("record_finance_transaction", {
+    p_ref: String(payload.ref ?? payload.doc_no ?? `FIN-${Date.now()}`),
+    p_transaction_type: payload.transaction_type,
+    p_source_ref: payload.source_ref ?? payload.sourceRef ?? null,
+    p_customer_id: payload.customer_id ?? null,
+    p_customer_name: payload.customer_name ?? payload.customer ?? null,
+    p_supplier_id: payload.supplier_id ?? null,
+    p_supplier_name: payload.supplier_name ?? payload.supplier ?? null,
+    p_amount: Number(payload.amount ?? 0),
+    p_method: payload.method ?? "Cash",
+    p_description: payload.description ?? null,
+    p_created_by: payload.created_by ?? payload.createdBy ?? "system",
+  })
+  return { error }
 }
 
 export async function upsertCashBook(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -753,6 +1029,10 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const purchases = purchaseResult.data as any[]
   const receipts = receiptResult.data as any[]
   const ledger = ledgerResult.data as any[]
+  const ledgerQtyByProduct = ledger.reduce<Record<string, number>>((totals, row) => {
+    if (row.product_id) totals[row.product_id] = (totals[row.product_id] ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
+    return totals
+  }, {})
   const receiptIds = receipts.map(row => row.id).filter(Boolean)
   const receiptItemsResult = receiptIds.length
     ? await safeSelect("goods_receipt_items", "*", query => query.in("receipt_id", receiptIds))
@@ -766,12 +1046,14 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const activePurchases = purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
   const todaySales = activeSales.filter(row => String(row.date ?? row.created_at ?? "").slice(0, 10) === today)
   const todayPurchases = activePurchases.filter(row => String(row.date ?? row.created_at ?? "").slice(0, 10) === today)
-  const inventoryValue = inventory.length
-    ? inventory.reduce((sum, row) => sum + toNumber(row.value ?? row.qty * row.unit_cost), 0)
-    : products.reduce((sum, row) => sum + toNumber(row.qty) * toNumber(row.cost), 0)
+  const inventoryValue = ledger.length
+    ? ledger.reduce((sum, row) => sum + (toNumber(row.qty_in) - toNumber(row.qty_out)) * toNumber(row.unit_cost), 0)
+    : inventory.length
+      ? inventory.reduce((sum, row) => sum + toNumber(row.value ?? row.qty * row.unit_cost), 0)
+      : products.reduce((sum, row) => sum + toNumber(row.qty) * toNumber(row.cost), 0)
   const categoryTotals = products.reduce((groups, product) => {
     const name = product.category || "Other"
-    groups[name] = (groups[name] || 0) + toNumber(product.qty) * toNumber(product.cost)
+    groups[name] = (groups[name] || 0) + toNumber(ledgerQtyByProduct[product.id] ?? product.qty) * toNumber(product.cost)
     return groups
   }, {} as Record<string, number>)
   const categoryColors = ["#2563eb", "#059669", "#d97706", "#dc2626", "#64748b", "#0f766e"]
@@ -803,7 +1085,7 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
     ...activeSales.map(row => ({ type: "sales", text: `Sales order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
     ...ledger.map(row => ({ type: "inventory", text: `${row.movement_type || "Inventory"}: ${row.product_name || row.sku} (${toNumber(row.qty_in) - toNumber(row.qty_out)})`, time: row.created_at, user: row.created_by || "System" })),
   ].sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime()).slice(0, 6)
-  const lowStock = products.filter(row => toNumber(row.qty) <= toNumber(row.min_qty ?? row.min_stock ?? 0)).map(row => ({ sku: row.sku, name: row.name, qty: toNumber(row.qty), min: toNumber(row.min_qty ?? row.min_stock ?? 0), warehouse: "All warehouses" }))
+  const lowStock = products.filter(row => toNumber(ledgerQtyByProduct[row.id] ?? row.qty) <= toNumber(row.min_qty ?? row.min_stock ?? 0)).map(row => ({ sku: row.sku, name: row.name, qty: toNumber(ledgerQtyByProduct[row.id] ?? row.qty), min: toNumber(row.min_qty ?? row.min_stock ?? 0), warehouse: "All warehouses" }))
   return {
     kpis: [
       { label: "Doanh thu hôm nay", value: `₫${formatVnd(todaySales.reduce((sum, row) => sum + toNumber(row.total), 0))}`, change: "", trend: "up", sub: "theo dữ liệu thật" },
