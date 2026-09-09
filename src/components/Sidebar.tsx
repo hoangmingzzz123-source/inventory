@@ -5,10 +5,9 @@ import {
   ClipboardList, FileText, Receipt, CreditCard, UserCog,
   KeyRound, ScrollText, Building2, BookOpen,
 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useAuth } from "../contexts/AuthContext"
 import { useLang } from "../i18n/LangContext"
-import { fetchRolePermissions, fetchRoles } from "../lib/dataService"
 
 type NavChild = { id: string; labelKey: string; icon: React.ReactNode }
 type NavItem = { id: string; labelKey: string; icon: React.ReactNode; children?: NavChild[] }
@@ -84,9 +83,8 @@ interface SidebarProps {
 
 export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps) {
   const { t, lang } = useLang()
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
   const role = String(profile?.role ?? "staff").toLowerCase()
-  const [permissionMap, setPermissionMap] = useState<Record<string, boolean>>({})
 
   const screenToModule: Record<string, string> = {
     dashboard: "Dashboard",
@@ -118,58 +116,18 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
     users: "Administration",
     roles: "Administration",
     "audit-logs": "Administration",
-    settings: "Dashboard",
+    settings: "Administration",
     notifications: "Dashboard",
   }
-  const defaultAllowedByRole: Record<string, string[]> = {
-    admin: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
-    manager: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-    staff: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-  }
-
-  useEffect(() => {
-    if (!profile || !profile.org_id) {
-      setPermissionMap({})
-      return
-    }
-
-    let active = true
-    Promise.all([
-      fetchRoles({ isDemo: false, orgId: profile.org_id }),
-      fetchRolePermissions({ isDemo: false, orgId: profile.org_id }),
-    ]).then(([rolesRes, permsRes]) => {
-      if (!active) return
-      const roles = rolesRes.data ?? []
-      const currentRole = roles.find((row: any) => String(row.code ?? row.name ?? "").toLowerCase() === role || String(row.name ?? row.name_vi ?? row.name_en ?? "").toLowerCase() === role)
-      const roleId = currentRole?.id
-      if (!roleId) {
-        setPermissionMap({})
-        return
-      }
-      const map: Record<string, boolean> = {}
-      for (const row of permsRes.data ?? []) {
-        if (String(row.role_id) !== String(roleId)) continue
-        if (row.allowed) map[`${row.module}:view`] = true
-      }
-      setPermissionMap(map)
-    })
-
-    return () => { active = false }
-  }, [profile, role])
-
   const canAccess = (screen: string) => {
     if (!profile) return true
     if (role === "admin") return true
+    if (["dashboard", "user-guide", "notifications"].includes(screen)) return true
 
     const module = screenToModule[screen]
     if (!module) return false
 
-    const permissionKey = `${module}:view`
-    if (Object.keys(permissionMap).length > 0) {
-      return Boolean(permissionMap[permissionKey])
-    }
-
-    return defaultAllowedByRole[role]?.includes(screen) ?? false
+    return can(module, "view")
   }
 
   const navItemsFiltered = navItems.filter(item => {
@@ -275,11 +233,11 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
         <div className="border-t p-3 flex-shrink-0" style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">
-              NA
+              {(profile?.full_name || profile?.email || "U").split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-slate-800 truncate">Nguyễn Văn A</div>
-              <div className="text-[10px] text-slate-400">{lang === "vi" ? "Quản trị viên" : "Administrator"}</div>
+              <div className="text-xs font-semibold text-slate-800 truncate">{profile?.full_name || profile?.email || (lang === "vi" ? "Khách dùng thử" : "Demo user")}</div>
+              <div className="text-[10px] text-slate-400 capitalize">{profile?.role || (lang === "vi" ? "Bản dùng thử" : "Demo")}</div>
             </div>
           </div>
         </div>

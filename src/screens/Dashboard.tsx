@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package, ArrowRight } from "lucide-react"
+import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
 import { useState, useEffect } from "react"
 import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities } from "../data/mockData"
@@ -19,27 +19,29 @@ const activityIcon: Record<string, React.ReactNode> = {
   system: <Activity size={13} className="text-slate-400" />,
 }
 
-const periodLabels = {
-  vi: ["Hôm nay", "Tuần", "Tháng", "Quý"],
-  en: ["Today", "Week", "Month", "Quarter"],
-}
-
 export default function Dashboard() {
   const { t, lang } = useLang()
-  const periods = periodLabels[lang]
   const { isDemo } = useDemo()
   const { profile } = useAuth()
 
   const [quotationsData, setQuotationsData] = useState<any[]>([])
   const [liveDashboard, setLiveDashboard] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
 
   useEffect(() => {
+    setLoading(true)
+    setError("")
     Promise.all([
       fetchQuotations({ isDemo, orgId: profile?.org_id }),
       fetchDashboardData({ isDemo, orgId: profile?.org_id }),
     ]).then(([quotationResult, dashboardResult]) => {
-      if (quotationResult.data) setQuotationsData(quotationResult.data)
-      if (dashboardResult) setLiveDashboard(dashboardResult)
+      setQuotationsData(quotationResult.data ?? [])
+      setLiveDashboard(dashboardResult.data)
+      const sourceError = quotationResult.error ?? dashboardResult.error
+      if (sourceError) setError(sourceError.message ?? String(sourceError))
+    }).finally(() => {
+      setLoading(false)
     })
   }, [isDemo, profile])
 
@@ -55,11 +57,13 @@ export default function Dashboard() {
     en: kpiData,
   }
 
-  const kpis = liveDashboard?.kpis ?? kpiLabels[lang]
-  const dashboardRevenueData = liveDashboard?.revenueData ?? revenueData
-  const dashboardInventoryData = liveDashboard?.inventoryDonutData ?? inventoryDonutData
-  const dashboardLowStockItems = liveDashboard?.lowStockItems ?? lowStockItems
-  const dashboardActivities = liveDashboard?.recentActivities ?? recentActivities
+  const kpis = isDemo ? kpiLabels[lang] : (liveDashboard?.kpis ?? [])
+  const dashboardRevenueData = isDemo ? revenueData : (liveDashboard?.revenueData ?? [])
+  const dashboardInventoryData = isDemo ? inventoryDonutData : (liveDashboard?.inventoryDonutData ?? [])
+  const dashboardLowStockItems = isDemo ? lowStockItems : (liveDashboard?.lowStockItems ?? [])
+  const dashboardActivities = isDemo ? recentActivities : (liveDashboard?.recentActivities ?? [])
+  const displayDate = new Intl.DateTimeFormat(lang === "vi" ? "vi-VN" : "en-US", { dateStyle: "full", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date())
+  const chartYear = liveDashboard?.year ?? new Date().getFullYear()
 
   return (
     <div className="p-5 space-y-4 max-w-screen-2xl">
@@ -68,17 +72,14 @@ export default function Dashboard() {
         <div>
           <h1 className="text-base font-semibold text-slate-900">{t("dashboard")}</h1>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            {lang === "vi" ? "Thứ Hai, 04 tháng 8 năm 2026 — Vừa cập nhật" : "Monday, August 04, 2026 — Refreshed just now"}
+            {displayDate} — {lang === "vi" ? "vừa cập nhật" : "refreshed just now"}
           </p>
         </div>
-        <div className="flex gap-1.5">
-          {periods.map((p, i) => (
-            <button key={p} className={`h-7 px-3 rounded-md text-xs font-medium transition-colors ${i === 0 ? "bg-blue-600 text-white" : "bg-white border text-slate-600 hover:bg-slate-50"}`} style={i !== 0 ? { borderColor: "var(--border)" } : {}}>
-              {p}
-            </button>
-          ))}
-        </div>
+        <span className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">{lang === "vi" ? "Số liệu hôm nay" : "Today"}</span>
       </div>
+
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</div>}
+      {loading && !isDemo && <div role="status" aria-label={lang === "vi" ? "Đang tải bảng điều khiển" : "Loading dashboard"} className="grid animate-pulse grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-24 rounded-xl border bg-white p-4" style={{ borderColor: "var(--border)" }}><div className="h-2.5 w-20 rounded bg-slate-200" /><div className="mt-4 h-5 w-16 rounded bg-slate-200" /></div>)}</div>}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -106,7 +107,7 @@ export default function Dashboard() {
               <h2 className="text-sm font-semibold text-slate-800">
                 {lang === "vi" ? "Doanh thu & Mua hàng" : "Revenue & Purchase"}
               </h2>
-              <p className="text-[11px] text-slate-400">{lang === "vi" ? "Triệu VNĐ, năm 2026" : "Million VND, 2026"}</p>
+              <p className="text-[11px] text-slate-400">{lang === "vi" ? `Triệu VNĐ, năm ${chartYear}` : `Million VND, ${chartYear}`}</p>
             </div>
             <div className="flex gap-3">
               {[
@@ -156,6 +157,7 @@ export default function Dashboard() {
               <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0" }} />
             </PieChart>
           </ResponsiveContainer>
+          {!dashboardInventoryData.length && <div className="-mt-24 mb-16 text-center text-xs text-slate-400">{t("noData")}</div>}
           <div className="space-y-1.5 mt-1">
             {dashboardInventoryData.map((d: any) => (
               <div key={d.name} className="flex items-center justify-between text-[11px]">
@@ -212,7 +214,6 @@ export default function Dashboard() {
               <h3 className="text-sm font-semibold text-slate-800">{t("lowStockAlert")}</h3>
               <span className="text-[11px] bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-semibold">{dashboardLowStockItems.length}</span>
             </div>
-            <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
           {dashboardLowStockItems.map((item: any) => (
             <div key={item.sku} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
@@ -229,6 +230,7 @@ export default function Dashboard() {
               </div>
             </div>
           ))}
+          {!dashboardLowStockItems.length && <div className="px-4 py-10 text-center text-xs text-slate-400">{t("noData")}</div>}
         </div>
 
         {/* Recent Activity */}
@@ -238,7 +240,6 @@ export default function Dashboard() {
               <Activity size={14} className="text-slate-500" />
               <h3 className="text-sm font-semibold text-slate-800">{t("recentActivity")}</h3>
             </div>
-            <button className="text-[11px] text-blue-600 hover:underline flex items-center gap-0.5">{t("viewAll")} <ArrowRight size={11} /></button>
           </div>
           {dashboardActivities.map((act: any, i: number) => (
             <div key={i} className="flex items-start gap-3 px-4 py-2.5 border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
@@ -255,6 +256,7 @@ export default function Dashboard() {
               </div>
             </div>
           ))}
+          {!dashboardActivities.length && <div className="px-4 py-10 text-center text-xs text-slate-400">{t("noData")}</div>}
         </div>
       </div>
     </div>

@@ -1,3 +1,5 @@
+import { formatDateKeyUtc7 } from "./dateUtils"
+
 export type ReportSourceRow = Record<string, any>
 
 export function deriveLedgerBalance(rows: ReportSourceRow[]) {
@@ -14,10 +16,11 @@ export function deriveLedgerBalance(rows: ReportSourceRow[]) {
 
 export function buildAgingBuckets(rows: ReportSourceRow[], amountKeys: string[]) {
   const buckets: Record<string, number> = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 }
+  const today = new Date(`${formatDateKeyUtc7()}T00:00:00+07:00`).getTime()
   for (const row of rows) {
     const amount = amountKeys.reduce((value, key) => value || Number(row[key] ?? 0), 0)
-    const dateValue = row.due_date ?? row.due ?? row.created_at ?? new Date().toISOString()
-    const age = Math.max(0, Math.floor((Date.now() - new Date(dateValue).getTime()) / 86400000))
+    const dateKey = formatDateKeyUtc7(row.due_date ?? row.due ?? row.created_at) || formatDateKeyUtc7()
+    const age = Math.max(0, Math.floor((today - new Date(`${dateKey}T00:00:00+07:00`).getTime()) / 86400000))
     const bucket = age <= 30 ? "0-30" : age <= 60 ? "31-60" : age <= 90 ? "61-90" : "90+"
     buckets[bucket] += amount
   }
@@ -25,12 +28,16 @@ export function buildAgingBuckets(rows: ReportSourceRow[], amountKeys: string[])
 }
 
 export function calculateCashBalance(rows: ReportSourceRow[]) {
+  const latestWithBalance = rows
+    .filter(row => row.balance !== null && row.balance !== undefined && row.balance !== "" && Number.isFinite(Number(row.balance)))
+    .sort((a, b) => new Date(String(b.created_at ?? 0)).getTime() - new Date(String(a.created_at ?? 0)).getTime())[0]
+  if (latestWithBalance) return Number(latestWithBalance.balance)
   return rows.reduce((sum, row) => sum + (String(row.type).toLowerCase() === "receipt" ? Number(row.amount ?? 0) : -Number(row.amount ?? 0)), 0)
 }
 
 export function filterReportRows(rows: ReportSourceRow[], filters: { from?: string; to?: string; warehouseId?: string; productId?: string; status?: string }) {
   const inRange = (value: unknown) => {
-    const date = String(value ?? "").slice(0, 10)
+    const date = formatDateKeyUtc7(value)
     return (!filters.from || date >= filters.from) && (!filters.to || date <= filters.to)
   }
   return rows.filter(row => {

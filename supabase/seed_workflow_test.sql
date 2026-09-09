@@ -1,6 +1,10 @@
 -- Idempotent fixture for live quotation workflow testing.
 -- Run this in Supabase SQL Editor after applying migrations.
 -- Use only in a non-production project.
+-- Then point a dedicated authenticated admin test profile at the fixture org:
+-- update profiles set org_id = '11111111-1111-4111-8111-111111111111', role = 'admin'
+-- where email = 'your-staging-test-user@example.com';
+-- Export that user's access token as SUPABASE_TEST_ACCESS_TOKEN before npm test.
 
 insert into organizations (id, name)
 values ('11111111-1111-4111-8111-111111111111', 'Workflow Test Company')
@@ -36,5 +40,6 @@ on conflict (id) do update set name = excluded.name, cost = excluded.cost, price
 
 -- Clean only fixture documents so the workflow test can be repeated.
 delete from inventory_ledger where org_id = '11111111-1111-4111-8111-111111111111' and ref like 'TEST-%';
+delete from inventory_balance where org_id = '11111111-1111-4111-8111-111111111111' and product_id = '88888888-8888-4888-8888-888888888888';
 delete from goods_receipts where org_id = '11111111-1111-4111-8111-111111111111' and ref like 'TEST-%';
 delete from quotations where org_id = '11111111-1111-4111-8111-111111111111' and customer_id = '66666666-6666-4666-8666-666666666666';

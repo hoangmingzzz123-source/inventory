@@ -2,7 +2,8 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 
 const projectId = process.env.VITE_SUPABASE_PROJECT_ID || "jvyclpseixkqojcdxujp"
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const anonKey = process.env.VITE_SUPABASE_ANON_KEY
+const accessToken = process.env.SUPABASE_TEST_ACCESS_TOKEN
 const baseUrl = `https://${projectId}.supabase.co/rest/v1`
 const ids = {
   org: "11111111-1111-4111-8111-111111111111",
@@ -12,42 +13,216 @@ const ids = {
   product: "88888888-8888-4888-8888-888888888888",
 }
 
-async function api(table, options = {}) {
-  const response = await fetch(`${baseUrl}/${table}${options.query || ""}`, {
+async function request(path, options = {}) {
+  const response = await fetch(`${baseUrl}/${path}`, {
     method: options.method || "GET",
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json", Prefer: options.prefer || "return=representation" },
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: options.prefer || "return=representation",
+    },
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
-  const text = await response.text()
-  const data = text ? JSON.parse(text) : null
-  assert.equal(response.ok, true, `${options.method || "GET"} ${table} failed: ${JSON.stringify(data)}`)
-  return data
+  const responseText = await response.text()
+  let data = null
+  try {
+    data = responseText ? JSON.parse(responseText) : null
+  } catch {
+    data = responseText
+  }
+  return { response, data }
 }
 
-test("live quotation workflow: create, transition, receive, ledger, idempotency", { skip: !serviceKey && "Set SUPABASE_SERVICE_ROLE_KEY to run live Supabase workflow tests" }, async () => {
-  const ref = `TEST-QT-${Date.now()}`
-  const quotation = (await api("quotations", {
-    method: "POST",
-    body: { org_id: ids.org, customer_id: ids.customer, customer_name: "Khách hàng kiểm thử", date: new Date().toISOString().slice(0, 10), status: "Draft", total: 150000, discount_val: 0, discount_type: "pct" },
-  }))[0]
-  await api("quotation_items", { method: "POST", body: { quotation_id: quotation.id, product_id: ids.product, product_name: "Sản phẩm kiểm thử", supplier_id: ids.supplier, supplier_name: "Nhà cung cấp kiểm thử", sell_unit: "Piece", qty: 3, cost_price: 100000, selling_price: 150000, vat_pct: 10, total: 450000 } })
-  await api(`quotations?id=eq.${quotation.id}`, { method: "PATCH", body: { status: "Sent" }, prefer: "return=minimal" })
-  await api(`quotations?id=eq.${quotation.id}`, { method: "PATCH", body: { status: "Accepted" }, prefer: "return=minimal" })
+async function api(path, options = {}) {
+  const result = await request(path, options)
+  assert.equal(
+    result.response.ok,
+    true,
+    `${options.method || "GET"} ${path} failed: ${JSON.stringify(result.data)}`,
+  )
+  return result.data
+}
 
-  const receiptRef = `TEST-${ref}`
-  const receipt = (await api("goods_receipts", { method: "POST", body: { org_id: ids.org, ref: receiptRef, po_ref: quotation.id, supplier_name: "Nhà cung cấp kiểm thử", warehouse_id: ids.warehouse, warehouse_name: "Workflow Test Warehouse", items: 1, status: "Completed" } }))[0]
-  await api("goods_receipt_items", { method: "POST", body: { receipt_id: receipt.id, product_id: ids.product, product_name: "Sản phẩm kiểm thử", sku: "TEST-SKU-001", qty: 3, unit_cost: 100000, unit: "Piece" } })
-  await api("inventory_ledger", { method: "POST", body: { org_id: ids.org, ref: receiptRef, movement_type: "RECEIPT", product_id: ids.product, product_name: "Sản phẩm kiểm thử", sku: "TEST-SKU-001", warehouse_id: ids.warehouse, warehouse_name: "Workflow Test Warehouse", qty_in: 3, qty_out: 0, unit_cost: 100000 } })
-  await api(`quotations?id=eq.${quotation.id}`, { method: "PATCH", body: { status: "converted" }, prefer: "return=minimal" })
+test(
+  "live quotation workflow uses authenticated guarded RPCs",
+  {
+    skip:
+      (!anonKey || !accessToken) &&
+      "Set VITE_SUPABASE_ANON_KEY and SUPABASE_TEST_ACCESS_TOKEN to run live workflow tests",
+  },
+  async () => {
+    const tokenPayload = JSON.parse(
+      Buffer.from(accessToken.split(".")[1], "base64url").toString("utf8"),
+    )
+    const profiles = await api(
+      `profiles?id=eq.${tokenPayload.sub}&select=id,org_id,role,full_name,email`,
+    )
+    assert.equal(
+      profiles[0]?.org_id,
+      ids.org,
+      "The test user must belong to the seeded workflow organization",
+    )
+    assert.equal(
+      String(profiles[0]?.role).toLowerCase(),
+      "admin",
+      "The live workflow test requires the seeded organization administrator",
+    )
 
-  const savedQuotation = (await api(`quotations?id=eq.${quotation.id}`))[0]
-  const savedItems = await api(`quotation_items?quotation_id=eq.${quotation.id}`)
-  const savedReceiptItems = await api(`goods_receipt_items?receipt_id=eq.${receipt.id}`)
-  const savedLedger = await api(`inventory_ledger?ref=eq.${receiptRef}`)
-  assert.equal(savedQuotation.status, "converted")
-  assert.equal(savedItems.length, 1)
-  assert.equal(savedReceiptItems[0].qty, 3)
-  assert.equal(savedLedger[0].qty_in, 3)
-  const duplicate = await fetch(`${baseUrl}/goods_receipts?ref=eq.${receiptRef}`, { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } })
-  assert.equal((await duplicate.json()).length, 1)
-})
+    const stamp = Date.now()
+    const quotationId = await api("rpc/save_quotation", {
+      method: "POST",
+      body: {
+        p_id: null,
+        p_customer_id: ids.customer,
+        p_customer_name: "Khách hàng kiểm thử",
+        p_warehouse_id: ids.warehouse,
+        p_date: new Date().toISOString().slice(0, 10),
+        p_valid_until: null,
+        p_status: "Accepted",
+        p_discount_val: 0,
+        p_discount_type: "pct",
+        p_notes: `Live workflow ${stamp}`,
+        p_items: [
+          {
+            product_id: ids.product,
+            supplier_id: ids.supplier,
+            import_unit: "Piece",
+            sell_unit: "Piece",
+            qty: 3,
+            cost_price: 100000,
+            profit_pct: 50,
+            selling_price: 150000,
+            vat_pct: 10,
+          },
+        ],
+        p_created_by: "Live workflow test",
+      },
+    })
+
+    const receiptRef = `TEST-GRN-${stamp}`
+    const receiptId = await api("rpc/receive_goods_receipt", {
+      method: "POST",
+      body: {
+        p_ref: receiptRef,
+        p_po_ref: quotationId,
+        p_warehouse_id: ids.warehouse,
+        p_warehouse_name: "Workflow Test Warehouse",
+        p_supplier_name: "Nhà cung cấp kiểm thử",
+        p_items: [
+          {
+            product_id: ids.product,
+            sku: "TEST-SKU-001",
+            qty: 3,
+            unit_cost: 100000,
+            unit: "Piece",
+          },
+        ],
+      },
+    })
+
+    const savedQuotation = (
+      await api(`quotations?id=eq.${quotationId}&select=id,status,created_by`)
+    )[0]
+    const savedReceipt = (
+      await api(`goods_receipts?id=eq.${receiptId}&select=id,created_by`)
+    )[0]
+    const savedReceiptItems = await api(
+      `goods_receipt_items?receipt_id=eq.${receiptId}&select=product_id,qty`,
+    )
+    const savedLedger = await api(
+      `inventory_ledger?ref=eq.${receiptRef}&select=product_id,qty_in,qty_out`,
+    )
+    const savedBalance = (
+      await api(
+        `inventory_balance?product_id=eq.${ids.product}&warehouse_id=eq.${ids.warehouse}&select=qty`,
+      )
+    )[0]
+    assert.equal(savedQuotation.status, "Converted")
+    assert.notEqual(
+      savedQuotation.created_by,
+      "Live workflow test",
+      "Quotation actor must come from the authenticated profile",
+    )
+    assert.notEqual(
+      savedReceipt.created_by,
+      "Live workflow test",
+      "Receipt actor must come from the authenticated profile",
+    )
+    assert.equal(savedReceiptItems.length, 1)
+    assert.equal(Number(savedReceiptItems[0].qty), 3)
+    assert.equal(Number(savedLedger[0].qty_in), 3)
+    assert.equal(Number(savedLedger[0].qty_out), 0)
+    assert.equal(
+      Number(savedBalance.qty),
+      3,
+      "Inventory balance cache must match the ledger movement",
+    )
+
+    const duplicate = await request("rpc/receive_goods_receipt", {
+      method: "POST",
+      body: {
+        p_ref: receiptRef,
+        p_po_ref: quotationId,
+        p_warehouse_id: ids.warehouse,
+        p_warehouse_name: "Workflow Test Warehouse",
+        p_supplier_name: "Nhà cung cấp kiểm thử",
+        p_items: [
+          {
+            product_id: ids.product,
+            sku: "TEST-SKU-001",
+            qty: 3,
+            unit_cost: 100000,
+            unit: "Piece",
+          },
+        ],
+      },
+    })
+    assert.equal(
+      duplicate.response.ok,
+      false,
+      "Duplicate quotation conversion must be rejected",
+    )
+
+    const directLedgerWrite = await request("inventory_ledger", {
+      method: "POST",
+      body: {
+        org_id: ids.org,
+        ref: `TEST-DIRECT-${stamp}`,
+        movement_type: "RECEIPT",
+        product_id: ids.product,
+        product_name: "Sản phẩm kiểm thử",
+        sku: "TEST-SKU-001",
+        warehouse_id: ids.warehouse,
+        warehouse_name: "Workflow Test Warehouse",
+        qty_in: 1,
+        qty_out: 0,
+        unit_cost: 100000,
+        created_by: "Unauthorized direct write",
+      },
+    })
+    assert.equal(
+      directLedgerWrite.response.ok,
+      false,
+      "Authenticated clients must not write directly to the inventory ledger",
+    )
+
+    const reconciliation = await api("rpc/reconciliation_summary", {
+      method: "POST",
+      body: {},
+    })
+    for (const key of [
+      "negative_stock_rows",
+      "legacy_products_without_ledger",
+      "invoice_payment_mismatches",
+      "purchase_payment_mismatches",
+      "inventory_balance_mismatches",
+    ]) {
+      assert.equal(
+        Number(reconciliation?.[key]),
+        0,
+        `Reconciliation check ${key} must be zero`,
+      )
+    }
+  },
+)

@@ -1,29 +1,48 @@
-import { useState, useEffect } from "react"
-import Quotations from "./screens/Quotations"
+import { lazy, Suspense, useState, useEffect } from "react"
 import Sidebar from "./components/Sidebar"
 import Topbar from "./components/Topbar"
 import DemoBanner from "./components/DemoBanner"
-import Dashboard from "./screens/Dashboard"
-import Products from "./screens/Products"
-import PurchaseOrders from "./screens/PurchaseOrders"
+import AppErrorBoundary from "./components/AppErrorBoundary"
 import AuthScreen from "./screens/AuthScreen"
-import {
-  Customers, Suppliers, Warehouses, SalesOrders,
-  StockBalance, StockLedger, InventoryAdjustment, InventoryTransfer,
-  AuditLogs, Reports, Settings,
-  Categories, Brands, Units, Users, Roles, Receivables,
-  GoodsReceipt, PurchaseReturn, SupplierPayment,
-  DeliveryNotes, Invoices, CustomerReceipts,
-  Payables, CashBook,
-} from "./screens/GenericList"
 import { LangProvider, useLang } from "./i18n/LangContext"
 import { NotificationProvider } from "./contexts/NotificationContext"
 import { AuthProvider, useAuth } from "./contexts/AuthContext"
 import { DemoProvider, useDemo } from "./contexts/DemoContext"
-import NotificationCenter from "./screens/NotificationCenter"
-import UserGuide from "./screens/UserGuide"
-import { fetchRolePermissions, fetchRoles } from "./lib/dataService"
 import { Check, AlertCircle, Info, LogOut, User } from "lucide-react"
+import { APP_CONFIRM_EVENT, APP_TOAST_EVENT, type AppConfirmRequest } from "./lib/appEvents"
+import { ThemeProvider } from "./contexts/ThemeContext"
+
+const Dashboard = lazy(() => import("./screens/Dashboard"))
+const Products = lazy(() => import("./screens/Products"))
+const PurchaseOrders = lazy(() => import("./screens/PurchaseOrders"))
+const Quotations = lazy(() => import("./screens/Quotations"))
+const NotificationCenter = lazy(() => import("./screens/NotificationCenter"))
+const UserGuide = lazy(() => import("./screens/UserGuide"))
+const Customers = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Customers })))
+const Suppliers = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Suppliers })))
+const Warehouses = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Warehouses })))
+const SalesOrders = lazy(() => import("./screens/GenericList").then(module => ({ default: module.SalesOrders })))
+const StockBalance = lazy(() => import("./screens/GenericList").then(module => ({ default: module.StockBalance })))
+const StockLedger = lazy(() => import("./screens/GenericList").then(module => ({ default: module.StockLedger })))
+const InventoryAdjustment = lazy(() => import("./screens/GenericList").then(module => ({ default: module.InventoryAdjustment })))
+const InventoryTransfer = lazy(() => import("./screens/GenericList").then(module => ({ default: module.InventoryTransfer })))
+const AuditLogs = lazy(() => import("./screens/GenericList").then(module => ({ default: module.AuditLogs })))
+const Reports = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Reports })))
+const Settings = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Settings })))
+const Categories = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Categories })))
+const Brands = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Brands })))
+const Units = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Units })))
+const Users = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Users })))
+const Roles = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Roles })))
+const Receivables = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Receivables })))
+const GoodsReceipt = lazy(() => import("./screens/GenericList").then(module => ({ default: module.GoodsReceipt })))
+const PurchaseReturn = lazy(() => import("./screens/GenericList").then(module => ({ default: module.PurchaseReturn })))
+const SupplierPayment = lazy(() => import("./screens/GenericList").then(module => ({ default: module.SupplierPayment })))
+const DeliveryNotes = lazy(() => import("./screens/GenericList").then(module => ({ default: module.DeliveryNotes })))
+const Invoices = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Invoices })))
+const CustomerReceipts = lazy(() => import("./screens/GenericList").then(module => ({ default: module.CustomerReceipts })))
+const Payables = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Payables })))
+const CashBook = lazy(() => import("./screens/GenericList").then(module => ({ default: module.CashBook })))
 
 export type ToastPayload = { msg: string; type: "success" | "error" | "info" }
 
@@ -80,15 +99,46 @@ function PlaceholderScreen({ id }: { id: string }) {
   )
 }
 
+function ScreenLoading() {
+  return (
+    <div role="status" aria-label="Loading" className="flex h-full items-center justify-center">
+      <div className="h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+    </div>
+  )
+}
+
 function AppInner() {
   const { t, lang } = useLang()
-  const { user, profile, signOut } = useAuth()
+  const { user, profile, signOut, can } = useAuth()
   const { isDemo, setDemo } = useDemo()
   const initialScreen = new URLSearchParams(window.location.search).get("screen") || "dashboard"
   const [active, setActive] = useState(initialScreen)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
   const [toast, setToast] = useState<ToastPayload | null>(null)
-  const [permissionMap, setPermissionMap] = useState<Record<string, boolean>>({})
+  const [confirmation, setConfirmation] = useState<AppConfirmRequest | null>(null)
+
+  useEffect(() => {
+    const handleToast = (event: Event) => {
+      const payload = (event as CustomEvent<ToastPayload>).detail
+      if (payload?.msg) setToast(payload)
+    }
+    window.addEventListener(APP_TOAST_EVENT, handleToast)
+    return () => window.removeEventListener(APP_TOAST_EVENT, handleToast)
+  }, [])
+
+  useEffect(() => {
+    const handleConfirmation = (event: Event) => {
+      setConfirmation((event as CustomEvent<AppConfirmRequest>).detail)
+    }
+    window.addEventListener(APP_CONFIRM_EVENT, handleConfirmation)
+    return () => window.removeEventListener(APP_CONFIRM_EVENT, handleConfirmation)
+  }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const timeoutId = window.setTimeout(() => setToast(null), 3500)
+    return () => window.clearTimeout(timeoutId)
+  }, [toast])
 
   useEffect(() => {
     const handleViewportChange = () => setSidebarCollapsed(window.innerWidth < 768)
@@ -127,58 +177,17 @@ function AppInner() {
     users: "Administration",
     roles: "Administration",
     "audit-logs": "Administration",
-    settings: "Dashboard",
+    settings: "Administration",
     notifications: "Dashboard",
   }
-  const defaultAllowedByRole: Record<string, string[]> = {
-    admin: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications", "users", "roles", "audit-logs"],
-    manager: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-    staff: ["dashboard", "user-guide", "products", "categories", "brands", "units", "warehouses", "customers", "suppliers", "stock-balance", "stock-ledger", "adjustment", "transfer", "purchase-orders", "goods-receipt", "purchase-return", "supplier-payment", "quotations", "sales-orders", "delivery", "invoices", "customer-receipt", "receivable", "payable", "cashbook", "reports", "settings", "notifications"],
-  }
-
-  useEffect(() => {
-    if (!user || isDemo) {
-      setPermissionMap({})
-      return
-    }
-
-    let active = true
-    Promise.all([
-      fetchRoles({ isDemo, orgId: profile?.org_id }),
-      fetchRolePermissions({ isDemo, orgId: profile?.org_id }),
-    ]).then(([rolesRes, permsRes]) => {
-      if (!active) return
-      const roles = rolesRes.data ?? []
-      const currentRole = roles.find((row: any) => String(row.code ?? row.name ?? "").toLowerCase() === role || String(row.name ?? row.name_vi ?? row.name_en ?? "").toLowerCase() === role)
-      const roleId = currentRole?.id
-      if (!roleId) {
-        setPermissionMap({})
-        return
-      }
-      const map: Record<string, boolean> = {}
-      for (const row of permsRes.data ?? []) {
-        if (String(row.role_id) !== String(roleId)) continue
-        if (row.allowed) map[`${row.module}:view`] = true
-      }
-      setPermissionMap(map)
-    })
-
-    return () => { active = false }
-  }, [user, isDemo, profile?.org_id, role])
-
   const canAccess = (screen: string) => {
     if (!user) return true
     if (role === "admin") return true
+    if (["dashboard", "user-guide", "notifications"].includes(screen)) return true
 
     const module = screenToModule[screen]
     if (!module) return false
-
-    const permissionKey = `${module}:view`
-    if (Object.keys(permissionMap).length > 0) {
-      return Boolean(permissionMap[permissionKey])
-    }
-
-    return defaultAllowedByRole[role]?.includes(screen) ?? false
+    return can(module, "view")
   }
 
   useEffect(() => {
@@ -187,7 +196,7 @@ function AppInner() {
       setActive("dashboard")
       setToast({ msg: lang === "vi" ? "Bạn không có quyền truy cập màn hình này." : "You do not have access to this screen.", type: "error" })
     }
-  }, [active, user, role, lang])
+  }, [active, user, role, lang, profile, can])
 
   // Sync demo mode with auth state
   useEffect(() => {
@@ -209,6 +218,11 @@ function AppInner() {
   const breadcrumbs = keys.length === 1
     ? ["WarehouseOS", t(keys[0] as any)]
     : [t(keys[0] as any), t(keys[1] as any)]
+
+  const finishConfirmation = (confirmed: boolean) => {
+    confirmation?.resolve(confirmed)
+    setConfirmation(null)
+  }
 
   function renderScreen() {
     switch (active) {
@@ -282,7 +296,11 @@ function AppInner() {
             }
           />
           <main className="flex-1 overflow-auto">
-            {renderScreen()}
+            <AppErrorBoundary key={active} scope="page">
+              <Suspense fallback={<ScreenLoading />}>
+                {renderScreen()}
+              </Suspense>
+            </AppErrorBoundary>
           </main>
         </div>
       </div>
@@ -296,12 +314,27 @@ function AppInner() {
           {toast.msg}
         </div>
       )}
+
+      {confirmation && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4" onClick={() => finishConfirmation(false)}>
+          <section role="dialog" aria-modal="true" aria-labelledby="app-confirm-title" className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="p-5">
+              <h2 id="app-confirm-title" className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Xác nhận thao tác" : "Confirm action"}</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-500">{confirmation.message}</p>
+            </div>
+            <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5">
+              <button type="button" autoFocus onClick={() => finishConfirmation(false)} className="h-8 rounded-lg border px-4 text-xs text-slate-600">{confirmation.cancelLabel ?? (lang === "vi" ? "Hủy" : "Cancel")}</button>
+              <button type="button" onClick={() => finishConfirmation(true)} className={`h-8 rounded-lg px-4 text-xs text-white ${confirmation.destructive ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}>{confirmation.confirmLabel ?? (lang === "vi" ? "Xác nhận" : "Confirm")}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
 
 function AppGate() {
-  const { session, loading } = useAuth()
+  const { session, profileError, loading, signOut } = useAuth()
   const qs = window.location.search
   const isDemoRequested = qs.includes("demo=true")
   const isAuthRequested = qs.includes("auth") || qs.includes("login")
@@ -309,13 +342,35 @@ function AppGate() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center animate-pulse">
-            <div className="w-5 h-5 bg-white rounded-lg" />
+        <div role="status" aria-label="Loading WarehouseOS" className="flex flex-col items-center gap-3">
+          <div className="flex h-10 w-10 animate-pulse items-center justify-center rounded-2xl bg-blue-600">
+            <div className="h-5 w-5 rounded-lg bg-white" />
           </div>
-          <div className="text-xs text-slate-400">Loading WarehouseOS...</div>
         </div>
       </div>
+    )
+  }
+
+  if (session && profileError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <section className="w-full max-w-lg rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-amber-600" />
+            <div>
+              <h1 className="text-base font-semibold text-slate-900">Không tải được hồ sơ / Profile unavailable</h1>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Kiểm tra rằng các migration mới nhất đã được áp dụng trên Supabase, sau đó tải lại trang.
+              </p>
+              <pre className="mt-3 max-h-28 overflow-auto rounded-lg bg-amber-50 p-3 text-[10px] text-amber-800">{profileError}</pre>
+              <div className="mt-4 flex gap-2">
+                <button onClick={() => window.location.reload()} className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700">Tải lại / Reload</button>
+                <button onClick={() => void signOut()} className="h-9 rounded-lg border px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50">Đăng xuất / Sign out</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     )
   }
 
@@ -333,12 +388,16 @@ function AppGate() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DemoProvider>
-        <LangProvider>
-          <AppGate />
-        </LangProvider>
-      </DemoProvider>
-    </AuthProvider>
+    <AppErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <DemoProvider>
+            <LangProvider>
+              <AppGate />
+            </LangProvider>
+          </DemoProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </AppErrorBoundary>
   )
 }

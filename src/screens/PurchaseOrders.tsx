@@ -1,469 +1,259 @@
-import { useState, useEffect } from "react"
-import { Plus, Search, Download, Printer, RefreshCw, CheckCircle, XCircle, MoreHorizontal, ChevronLeft, ChevronRight, X, Trash2, Check, AlertCircle, Upload } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { AlertCircle, Check, CheckCircle, Download, Plus, Printer, RefreshCw, Search, Trash2, X, XCircle } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
-import { purchaseOrders as initPOs, suppliers, warehouses } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
-import { exportCsv, exportXlsx, printTable, ImportModal } from "./GenericList"
+import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchPurchaseOrders, upsertPurchaseOrder, deletePurchaseOrder, fetchProducts, receiveQuotation } from "../lib/dataService"
+import { deletePurchaseOrder, fetchProducts, fetchPurchaseOrders, fetchSuppliers, fetchWarehouses, receiveQuotation, upsertPurchaseOrder } from "../lib/dataService"
+import { confirmAppAction } from "../lib/appEvents"
 
-function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
+function fmt(value: number) {
+  return new Intl.NumberFormat("vi-VN").format(Number(value) || 0)
+}
 
-const defaultItems = [
-  { product: "Dell Latitude 5540 i5", sku: "LP-DELL-001", qty: 5, price: 18500000, discount: 0, tax: 10 },
-  { product: "LG 27\" 4K Monitor", sku: "MON-LG-003", qty: 3, price: 6200000, discount: 0, tax: 10 },
-]
+function newLine() {
+  return { product_id: "", product_name: "", sku: "", qty: 1, unit_cost: 0 }
+}
 
 export default function PurchaseOrders() {
   const { t, lang } = useLang()
-  const [pos, setPOs] = useState<any[]>(initPOs)
   const { isDemo } = useDemo()
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
+  const [orders, setOrders] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
-
-  const normalizePOs = (rows: any[]) => rows.map((r: any) => ({
-    ...r,
-    createdBy: r.createdBy ?? r.created_by ?? r.created_by ?? "",
-    supplier: r.supplier_name ?? r.supplier,
-    warehouse: r.warehouse_name ?? r.warehouse,
-    ref: r.ref ?? r.id,
-  }))
-
-  useEffect(() => {
-    fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setPOs(normalizePOs(res.data)) })
-    fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setProducts(res.data) })
-  }, [isDemo, profile])
+  const [suppliers, setSuppliers] = useState<any[]>([])
+  const [warehouses, setWarehouses] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState("all")
   const [showCreate, setShowCreate] = useState(false)
-  const [showImport, setShowImport] = useState(false)
   const [showDetail, setShowDetail] = useState<any | null>(null)
   const [showReceive, setShowReceive] = useState<any | null>(null)
   const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({})
-  const [items, setItems] = useState(defaultItems)
+  const [items, setItems] = useState<any[]>([newLine()])
+  const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
-  const showToast = (msg: string, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 2500) }
-
-  const filtered = pos.filter(p =>
-    (filterStatus === "all" || p.status === filterStatus) &&
-    (search === "" || p.ref?.toLowerCase().includes(search.toLowerCase()) || p.supplier.toLowerCase().includes(search.toLowerCase()))
-  )
-
-  const subtotal = items.reduce((acc, i) => acc + i.qty * i.price * (1 - i.discount / 100), 0)
-  const taxAmt = items.reduce((acc, i) => acc + i.qty * i.price * (1 - i.discount / 100) * (i.tax / 100), 0)
-  const grand = subtotal + taxAmt
-
-  const handleApprove = async (po: typeof initPOs[0]) => {
-    const res = await upsertPurchaseOrder({ id: po.id, status: "Approved" } as any, { isDemo, orgId: profile?.org_id })
-    if (res && res.error) showToast(lang === "vi" ? `Lỗi khi duyệt ${po.id}` : `Approve failed ${po.id}`, false)
-    else {
-      const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data)
-      setShowDetail(null)
-      showToast(lang === "vi" ? `Đã duyệt ${po.id}` : `Approved ${po.id}`)
-    }
+  const showToast = (msg: string, ok = true) => {
+    setToast({ msg, ok })
+    window.setTimeout(() => setToast(null), 3000)
   }
 
-  const handleStatus = async (po: typeof initPOs[0], status: string) => {
-    const res = await upsertPurchaseOrder({ id: po.id, status } as any, { isDemo, orgId: profile?.org_id })
-    if (res && res.error) showToast(lang === "vi" ? "Cập nhật trạng thái thất bại" : "Status update failed", false)
-    else {
-      const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id })
-      if (r.data) setPOs(normalizePOs(r.data))
-      setShowDetail(null)
-      showToast(lang === "vi" ? "Đã cập nhật trạng thái" : "Status updated")
-    }
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    const context = { isDemo, orgId: profile?.org_id }
+    const [orderResult, productResult, supplierResult, warehouseResult] = await Promise.all([
+      fetchPurchaseOrders(context),
+      fetchProducts(context),
+      fetchSuppliers(context),
+      fetchWarehouses(context),
+    ])
+    const error = orderResult.error ?? productResult.error ?? supplierResult.error ?? warehouseResult.error
+    if (error) showToast(error.message ?? String(error), false)
+    setOrders(orderResult.data ?? [])
+    setProducts(productResult.data ?? [])
+    setSuppliers(supplierResult.data ?? [])
+    setWarehouses(warehouseResult.data ?? [])
+    setLoading(false)
+  }, [isDemo, profile?.org_id])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
+
+  const filtered = useMemo(() => orders.filter(order => {
+    const statusMatches = filterStatus === "all" || order.status === filterStatus
+    const query = search.trim().toLowerCase()
+    return statusMatches && (!query || String(order.ref ?? order.id).toLowerCase().includes(query) || String(order.supplier_name ?? order.supplier ?? "").toLowerCase().includes(query))
+  }), [orders, filterStatus, search])
+
+  const total = items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unit_cost || 0), 0)
+
+  const updateStatus = async (order: any, status: string) => {
+    setSaving(true)
+    const result = await upsertPurchaseOrder({ id: order.id, status }, { isDemo, orgId: profile?.org_id })
+    setSaving(false)
+    if (result.error) return showToast(result.error.message ?? String(result.error), false)
+    setShowDetail(null)
+    await loadData()
+    showToast(lang === "vi" ? "Đã cập nhật trạng thái" : "Status updated")
   }
 
-  const openReceive = (po: any) => {
+  const openReceive = (order: any) => {
     const quantities: Record<string, number> = {}
-    for (const item of po.items ?? []) quantities[String(item.product_id ?? item.sku)] = Number(item.remaining_qty ?? item.qty ?? 0)
+    for (const item of order.items ?? []) {
+      quantities[String(item.product_id ?? item.sku)] = Number(item.remaining_qty ?? 0)
+    }
     setReceiveQuantities(quantities)
-    setShowReceive(po)
+    setShowReceive(order)
   }
 
-  const handleReceive = async (po: any, requestedQuantities = receiveQuantities) => {
-    const items = (po.items ?? []).map((item: any) => {
-      const product = products.find(row => String(row.id) === String(item.product_id) || (item.sku && String(row.sku) === String(item.sku)))
-      const key = String(item.product_id ?? item.sku)
-      const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
-      return { ...item, product_id: item.product_id ?? product?.id, product_name: item.product_name ?? product?.name, qty: Math.min(remaining, Math.max(0, Number(requestedQuantities[key] ?? 0))), cost_price: item.unit_cost, supplier_name: po.supplier }
-    }).filter((item: any) => item.qty > 0)
-    if (!items.length) return showToast(lang === "vi" ? "PO chưa có sản phẩm để nhận" : "This PO has no items to receive", false)
-    if (items.some((item: any) => !item.product_id)) return showToast(lang === "vi" ? "Không tìm thấy sản phẩm trong danh mục" : "A PO product was not found in the product master", false)
-    const receiveResult = await receiveQuotation({ quotationId: po.ref ?? po.id, receiptRef: `GR-${po.ref ?? po.id}-${Date.now()}`, warehouseId: po.warehouse_id, warehouseName: po.warehouse, items }, { isDemo, orgId: profile?.org_id })
-    if (receiveResult.error) return showToast(lang === "vi" ? "Nhận hàng thất bại" : "Receiving failed", false)
-    const hasRemaining = (po.items ?? []).some((item: any) => {
-      const key = String(item.product_id ?? item.sku)
-      const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
-      return remaining - Math.max(0, Number(requestedQuantities[key] ?? 0)) > 0
-    })
+  const receive = async () => {
+    if (!showReceive) return
+    const receiptItems = (showReceive.items ?? []).map((item: any) => ({
+      product_id: item.product_id,
+      product_name: item.product_name,
+      sku: item.sku,
+      qty: Math.min(Number(item.remaining_qty ?? 0), Math.max(0, Number(receiveQuantities[String(item.product_id ?? item.sku)] ?? 0))),
+      unit_cost: Number(item.unit_cost ?? 0),
+      unit: item.unit,
+    })).filter((item: any) => item.qty > 0)
+    if (!receiptItems.length) return showToast(lang === "vi" ? "Vui lòng nhập số lượng nhận" : "Enter a receiving quantity", false)
+    setSaving(true)
+    const result = await receiveQuotation({
+      quotationId: showReceive.ref,
+      receiptRef: `GR-${showReceive.ref}-${Date.now()}`,
+      warehouseId: showReceive.warehouse_id,
+      warehouseName: showReceive.warehouse_name,
+      items: receiptItems,
+    }, { isDemo, orgId: profile?.org_id })
+    setSaving(false)
+    if (result.error) return showToast(result.error.message ?? String(result.error), false)
     setShowReceive(null)
-    await handleStatus(po, hasRemaining ? "Receiving" : "Completed")
+    setShowDetail(null)
+    await loadData()
+    showToast(lang === "vi" ? "Nhập kho thành công" : "Goods received")
+  }
+
+  const removeOrder = async (order: any) => {
+    if (!await confirmAppAction(lang === "vi" ? `Xóa đơn nháp ${order.ref}?` : `Delete draft ${order.ref}?`, { destructive: true })) return
+    const result = await deletePurchaseOrder(order.id, { isDemo, orgId: profile?.org_id })
+    if (result.error) return showToast(result.error.message ?? String(result.error), false)
+    await loadData()
+    showToast(lang === "vi" ? "Đã xóa đơn nháp" : "Draft deleted")
   }
 
   const statusOptions = [
-    { key: "all", label: lang === "vi" ? "Tất cả" : "All" },
-    { key: "Draft", label: lang === "vi" ? "Nháp" : "Draft" },
-    { key: "Pending Approval", label: lang === "vi" ? "Chờ duyệt" : "Pending" },
-    { key: "Approved", label: lang === "vi" ? "Đã duyệt" : "Approved" },
-    { key: "Completed", label: lang === "vi" ? "Hoàn tất" : "Completed" },
+    ["all", lang === "vi" ? "Tất cả" : "All"],
+    ["Draft", lang === "vi" ? "Nháp" : "Draft"],
+    ["Pending Approval", lang === "vi" ? "Chờ duyệt" : "Pending"],
+    ["Approved", lang === "vi" ? "Đã duyệt" : "Approved"],
+    ["Receiving", lang === "vi" ? "Đang nhập" : "Receiving"],
+    ["Completed", lang === "vi" ? "Hoàn tất" : "Completed"],
   ]
 
-  return (
-    <div className="flex flex-col h-full relative">
-      {toast && (
-        <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-xs font-medium text-white ${toast.ok ? "bg-emerald-600" : "bg-red-500"}`}>
-          {toast.ok ? <Check size={14} /> : <AlertCircle size={14} />} {toast.msg}
-        </div>
-      )}
+  const exportHeaders = [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), lang === "vi" ? "Thanh toán" : "Payment", t("createdBy")]
+  const exportRows = filtered.map(order => [order.ref, order.supplier_name, order.warehouse_name, order.status, order.total, order.payment_status, order.created_by])
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b flex-shrink-0 flex-wrap gap-y-2" style={{ borderColor: "var(--border)" }}>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors">
+  return (
+    <div className="flex h-full flex-col relative">
+      {toast && <div className={`fixed bottom-5 right-5 z-[80] flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium text-white shadow-lg ${toast.ok ? "bg-emerald-600" : "bg-red-500"}`}>
+        {toast.ok ? <Check size={14} /> : <AlertCircle size={14} />} {toast.msg}
+      </div>}
+
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b bg-white px-5 py-2.5" style={{ borderColor: "var(--border)" }}>
+        {can("Purchase", "create") && <button onClick={() => { setItems([newLine()]); setShowCreate(true) }} className="flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">
           <Plus size={13} /> {lang === "vi" ? "Tạo PO" : "Create PO"}
-        </button>
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <CheckCircle size={13} className="text-emerald-500" /> {t("approve")}
-        </button>
-        <button onClick={() => printTable(
-          "purchase-orders",
-          [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"],
-          filtered.map(p => [p.id, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]),
-        )} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        </button>}
+        {can("Purchase", "export") && <button onClick={() => printTable("purchase-orders", exportHeaders, exportRows)} className="flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Printer size={13} /> {t("print")}
-        </button>
-        <div className="relative group">
-          <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-            <Download size={13} /> {t("export")}
-          </button>
-          <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
-            <button onClick={() => exportCsv("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.ref, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
-            <button onClick={() => exportXlsx("purchase-orders", [t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date"], filtered.map(p => [p.ref, p.supplier, p.warehouse, p.status, p.total, p.createdBy, p.date]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
+        </button>}
+        {can("Purchase", "export") && <div className="relative group">
+          <button className="flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><Download size={13} /> {t("export")}</button>
+          <div className="absolute left-0 top-full z-50 hidden w-32 flex-col overflow-hidden rounded-lg border bg-white shadow-lg group-hover:flex" style={{ borderColor: "var(--border)" }}>
+            <button onClick={() => exportCsv("purchase-orders", exportHeaders, exportRows)} className="px-3 py-2 text-left text-xs hover:bg-slate-50">CSV</button>
+            <button onClick={() => exportXlsx("purchase-orders", exportHeaders, exportRows)} className="px-3 py-2 text-left text-xs hover:bg-slate-50">Excel</button>
           </div>
-        </div>
+        </div>}
         <div className="flex-1" />
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={lang === "vi" ? "Tìm số PO, nhà cung cấp..." : "Search PO, supplier..."} className="h-8 pl-8 pr-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 w-52" style={{ borderColor: "var(--border)" }} />
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder={lang === "vi" ? "Tìm số PO, nhà cung cấp..." : "Search PO, supplier..."} className="h-8 w-52 rounded-lg border pl-8 pr-3 text-xs outline-none" style={{ borderColor: "var(--border)" }} />
         </div>
-        <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ borderColor: "var(--border)" }}>
-          {statusOptions.map(s => (
-            <button key={s.key} onClick={() => setFilterStatus(s.key)} className={`h-8 px-2.5 transition-colors whitespace-nowrap ${filterStatus === s.key ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{s.label}</button>
-          ))}
-        </div>
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <RefreshCw size={13} />
-        </button>
+        <select value={filterStatus} onChange={event => setFilterStatus(event.target.value)} className="h-8 rounded-lg border bg-white px-2 text-xs" style={{ borderColor: "var(--border)" }}>
+          {statusOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        <button onClick={() => void loadData()} disabled={loading} className="flex h-8 w-8 items-center justify-center rounded-lg border text-slate-500 disabled:opacity-50" style={{ borderColor: "var(--border)" }}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
       </div>
 
-      {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {[t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), t("createdBy"), lang === "vi" ? "Ngày tạo" : "Date", ""].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
+        <table className="w-full min-w-[950px] border-collapse text-xs">
+          <thead className="sticky top-0 z-10"><tr className="border-b bg-slate-50" style={{ borderColor: "var(--border)" }}>
+            {[t("poNumber"), t("supplier"), t("warehouse"), t("status"), t("grandTotal"), lang === "vi" ? "Thanh toán" : "Payment", t("createdBy"), lang === "vi" ? "Ngày tạo" : "Created", ""].map(header => <th key={header} className="whitespace-nowrap px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500">{header}</th>)}
+          </tr></thead>
           <tbody>
-            {filtered.length === 0 && (
-              <tr><td colSpan={8} className="py-16 text-center text-sm text-slate-400">{t("noData")}</td></tr>
-            )}
-            {filtered.map(po => (
-              <tr key={po.id} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }} onClick={() => setShowDetail(po)}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-semibold">{po.id}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{po.supplier}</td>
-                <td className="px-4 py-2.5 text-slate-600">{po.warehouse}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={po.status} /></td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(po.total)}</td>
-                <td className="px-4 py-2.5 text-slate-500">{po.createdBy}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{po.date}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button onClick={e => e.stopPropagation()} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100">
-                      <MoreHorizontal size={14} />
-                    </button>
-                    <button onClick={async (e) => { e.stopPropagation(); const res = await deletePurchaseOrder(po.id, { isDemo, orgId: profile?.org_id }); if (res && res.error) showToast(lang === "vi" ? "Lỗi khi xóa" : "Delete failed", false); else { const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data); } }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {!loading && filtered.length === 0 && <tr><td colSpan={9} className="py-16 text-center text-sm text-slate-400">{t("noData")}</td></tr>}
+            {filtered.map(order => <tr key={order.id} onClick={() => setShowDetail(order)} className="group cursor-pointer border-b hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
+              <td className="px-4 py-2.5 font-semibold text-blue-600 mono">{order.ref}</td>
+              <td className="px-4 py-2.5 font-medium text-slate-800">{order.supplier_name ?? order.supplier}</td>
+              <td className="px-4 py-2.5 text-slate-600">{order.warehouse_name ?? order.warehouse}</td>
+              <td className="px-4 py-2.5"><StatusBadge status={order.status} /></td>
+              <td className="px-4 py-2.5 text-right font-semibold mono">{fmt(order.total)}</td>
+              <td className="px-4 py-2.5"><StatusBadge status={order.payment_status ?? "Unpaid"} /></td>
+              <td className="px-4 py-2.5 text-slate-500">{order.created_by ?? order.createdBy}</td>
+              <td className="px-4 py-2.5 text-slate-400 mono">{formatDateTimeUtc7(order.created_at)}</td>
+              <td className="px-4 py-2.5">{can("Purchase", "delete") && order.status === "Draft" && <button onClick={event => { event.stopPropagation(); void removeOrder(order) }} className="flex h-7 w-7 items-center justify-center rounded-md text-red-400 opacity-0 hover:bg-red-50 group-hover:opacity-100"><Trash2 size={14} /></button>}</td>
+            </tr>)}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
-        <span>{t("showing")} {filtered.length} {t("of")} {pos.length} {lang === "vi" ? "đơn mua hàng" : "purchase orders"}</span>
-        <div className="flex items-center gap-1">
-          <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronLeft size={13} /></button>
-          <button className="w-7 h-7 flex items-center justify-center rounded-md bg-blue-600 text-white">1</button>
-          <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronRight size={13} /></button>
-        </div>
+      <div className="flex flex-shrink-0 items-center justify-between border-t bg-white px-5 py-2.5 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
+        <span>{t("showing")} {filtered.length} {t("of")} {orders.length}</span>
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
       </div>
 
-      {/* Create Dialog */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Tạo đơn mua hàng" : "Create Purchase Order"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={async e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement;
-              const isDraft = submitter.value === "draft";
-              const payload: any = {
-                supplier: fd.get(t("supplier") + " *") as string || "Unknown",
-                warehouse: fd.get(t("warehouse") + " *") as string || "Unknown",
-                status: isDraft ? "Draft" : "Pending Approval",
-                total: grand,
-                createdBy: "Current User",
-                date: new Date().toISOString().split("T")[0],
-                items: items.map(item => ({ product: item.product, sku: item.sku, qty: item.qty, price: item.price }))
-              }
-              const res = await upsertPurchaseOrder(payload, { isDemo, orgId: profile?.org_id })
-              if (res && res.error) showToast(lang === "vi" ? "Lỗi khi tạo PO" : "Create PO failed", false)
-              else {
-                const r = await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }); if (r.data) setPOs(r.data)
-                setShowCreate(false)
-                showToast(isDraft ? (lang === "vi" ? "Đã lưu nháp" : "Saved as draft") : (lang === "vi" ? "Đã gửi duyệt thành công" : "Submitted for approval"))
-              }
-            }}>
-            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-              <div className="grid grid-cols-3 gap-3">
-                {([
-                  [t("supplier") + " *", suppliers.map(s => s.name)],
-                  [t("warehouse") + " *", warehouses.map(w => w.name)],
-                  [t("currency"), ["VND", "USD", "EUR"]],
-                  [t("expectedDate"), null],
-                ] as [string, string[] | null][]).map(([label, opts]) => (
-                  <div key={label}>
-                    <label className="block text-[11px] font-medium text-slate-600 mb-1">{label}</label>
-                    {opts ? (
-                      <select name={label} className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
-                        <option value="">{lang === "vi" ? "Chọn..." : "Select..."}</option>
-                        {opts.map(o => <option key={o}>{o}</option>)}
-                      </select>
-                    ) : (
-                      <input type="date" className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20" style={{ borderColor: "var(--border)" }} />
-                    )}
-                  </div>
-                ))}
-                <div className="col-span-2">
-                  <label className="block text-[11px] font-medium text-slate-600 mb-1">{t("note")}</label>
-                  <input placeholder={lang === "vi" ? "Ghi chú (không bắt buộc)" : "Optional note..."} className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20" style={{ borderColor: "var(--border)" }} />
-                </div>
+      {showCreate && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreate(false)}>
+        <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}>
+          <div className="flex items-center justify-between border-b px-5 py-3.5" style={{ borderColor: "var(--border)" }}><h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo đơn mua hàng" : "Create Purchase Order"}</h2><button onClick={() => setShowCreate(false)}><X size={15} /></button></div>
+          <form onSubmit={async event => {
+            event.preventDefault()
+            const form = new FormData(event.currentTarget)
+            const supplierId = String(form.get("supplier_id") ?? "")
+            const warehouseId = String(form.get("warehouse_id") ?? "")
+            const validItems = items.filter(item => item.product_id && Number(item.qty) > 0)
+            if (!supplierId || !warehouseId || !validItems.length || validItems.length !== items.length) return showToast(lang === "vi" ? "Vui lòng chọn nhà cung cấp, kho và sản phẩm hợp lệ" : "Select a valid supplier, warehouse and products", false)
+            if (new Set(validItems.map(item => item.product_id)).size !== validItems.length) return showToast(lang === "vi" ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong đơn mua" : "Each product may only appear once in a purchase order", false)
+            const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement
+            setSaving(true)
+            const result = await upsertPurchaseOrder({
+              supplier_id: supplierId,
+              supplier_name: suppliers.find(row => String(row.id) === supplierId)?.name,
+              warehouse_id: warehouseId,
+              warehouse_name: warehouses.find(row => String(row.id) === warehouseId)?.name,
+              expected_date: form.get("expected_date") || null,
+              notes: form.get("notes") || null,
+              status: submitter.value === "draft" ? "Draft" : "Pending Approval",
+              total,
+              created_by: profile?.full_name || profile?.email,
+              items: validItems,
+            }, { isDemo, orgId: profile?.org_id })
+            setSaving(false)
+            if (result.error) return showToast(result.error.message ?? String(result.error), false)
+            setShowCreate(false)
+            await loadData()
+            showToast(lang === "vi" ? "Đã lưu đơn mua hàng" : "Purchase order saved")
+          }}>
+            <div className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <label className="text-[11px] font-medium text-slate-600">{t("supplier")} *<select required name="supplier_id" className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs" style={{ borderColor: "var(--border)" }}><option value="">--</option>{suppliers.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+                <label className="text-[11px] font-medium text-slate-600">{t("warehouse")} *<select required name="warehouse_id" className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs" style={{ borderColor: "var(--border)" }}><option value="">--</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+                <label className="text-[11px] font-medium text-slate-600">{t("expectedDate")}<input name="expected_date" type="date" className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" style={{ borderColor: "var(--border)" }} /></label>
+                <label className="text-[11px] font-medium text-slate-600 md:col-span-3">{t("note")}<input name="notes" className="mt-1 h-8 w-full rounded-lg border px-3 text-xs" style={{ borderColor: "var(--border)" }} /></label>
               </div>
-
-              {/* Items */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lang === "vi" ? "Danh sách sản phẩm" : "Order Items"}</h3>
-                  <button onClick={() => setItems(prev => [...prev, { product: "", sku: "", qty: 1, price: 0, discount: 0, tax: 10 }])} className="flex items-center gap-1 text-xs text-blue-600 hover:underline">
-                    <Plus size={12} /> {t("addItem")}
-                  </button>
-                </div>
-                <div className="border rounded-xl overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-                        {[t("product"), "SKU", t("qty"), t("unitPrice"), t("discount") + "%", t("tax") + "%", t("lineTotal"), ""].map(h => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((item, i) => {
-                        const lineTotal = item.qty * item.price * (1 - item.discount / 100) * (1 + item.tax / 100)
-                        return (
-                          <tr key={i} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
-                            <td className="px-3 py-1.5">
-                              <input value={item.product} onChange={e => setItems(prev => prev.map((it, j) => j === i ? { ...it, product: e.target.value } : it))} className="w-40 h-7 px-2 border rounded text-xs outline-none focus:ring-1 focus:ring-blue-500" style={{ borderColor: "var(--border)" }} />
-                            </td>
-                            <td className="px-3 py-1.5 mono text-slate-500">{item.sku}</td>
-                            <td className="px-3 py-1.5">
-                              <input type="number" value={item.qty} onChange={e => setItems(prev => prev.map((it, j) => j === i ? { ...it, qty: +e.target.value } : it))} className="w-16 h-7 px-2 border rounded text-xs mono text-center outline-none focus:ring-1 focus:ring-blue-500" style={{ borderColor: "var(--border)" }} />
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <input type="number" value={item.price} onChange={e => setItems(prev => prev.map((it, j) => j === i ? { ...it, price: +e.target.value } : it))} className="w-28 h-7 px-2 border rounded text-xs mono text-right outline-none focus:ring-1 focus:ring-blue-500" style={{ borderColor: "var(--border)" }} />
-                            </td>
-                            <td className="px-3 py-1.5"><input type="number" value={item.discount} onChange={e => setItems(prev => prev.map((it, j) => j === i ? { ...it, discount: +e.target.value } : it))} className="w-14 h-7 px-2 border rounded text-xs mono text-center outline-none" style={{ borderColor: "var(--border)" }} /></td>
-                            <td className="px-3 py-1.5"><input type="number" value={item.tax} onChange={e => setItems(prev => prev.map((it, j) => j === i ? { ...it, tax: +e.target.value } : it))} className="w-14 h-7 px-2 border rounded text-xs mono text-center outline-none" style={{ borderColor: "var(--border)" }} /></td>
-                            <td className="px-3 py-1.5 mono font-semibold text-right">{fmt(lineTotal)}</td>
-                            <td className="px-3 py-1.5">
-                              <button onClick={() => setItems(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <div className="w-64 space-y-1.5 text-xs">
-                  <div className="flex justify-between text-slate-600"><span>{t("subtotal")}</span><span className="mono">{fmt(subtotal)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>{t("tax")}</span><span className="mono">{fmt(taxAmt)}</span></div>
-                  <div className="flex justify-between font-bold text-slate-900 border-t pt-1.5" style={{ borderColor: "var(--border)" }}>
-                    <span>{t("grandTotal")}</span>
-                    <span className="mono text-blue-600">{fmt(grand)}</span>
-                  </div>
-                </div>
-              </div>
+              <div className="flex items-center justify-between"><h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{lang === "vi" ? "Chi tiết sản phẩm" : "Order items"}</h3><button type="button" onClick={() => setItems(previous => [...previous, newLine()])} className="flex items-center gap-1 text-xs text-blue-600"><Plus size={12} /> {t("addItem")}</button></div>
+              <div className="overflow-auto rounded-xl border" style={{ borderColor: "var(--border)" }}><table className="w-full min-w-[650px] text-xs"><thead><tr className="border-b bg-slate-50" style={{ borderColor: "var(--border)" }}>{[t("product"), "SKU", t("qty"), t("unitPrice"), t("lineTotal"), ""].map(header => <th key={header} className="px-3 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>
+                {items.map((item, index) => <tr key={index} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
+                  <td className="px-3 py-1.5"><select required value={item.product_id} onChange={event => { const product = products.find(row => String(row.id) === event.target.value); setItems(previous => previous.map((line, lineIndex) => lineIndex === index ? { ...line, product_id: product?.id ?? "", product_name: product?.name ?? "", sku: product?.sku ?? "", unit_cost: Number(product?.cost ?? 0) } : line)) }} className="h-8 w-60 rounded border bg-white px-2" style={{ borderColor: "var(--border)" }}><option value="">-- {lang === "vi" ? "Chọn sản phẩm" : "Select product"} --</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} ({product.sku})</option>)}</select></td>
+                  <td className="px-3 py-1.5 text-slate-500 mono">{item.sku}</td>
+                  <td className="px-3 py-1.5"><input required min={1} step={1} type="number" value={item.qty} onChange={event => setItems(previous => previous.map((line, lineIndex) => lineIndex === index ? { ...line, qty: Number(event.target.value) } : line))} className="h-8 w-20 rounded border px-2 text-right" style={{ borderColor: "var(--border)" }} /></td>
+                  <td className="px-3 py-1.5"><input required min={0} type="number" value={item.unit_cost} onChange={event => setItems(previous => previous.map((line, lineIndex) => lineIndex === index ? { ...line, unit_cost: Number(event.target.value) } : line))} className="h-8 w-32 rounded border px-2 text-right" style={{ borderColor: "var(--border)" }} /></td>
+                  <td className="px-3 py-1.5 text-right font-semibold mono">{fmt(item.qty * item.unit_cost)}</td>
+                  <td className="px-3 py-1.5"><button type="button" disabled={items.length === 1} onClick={() => setItems(previous => previous.filter((_, lineIndex) => lineIndex !== index))} className="text-red-400 disabled:opacity-30"><Trash2 size={13} /></button></td>
+                </tr>)}
+              </tbody></table></div>
+              <div className="text-right text-sm font-bold">{t("grandTotal")}: <span className="text-blue-600 mono">{fmt(total)} VND</span></div>
             </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-              <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600 hover:bg-white" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-              <button type="submit" value="draft" className="h-8 px-4 rounded-lg bg-slate-100 text-xs text-slate-700 hover:bg-slate-200 font-medium">{lang === "vi" ? "Lưu nháp" : "Save Draft"}</button>
-              <button type="submit" value="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">{t("submit")}</button>
-            </div>
-            </form>
-          </div>
+            <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5" style={{ borderColor: "var(--border)" }}><button type="button" onClick={() => setShowCreate(false)} className="h-8 rounded-lg border px-4 text-xs">{t("cancel")}</button><button disabled={saving} type="submit" value="draft" className="h-8 rounded-lg bg-slate-200 px-4 text-xs">{lang === "vi" ? "Lưu nháp" : "Save draft"}</button><button disabled={saving} type="submit" value="submit" className="h-8 rounded-lg bg-blue-600 px-4 text-xs font-medium text-white">{t("submit")}</button></div>
+          </form>
         </div>
-      )}
+      </div>}
 
-      {showReceive && (
-        <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={() => setShowReceive(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Nhận hàng theo PO" : "Receive against PO"}</h2>
-                <p className="text-[10px] text-slate-400 mono mt-0.5">{showReceive.ref ?? showReceive.id} · {showReceive.warehouse}</p>
-              </div>
-              <button onClick={() => setShowReceive(null)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <div className="p-5">
-              <table className="w-full text-xs">
-                <thead><tr className="border-b" style={{ borderColor: "var(--border)" }}>
-                  {[t("product"), "SKU", lang === "vi" ? "Đặt mua" : "Ordered", lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Nhập lần này" : "Receive now"].map(header => <th key={header} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}
-                </tr></thead>
-                <tbody>
-                  {(showReceive.items ?? []).map((item: any) => {
-                    const key = String(item.product_id ?? item.sku)
-                    const remaining = Number(item.remaining_qty ?? item.qty ?? 0)
-                    return <tr key={key} className="border-b" style={{ borderColor: "var(--border)" }}>
-                      <td className="px-2 py-2 font-medium">{item.product_name ?? item.product}</td>
-                      <td className="px-2 py-2 mono text-slate-500">{item.sku}</td>
-                      <td className="px-2 py-2 mono">{item.qty}</td>
-                      <td className="px-2 py-2 mono text-emerald-600">{item.received_qty ?? 0}</td>
-                      <td className="px-2 py-2"><input type="number" min={0} max={remaining} value={receiveQuantities[key] ?? 0} onChange={e => setReceiveQuantities(prev => ({ ...prev, [key]: Math.min(remaining, Math.max(0, Number(e.target.value))) }))} className="w-24 h-7 px-2 border rounded text-xs mono text-right" style={{ borderColor: "var(--border)" }} /></td>
-                    </tr>
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-              <button onClick={() => setShowReceive(null)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-              <button onClick={() => handleReceive(showReceive)} className="h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-medium">{lang === "vi" ? "Xác nhận nhập" : "Confirm Receipt"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showReceive && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowReceive(null)}><div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-center justify-between border-b px-5 py-3.5"><div><h2 className="text-sm font-semibold">{lang === "vi" ? "Nhận hàng theo PO" : "Receive against PO"}</h2><p className="mt-0.5 text-[10px] text-slate-400 mono">{showReceive.ref} · {showReceive.warehouse_name}</p></div><button onClick={() => setShowReceive(null)}><X size={14} /></button></div><div className="p-5"><table className="w-full text-xs"><thead><tr className="border-b">{[t("product"), lang === "vi" ? "Đặt" : "Ordered", lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Lần này" : "Now"].map(header => <th key={header} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{(showReceive.items ?? []).map((item: any) => { const key = String(item.product_id ?? item.sku); const remaining = Number(item.remaining_qty ?? 0); return <tr key={key} className="border-b"><td className="px-2 py-2 font-medium">{item.product_name}</td><td className="px-2 py-2 mono">{item.qty}</td><td className="px-2 py-2 text-emerald-600 mono">{item.received_qty}</td><td className="px-2 py-2"><input min={0} max={remaining} step={1} type="number" value={receiveQuantities[key] ?? 0} onChange={event => setReceiveQuantities(previous => ({ ...previous, [key]: Math.min(remaining, Math.max(0, Number(event.target.value))) }))} className="h-7 w-24 rounded border px-2 text-right mono" /></td></tr> })}</tbody></table></div><div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5"><button onClick={() => setShowReceive(null)} className="h-8 rounded-lg border px-4 text-xs">{t("cancel")}</button><button disabled={saving} onClick={() => void receive()} className="h-8 rounded-lg bg-emerald-600 px-4 text-xs font-medium text-white">{lang === "vi" ? "Xác nhận nhập" : "Confirm receipt"}</button></div></div></div>}
 
-      {/* Detail Dialog */}
-      {showDetail && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowDetail(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <div className="flex items-center gap-3">
-                <h2 className="text-sm font-semibold text-slate-900 mono">{showDetail.id}</h2>
-                <StatusBadge status={showDetail.status} />
-              </div>
-              <div className="flex items-center gap-2">
-                {showDetail.status === "Approved" && (
-                  <button onClick={() => openReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận hàng" : "Receive Goods"}</button>
-                )}
-                {showDetail.status === "Receiving" && (
-                  <button onClick={() => openReceive(showDetail)} className="h-7 px-3 rounded-lg bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600">{lang === "vi" ? "Nhận tiếp" : "Receive More"}</button>
-                )}
-                {showDetail.status === "Pending Approval" && (
-                  <>
-                    <button onClick={() => handleApprove(showDetail)} className="h-7 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium flex items-center gap-1 hover:bg-blue-700">
-                      <CheckCircle size={12} /> {t("approve")}
-                    </button>
-                    <button onClick={() => handleStatus(showDetail, "Cancelled")} className="h-7 px-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium flex items-center gap-1">
-                      <XCircle size={12} /> {t("reject")}
-                    </button>
-                  </>
-                )}
-                <button onClick={() => setShowDetail(null)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-              </div>
-            </div>
-            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-              <div className="grid grid-cols-3 gap-x-6 gap-y-3">
-                {[
-                  [t("supplier"), showDetail.supplier],
-                  [t("warehouse"), showDetail.warehouse],
-                  [lang === "vi" ? "Ngày tạo" : "Date", showDetail.date],
-                  [t("createdBy"), showDetail.createdBy],
-                  [t("currency"), "VND"],
-                  [t("grandTotal"), fmt(showDetail.total) + " VND"],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex flex-col gap-0.5">
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{k}</span>
-                    <span className="text-xs text-slate-800 font-medium">{v}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="border rounded-xl overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-                      {[t("product"), "SKU", t("qty"), lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Còn lại" : "Remaining", t("unitPrice"), t("lineTotal")].map(h => (
-                        <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(showDetail.items ?? []).map((item: any, i: number) => (
-                      <tr key={i} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
-                        <td className="px-3 py-2 font-medium text-slate-800">{item.product_name ?? item.product}</td>
-                        <td className="px-3 py-2 mono text-slate-500">{item.sku}</td>
-                        <td className="px-3 py-2 mono text-center">{item.qty}</td>
-                        <td className="px-3 py-2 mono text-center text-emerald-600">{item.received_qty ?? 0}</td>
-                        <td className="px-3 py-2 mono text-center text-amber-600">{item.remaining_qty ?? item.qty}</td>
-                        <td className="px-3 py-2 mono text-right">{fmt(item.price)}</td>
-                        <td className="px-3 py-2 mono font-semibold text-right">{fmt(item.qty * (item.unit_cost ?? item.price))}</td>
-                      </tr>
-                    ))}
-                    <tr className="bg-slate-50">
-                      <td colSpan={6} className="px-3 py-2 font-bold text-right text-slate-700">{t("grandTotal")}</td>
-                      <td className="px-3 py-2 mono font-bold text-blue-600 text-right">{fmt(showDetail.total)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div>
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t("activity")}</h3>
-                <div className="space-y-2.5">
-                  {[
-                    { action: lang === "vi" ? "Đơn hàng đã tạo" : "Purchase Order Created", user: showDetail.createdBy, time: showDetail.date + " 09:00" },
-                    { action: lang === "vi" ? "Đã gửi duyệt" : "Submitted for Approval", user: showDetail.createdBy, time: showDetail.date + " 09:05" },
-                  ].map((e, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-xs">
-                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
-                      <div>
-                        <span className="text-slate-700 font-medium">{e.action}</span>
-                        <span className="text-slate-400"> · {lang === "vi" ? "bởi" : "by"} {e.user} · </span>
-                        <span className="text-slate-400 mono">{formatDateTimeUtc7(e.time)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {showDetail && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowDetail(null)}><div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-center justify-between border-b px-5 py-3.5"><div className="flex items-center gap-3"><h2 className="text-sm font-semibold mono">{showDetail.ref}</h2><StatusBadge status={showDetail.status} /></div><div className="flex items-center gap-2">{can("Purchase", "create") && ["Approved", "Receiving"].includes(showDetail.status) && <button onClick={() => openReceive(showDetail)} className="h-7 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white">{lang === "vi" ? "Nhận hàng" : "Receive"}</button>}{can("Purchase", "approve") && showDetail.status === "Pending Approval" && <><button disabled={saving} onClick={() => void updateStatus(showDetail, "Approved")} className="flex h-7 items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white"><CheckCircle size={12} />{t("approve")}</button><button disabled={saving} onClick={() => void updateStatus(showDetail, "Cancelled")} className="flex h-7 items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 text-xs text-red-600"><XCircle size={12} />{t("reject")}</button></>}<button onClick={() => setShowDetail(null)}><X size={14} /></button></div></div><div className="max-h-[75vh] space-y-4 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{[[t("supplier"), showDetail.supplier_name], [t("warehouse"), showDetail.warehouse_name], [lang === "vi" ? "Dự kiến" : "Expected", showDetail.expected_date || "—"], [t("grandTotal"), `${fmt(showDetail.total)} VND`], [lang === "vi" ? "Đã trả" : "Paid", `${fmt(showDetail.paid_amount)} VND`], [lang === "vi" ? "Còn phải trả" : "Outstanding", `${fmt(showDetail.outstanding_amount)} VND`], [t("createdBy"), showDetail.created_by], [lang === "vi" ? "Ngày tạo" : "Created", formatDateTimeUtc7(showDetail.created_at)]].map(([label, value]) => <div key={label}><span className="block text-[10px] font-semibold uppercase text-slate-400">{label}</span><span className="text-xs font-medium text-slate-800">{value || "—"}</span></div>)}</div><div className="overflow-hidden rounded-xl border"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[t("product"), "SKU", t("qty"), lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Còn lại" : "Remaining", t("unitPrice"), t("lineTotal")].map(header => <th key={header} className="px-3 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{(showDetail.items ?? []).map((item: any) => <tr key={item.id} className="border-b last:border-0"><td className="px-3 py-2 font-medium">{item.product_name}</td><td className="px-3 py-2 text-slate-500 mono">{item.sku}</td><td className="px-3 py-2 text-center mono">{item.qty}</td><td className="px-3 py-2 text-center text-emerald-600 mono">{item.received_qty}</td><td className="px-3 py-2 text-center text-amber-600 mono">{item.remaining_qty}</td><td className="px-3 py-2 text-right mono">{fmt(item.unit_cost)}</td><td className="px-3 py-2 text-right font-semibold mono">{fmt(Number(item.qty) * Number(item.unit_cost))}</td></tr>)}</tbody></table></div></div></div></div>}
     </div>
   )
 }

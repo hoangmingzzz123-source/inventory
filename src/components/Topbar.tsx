@@ -1,7 +1,8 @@
-import { Bell, Search, PanelLeft, ChevronRight, Globe, X, AlertTriangle, CheckCircle, Info, Clock, AlertCircle, Trash2, Check } from "lucide-react"
+import { Bell, Search, PanelLeft, ChevronRight, Globe, X, AlertTriangle, CheckCircle, Info, Clock, AlertCircle, Trash2, Check, Moon, Sun, Monitor } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useLang } from "../i18n/LangContext"
 import { useNotifications, type NotifType, type AppNotification } from "../contexts/NotificationContext"
+import { useTheme, type ThemePreference } from "../contexts/ThemeContext"
 
 interface TopbarProps {
   breadcrumbs: string[]
@@ -92,7 +93,9 @@ function NotifRow({ n, lang, onRead, onDismiss, onNavigate }: { n: AppNotificati
 export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userMenu }: TopbarProps) {
   const { lang, setLang, t } = useLang()
   const { notifications, unreadCount, markRead, markAllRead, dismiss, dismissAll } = useNotifications()
+  const { theme, resolvedTheme, setTheme } = useTheme()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
   const [notifOpen, setNotifOpen] = useState(false)
 
   useEffect(() => {
@@ -102,6 +105,14 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
   }, [])
 
   const preview = notifications.slice(0, 5)
+  const nextTheme: Record<ThemePreference, ThemePreference> = { light: "dark", dark: "system", system: "light" }
+  const quickAccess = [
+    { label: lang === "vi" ? "Sản phẩm" : "Products", screen: "products" },
+    { label: lang === "vi" ? "Đơn mua hàng" : "Purchase Orders", screen: "purchase-orders" },
+    { label: lang === "vi" ? "Đơn bán hàng" : "Sales Orders", screen: "sales-orders" },
+    { label: lang === "vi" ? "Khách hàng" : "Customers", screen: "customers" },
+    { label: lang === "vi" ? "Tồn kho hiện tại" : "Stock Balance", screen: "stock-balance" },
+  ].filter(item => item.label.toLowerCase().includes(searchTerm.trim().toLowerCase()))
 
   return (
     <header className="flex items-center gap-3 px-4 border-b bg-white" style={{ height: 52, borderColor: "var(--border)", flexShrink: 0 }}>
@@ -203,6 +214,15 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
           )}
         </div>
 
+        <button
+          onClick={() => setTheme(nextTheme[theme])}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
+          title={lang === "vi" ? `Giao diện: ${theme === "system" ? "Hệ thống" : resolvedTheme === "dark" ? "Tối" : "Sáng"}` : `Theme: ${theme === "system" ? "System" : resolvedTheme}`}
+          aria-label={lang === "vi" ? "Đổi giao diện sáng tối" : "Change color theme"}
+        >
+          {theme === "system" ? <Monitor size={15} /> : resolvedTheme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
+        </button>
+
         {/* Language Toggle */}
         <div className="relative ml-1">
           <button
@@ -232,7 +252,9 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
               <Search size={16} className="text-slate-400 flex-shrink-0" />
               <input
                 autoFocus
-                placeholder={lang === "vi" ? "Tìm sản phẩm, khách hàng, đơn hàng..." : "Search products, customers, orders..."}
+                value={searchTerm}
+                onChange={event => setSearchTerm(event.target.value)}
+                placeholder={lang === "vi" ? "Tìm màn hình..." : "Find a screen..."}
                 className="flex-1 text-sm outline-none text-slate-800 placeholder-slate-400"
                 onKeyDown={e => e.key === "Escape" && setSearchOpen(false)}
               />
@@ -240,13 +262,7 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
             </div>
             <div className="p-3">
               <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-2 px-2">{lang === "vi" ? "Truy cập nhanh" : "Quick Access"}</div>
-              {[
-                { label: lang === "vi" ? "Sản phẩm" : "Products", screen: "products" },
-                { label: lang === "vi" ? "Đơn mua hàng" : "Purchase Orders", screen: "purchase-orders" },
-                { label: lang === "vi" ? "Đơn bán hàng" : "Sales Orders", screen: "sales-orders" },
-                { label: lang === "vi" ? "Khách hàng" : "Customers", screen: "customers" },
-                { label: lang === "vi" ? "Tồn kho hiện tại" : "Stock Balance", screen: "stock-balance" },
-              ].map(item => (
+              {quickAccess.map(item => (
                 <button
                   key={item.screen}
                   onClick={() => { setSearchOpen(false); onNavigate?.(item.screen) }}
@@ -256,6 +272,7 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
                   {item.label}
                 </button>
               ))}
+              {!quickAccess.length && <div className="px-2 py-6 text-center text-xs text-slate-400">{lang === "vi" ? "Không tìm thấy màn hình phù hợp" : "No matching screen"}</div>}
             </div>
           </div>
         </div>

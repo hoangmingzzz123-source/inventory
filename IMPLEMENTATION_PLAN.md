@@ -7,10 +7,11 @@
 - [x] `npx tsc --noEmit` passes after the opening warehouse changes.
 - [x] Phase 2: purchase order and goods receipt workflow. PO receiving resolves real product IDs by `product_id` or SKU, calculates `received_qty`/`remaining_qty`, creates unique receipt references for each batch, supports partial quantities in the UI, and uses an atomic Supabase RPC for live writes. The RPC migration must be applied to the target Supabase project before live use.
 - [x] Phase 3: inventory adjustment and warehouse transfer. Atomic writes, ledger-derived adjustment delta, source-stock validation, creation UI, and reversal workflow are implemented.
-- [~] Phase 4: sales and outbound stock. Sales order creation, partial delivery, invoice linkage, creation UI, returns, and reversal workflow are implemented; approval permissions and invoice settlement remain in Phase 6/7.
+- [x] Phase 4: sales and outbound stock. Sales order creation, approval guards, partial delivery, invoice linkage, returns, and reversal workflow are implemented.
 - [x] Phase 5: live reports and dashboard reconciliation. Inventory, sales, gross profit, purchasing, cash-flow report sources, period/warehouse/product/status filters, live receivable/payable aging, loading/error states, filtered summary export, shared report calculation helpers, and extracted report catalog are live. The remaining detailed static-definition extraction is internal cleanup only.
-- [~] Phase 6: finance basics. Atomic customer receipts, supplier payments, cash-book posting, and invoice/PO settlement are implemented; finance permissions and final reconciliation tests remain.
-- [~] Phase 7: permissions, audit, and quality hardening. Finance, inventory, sales, and ledger workflow triggers now enforce database permissions and emit persisted audit events; broader role/live workflow tests remain.
+- [x] Phase 6: finance basics. Atomic customer receipts, supplier payments, cash-book posting, invoice/PO settlement, finance permissions, and reconciliation support are implemented.
+- [~] Phase 7: permissions, audit, and quality hardening. UI and database action guards, audit events, secure email-bound organization invitations, an application error boundary, schema contract tests, and nonnegative-inventory concurrency guards are implemented; validation against the deployed Supabase project remains an operational release step.
+- [x] Production dependency hardening: vulnerable SheetJS packages were removed, Excel/CSV import-export now uses ExcelJS with spreadsheet-formula escaping, and the production dependency audit has no known vulnerabilities.
 
 ## 1. Context
 
@@ -18,14 +19,14 @@ InventoryOS is a React + Vite + Supabase inventory management application. The a
 
 Current implementation status:
 
-- Authentication, organization profile loading, role access, and demo mode are available.
-- Product, customer, supplier, warehouse, category, brand, unit, quotation, purchase order, and goods receipt data services exist in different levels of completeness.
+- Authentication, organization profile loading, role access, email-bound organization invitations, and demo mode are available.
+- Product, customer, supplier, warehouse, category, brand, unit, quotation, purchase, sales, inventory, returns, finance, user, role, and audit screens use organization-scoped services in live mode.
 - `inventory_ledger`, `goods_receipts`, `goods_receipt_items`, and `inventory_balance` are available as the inventory foundation.
-- Product quantity is being moved to a ledger-derived value instead of a user-editable field.
+- Product quantity is ledger-derived instead of user-editable.
 - Creating or importing a product with a positive initial quantity creates an opening goods receipt and an `OPENING_BALANCE` ledger movement.
 - Quotation-to-goods-receipt conversion creates receipt details, updates inventory, and writes ledger movements.
-- Stock ledger and inventory reports have started using live data.
-- Several sales, finance, adjustment, transfer, and reporting screens are still placeholders, mock-driven, or only partially connected to Supabase.
+- Dashboard, stock ledger, inventory, sales, purchase, finance, and aging reports use persisted live data; mock fixtures are restricted to demo mode.
+- Production hardening, an explicit legacy-opening-stock backfill RPC, ledger-to-balance cache synchronization, and reconciliation helpers are consolidated in `supabase/migrations/20260916000000_production_readiness.sql`.
 - The application requires Node.js 22 and pnpm 10.34.3 for the current Vite toolchain.
 
 Important existing files:
@@ -38,6 +39,7 @@ Important existing files:
 - `supabase/migrations/20260804000000_initial_schema.sql`: base schema.
 - `supabase/migrations/20260904000000_receipt_items_inventory_ledger.sql`: receipt detail and ledger schema.
 - `supabase/migrations/20260907000000_fix_inventory_ledger_history.sql`: ledger history constraint correction.
+- `supabase/migrations/20260916000000_production_readiness.sql`: final schema compatibility, atomic workflows, permissions, audit, concurrency guards, and reconciliation helper.
 
 ## 2. Mission
 
@@ -239,7 +241,7 @@ The shared formatter is `src/lib/dateUtils.ts`.
 ### Tasks
 
 1. [x] Add sales order item storage and retrieval.
-2. [ ] Add approval status transitions and permission enforcement.
+2. [x] Add approval status transitions and permission enforcement.
 3. [x] Create delivery note workflow.
 4. [x] Validate available ledger quantity before delivery.
 5. [x] Write `SALE` ledger movements at delivery confirmation.
@@ -261,7 +263,7 @@ The shared formatter is `src/lib/dateUtils.ts`.
 - Completed adjustment, transfer, and delivery documents expose reversal actions that append compensating ledger movements.
 - Delivery RPCs reject insufficient stock, duplicate references, and over-delivery; partial deliveries remain linked to the sales order.
 - Each delivery creates a linked draft invoice through `delivery_id`, `delivery_ref`, and `invoice_ref`.
-- Apply migrations `20260909000000_inventory_adjustment_transfer.sql`, `20260910000000_sales_outbound_workflow.sql`, and `20260911000000_sales_returns_reversals_invoice_link.sql` before live use.
+- For an existing database already migrated through phase 7, apply only the new `20260916000000_production_readiness.sql` before live use.
 
 ## Phase 5: Reports and dashboard
 
@@ -326,13 +328,16 @@ The shared formatter is `src/lib/dateUtils.ts`.
 
 ### Tasks
 
-1. [~] Enforce view/create/update/delete/approve/export actions. Database action guards now cover finance, inventory, sales, and ledger workflows; remaining UI action controls and export enforcement remain.
-2. [~] Hide or disable controls the current role cannot execute. View routing and Finance.create UI gating are implemented; remaining document action controls remain.
+1. [x] Enforce view/create/update/delete/approve/export actions in the UI and enforce mutating actions again at the database boundary.
+2. [x] Hide controls the current role cannot execute and prevent forbidden routes from rendering.
 3. [x] Enforce the same permission at the data/API boundary for finance, inventory, sales, and ledger workflow writes.
 4. [x] Record audit events for finance, inventory, sales, and ledger workflow changes and expose them in authenticated audit logs.
 5. [~] Add tests for organization isolation and role permissions. Schema contract coverage exists; live RLS/role tests remain.
 6. [~] Add tests for duplicate, partial, reversal, and concurrent workflows. Contract coverage exists; live workflow coverage remains.
 7. [x] Add user-facing error messages with actionable recovery guidance for finance RPC failures.
+8. [x] Add expiring, single-use, email-bound organization invitations so administrators can onboard users without sharing accounts or allowing self-selected roles.
+9. [x] Replace native browser alerts/confirmations with consistent, auto-dismissing toast messages and an accessible confirmation dialog.
+10. [x] Add persisted light/dark/system theme selection and organization-filtered realtime notification refreshes for operational changes.
 
 ### Current implementation
 
@@ -341,6 +346,8 @@ The shared formatter is `src/lib/dateUtils.ts`.
 - Finance settlement calls `require_permission('Finance', 'create')` and `append_audit_event` inside the transaction.
 - Migration `20260914000000_permissions_audit_hardening.sql` must be applied after the finance migrations.
 - Migration `20260915000000_phase7_action_guards.sql` applies idempotent permission and audit triggers to existing workflow tables.
+- Migration `20260916000000_production_readiness.sql` completes role seeding, signup/profile guards, atomic document RPCs, return/reversal safety, nonnegative stock locking, audit coverage, indexes, grants, and reconciliation queries.
+- The Users screen creates a private seven-day invitation link through a guarded RPC; signup validates the token, invited email, organization, and role inside the authentication trigger.
 
 ### Acceptance criteria
 
@@ -348,44 +355,35 @@ The shared formatter is `src/lib/dateUtils.ts`.
 - Every stock-changing action has an audit trail.
 - Tests cover the happy path and the main failure paths.
 
-## 7. Recommended Immediate Work
+## 7. Deployment Checklist
 
-The next implementation slice should be Phase 0 and the first half of Phase 2:
-
-1. Require a warehouse when creating/importing opening stock.
-2. Add a database transaction/function for goods receipt creation.
-3. Add PO item persistence and received quantity tracking.
-4. Implement partial receiving validation.
-5. Add a live goods receipt detail screen.
-6. Add reconciliation checks for ledger and inventory balance.
-
-This order is important because reports, product quantities, dashboard KPIs, and later sales workflows all depend on trustworthy receiving and ledger data.
+1. On an existing project that already applied migrations through `20260915000000_phase7_action_guards.sql`, apply only the new `20260916000000_production_readiness.sql` migration to staging first. Do not edit or re-run older migrations.
+2. Run the repository schema contract tests, then run authenticated live workflow tests with admin, manager, and viewer accounts from at least two organizations.
+3. Verify organization signup/invitation, opening stock, partial PO receipt, adjustment, transfer, delivery, purchase/sales return, reversal, invoice receipt, and supplier payment paths.
+4. Run `reconciliation_summary()` for each organization and resolve any legacy rows that do not reconcile before production cutover.
+5. Confirm forbidden direct table writes and cross-organization reads fail, including concurrent stock-out attempts.
+6. Build and deploy the frontend only after the staging database checks pass.
+7. Follow `DEPLOYMENT_GUIDE.md` for environment, reconciliation, invitation, and production-cutover steps.
 
 ## 8. Technical Risks
 
-### Risk: Multi-step writes from the browser
+### Risk: Database deployment drift
 
-A receipt currently involves multiple client-side writes. A failure in the middle can leave inconsistent data.
+The frontend now depends on the guarded RPCs and columns introduced by the latest migrations. Deploying the frontend before the database can break writes.
 
-Mitigation: move receipt creation into a Supabase RPC/database function with transaction semantics.
-
-### Risk: Opening stock has no selected warehouse
-
-Using a hard-coded default warehouse makes warehouse-level reporting unreliable.
-
-Mitigation: require warehouse selection for positive initial quantity and import rows, or explicitly store a controlled opening warehouse configured for the organization.
+Mitigation: apply the new `20260916000000_production_readiness.sql` migration in staging first and gate frontend deployment on workflow verification; do not modify already-applied migration files.
 
 ### Risk: Legacy data has no ledger history
 
 Existing product quantities and old receipts may not reconcile.
 
-Mitigation: provide a one-time backfill migration and a reconciliation report before enabling strict ledger-only display.
+Mitigation: run `reconciliation_summary()`, then call `backfill_legacy_product_opening_stock(product_id, warehouse_id)` for each flagged legacy product after choosing its real warehouse.
 
-### Risk: Mock fallback hides live data failures
+### Risk: Live role and concurrency behavior differs from static contracts
 
-A missing table or schema error can look like an empty report instead of a configuration problem.
+Schema tests verify the migration text but cannot prove JWT roles, RLS, or concurrent transactions against a hosted project.
 
-Mitigation: distinguish schema errors, network errors, empty data, and demo mode in the UI.
+Mitigation: run the live role/isolation/workflow matrix in staging with real authenticated sessions before production.
 
 ### Risk: Reports drift from operational logic
 
@@ -405,4 +403,4 @@ The app is ready for the first production milestone when:
 - Duplicate and partial workflows are handled safely.
 - Migrations can be applied repeatedly without policy or constraint errors.
 - `npx tsc --noEmit`, repository tests, and live workflow tests pass.
-- `pnpm run build` succeeds on Node.js 22.
+- `npm run build` (or `pnpm run build`) succeeds on Node.js 22.

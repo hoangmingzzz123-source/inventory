@@ -1,4 +1,9 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react"
+import { useAuth } from "./AuthContext"
+import { useDemo } from "./DemoContext"
+import { fetchInvoices, fetchProducts, fetchPurchaseOrders } from "../lib/dataService"
+import { formatDateKeyUtc7 } from "../lib/dateUtils"
+import { supabase } from "../lib/supabase"
 
 export type NotifType = "warning" | "success" | "info" | "pending" | "error"
 
@@ -44,6 +49,77 @@ const Ctx = createContext<NotifCtx | null>(null)
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL)
+  const { profile } = useAuth()
+  const { isDemo } = useDemo()
+  const [refreshVersion, setRefreshVersion] = useState(0)
+
+  useEffect(() => {
+    if (isDemo) {
+      setNotifications(INITIAL)
+      return
+    }
+    if (!profile?.org_id) {
+      setNotifications([])
+      return
+    }
+    let cancelled = false
+    void Promise.all([
+      fetchProducts({ isDemo: false, orgId: profile.org_id }),
+      fetchPurchaseOrders({ isDemo: false, orgId: profile.org_id }),
+      fetchInvoices({ isDemo: false, orgId: profile.org_id }),
+    ]).then(([productResult, purchaseResult, invoiceResult]) => {
+      if (cancelled) return
+      const today = formatDateKeyUtc7()
+      const next: AppNotification[] = []
+      const timestamp = Date.now()
+      for (const product of (productResult.data ?? []).filter((row: any) => Number(row.min_qty ?? 0) > 0 && Number(row.qty ?? 0) <= Number(row.min_qty ?? 0)).slice(0, 10)) {
+        next.push({ id: timestamp + next.length, type: "warning", category: "inventory", titleVi: "Tồn kho thấp", titleEn: "Low Stock Alert", bodyVi: `${product.name} còn ${Number(product.qty ?? 0)} (tối thiểu: ${Number(product.min_qty ?? 0)}).`, bodyEn: `${product.name} has ${Number(product.qty ?? 0)} remaining (minimum: ${Number(product.min_qty ?? 0)}).`, timeVi: "Hiện tại", timeEn: "Now", unread: true, actionVi: "Xem tồn kho", actionEn: "View stock", navigateTo: "stock-balance", timestamp: new Date(product.updated_at ?? timestamp).getTime() || timestamp })
+      }
+      for (const order of (purchaseResult.data ?? []).filter((row: any) => String(row.status).toLowerCase() === "pending approval").slice(0, 10)) {
+        const amount = new Intl.NumberFormat("vi-VN").format(Number(order.total ?? 0))
+        next.push({ id: timestamp + next.length, type: "pending", category: "purchase", titleVi: "PO chờ duyệt", titleEn: "PO Pending Approval", bodyVi: `${order.ref} (${order.supplier_name ?? ""} — ${amount} ₫) cần được phê duyệt.`, bodyEn: `${order.ref} (${order.supplier_name ?? ""} — ${amount} VND) needs approval.`, timeVi: "Đang chờ", timeEn: "Pending", unread: true, actionVi: "Xem đơn mua", actionEn: "View purchase order", navigateTo: "purchase-orders", timestamp: new Date(order.created_at ?? timestamp).getTime() || timestamp })
+      }
+      for (const invoice of (invoiceResult.data ?? []).filter((row: any) => Number(row.outstanding_amount ?? 0) > 0 && row.due_date && String(row.due_date) < today && String(row.status).toLowerCase() !== "cancelled").slice(0, 10)) {
+        const amount = new Intl.NumberFormat("vi-VN").format(Number(invoice.outstanding_amount ?? 0))
+        next.push({ id: timestamp + next.length, type: "warning", category: "finance", titleVi: "Hóa đơn quá hạn", titleEn: "Invoice Overdue", bodyVi: `${invoice.ref} (${invoice.customer_name ?? ""}) còn phải thu ${amount} ₫.`, bodyEn: `${invoice.ref} (${invoice.customer_name ?? ""}) has ${amount} VND overdue.`, timeVi: "Quá hạn", timeEn: "Overdue", unread: true, actionVi: "Xem hóa đơn", actionEn: "View invoice", navigateTo: "invoices", timestamp: new Date(invoice.created_at ?? timestamp).getTime() || timestamp })
+      }
+      const sourceError = productResult.error ?? purchaseResult.error ?? invoiceResult.error
+      if (sourceError) {
+        next.unshift({ id: timestamp - 1, type: "error", category: "system", titleVi: "Không thể tải đủ thông báo", titleEn: "Notifications could not be fully loaded", bodyVi: sourceError.message ?? String(sourceError), bodyEn: sourceError.message ?? String(sourceError), timeVi: "Hiện tại", timeEn: "Now", unread: true, navigateTo: "audit-logs", timestamp })
+      }
+      setNotifications(previous => {
+        const readState = new Map(previous.map(notification => [
+          `${notification.category}:${notification.titleEn}:${notification.bodyEn}`,
+          notification.unread,
+        ]))
+        return next.sort((a, b) => b.timestamp - a.timestamp).map(notification => ({
+          ...notification,
+          unread: readState.get(`${notification.category}:${notification.titleEn}:${notification.bodyEn}`) ?? notification.unread,
+        }))
+      })
+    })
+    return () => { cancelled = true }
+  }, [isDemo, profile?.org_id, refreshVersion])
+
+  useEffect(() => {
+    if (isDemo || !profile?.org_id) return
+    let refreshTimer: number | undefined
+    const refresh = () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => setRefreshVersion(version => version + 1), 300)
+    }
+    const filter = `org_id=eq.${profile.org_id}`
+    const channel = supabase.channel(`organization-notifications:${profile.org_id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "inventory_ledger", filter }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_orders", filter }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_orders", filter }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "invoices", filter }, refresh)
+      .subscribe()
+    return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      void supabase.removeChannel(channel)
+    }
+  }, [isDemo, profile?.org_id])
 
   const markRead = useCallback((id: number) =>
     setNotifications(p => p.map(n => n.id === id ? { ...n, unread: false } : n)), [])

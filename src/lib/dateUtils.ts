@@ -17,6 +17,14 @@ export function formatDateTimeUtc7(value: unknown) {
   return `${parts.hour}:${parts.minute}:${parts.second} ${parts.day}/${parts.month}/${parts.year} UTC+7`
 }
 
+export function formatDateKeyUtc7(value: unknown = new Date()) {
+  if (!value) return ""
+  const date = value instanceof Date ? value : new Date(String(value))
+  if (Number.isNaN(date.getTime())) return ""
+  const parts = Object.fromEntries(utc7Formatter.formatToParts(date).map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 export function formatDateOnlyUtc7(value: unknown) {
   const formatted = formatDateTimeUtc7(value)
   return formatted ? formatted.slice(9) : ""

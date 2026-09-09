@@ -1,18 +1,17 @@
-import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, ChevronLeft, ChevronRight, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Filter, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
+import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
 import { useState, useRef, useEffect } from "react"
 import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, upsertGoodsReceipt, deleteGoodsReceipt, upsertCashBook, deleteCashBook, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchUsers, fetchPurchaseReturns, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
-import * as XLSX from "xlsx"
-import ExcelJS from "exceljs"
-import { importFromExcel } from "../lib/excelUtils"
+import { exportRowsToExcel, importFromExcel, sanitizeSpreadsheetCell, saveExcelWorkbook } from "../lib/excelUtils"
 import { loadCompanySettings, saveCompanySettings, type CompanySettings } from "../lib/companySettings"
-import { formatDateTimeUtc7 } from "../lib/dateUtils"
+import { formatDateKeyUtc7, formatDateTimeUtc7 } from "../lib/dateUtils"
 import { buildAgingBuckets, calculateCashBalance, deriveLedgerBalance, filterReportRows } from "../lib/reportService"
 import { getReportCatalog } from "../lib/reportCatalog"
+import { confirmAppAction, showAppToast } from "../lib/appEvents"
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
@@ -48,9 +47,7 @@ function fieldPlaceholder(lang: string, label: string) {
 }
 
 function getStatusOptions(lang: string) {
-  return lang === "vi"
-    ? ["Đang hoạt động", "Ngừng hoạt động", "Nháp", "Chờ duyệt", "Đã duyệt", "Đã hủy"]
-    : ["Active", "Inactive", "Draft", "Pending Approval", "Approved", "Cancelled"]
+  return ["Active", "Inactive", "Draft", "Pending Approval", "Approved", "Cancelled"]
 }
 
 // --- Download CSV template utility ---
@@ -63,15 +60,12 @@ function downloadTemplate(filename: string, cols: string[]) {
   URL.revokeObjectURL(url)
 }
 
-function downloadTemplateXlsx(filename: string, cols: string[]) {
-  const ws = XLSX.utils.aoa_to_sheet([cols, cols.map(() => "")])
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Template")
-  XLSX.writeFile(wb, filename + "_template.xlsx")
+async function downloadTemplateXlsx(filename: string, cols: string[]) {
+  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Template")
 }
 
 function formatCsvCell(value: string | number) {
-  const text = String(value ?? "")
+  const text = String(sanitizeSpreadsheetCell(value) ?? "")
   return `"${text.replace(/"/g, '""')}"`
 }
 
@@ -134,7 +128,7 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
       })
       setPreviewRows(rows)
     } catch (err) {
-      console.error(err)
+      if (import.meta.env.DEV) console.error(err)
       setPreviewRows([])
       setParseError(lang === "vi" ? "Lỗi khi đọc file" : "Failed to read file")
     } finally {
@@ -158,16 +152,16 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
   }
 
   const runImport = async () => {
-    if (!file || !onImportRows) return alert(lang === "vi" ? "Chưa có chức năng import" : "Import handler not provided")
-    if (previewRows.length === 0) return alert(lang === "vi" ? "Chưa có dữ liệu để nhập" : "No data to import")
-    if (previewRows.some(r => r.issues.length > 0 || r.isDuplicate)) return alert(lang === "vi" ? "Vui lòng sửa các lỗi trước khi import" : "Please fix the errors before importing")
+    if (!file || !onImportRows) return showAppToast(lang === "vi" ? "Chưa có chức năng import" : "Import handler not provided")
+    if (previewRows.length === 0) return showAppToast(lang === "vi" ? "Chưa có dữ liệu để nhập" : "No data to import")
+    if (previewRows.some(r => r.issues.length > 0 || r.isDuplicate)) return showAppToast(lang === "vi" ? "Vui lòng sửa các lỗi trước khi import" : "Please fix the errors before importing")
     try {
       setProcessing(true)
       await onImportRows(previewRows.map(r => r.row))
       onClose()
     } catch (err) {
-      console.error(err)
-      alert(lang === "vi" ? "Lỗi khi import dữ liệu" : "Failed to import data")
+      if (import.meta.env.DEV) console.error(err)
+      showAppToast(lang === "vi" ? "Lỗi khi import dữ liệu" : "Failed to import data")
     } finally { setProcessing(false) }
   }
 
@@ -206,7 +200,7 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
                     {lang === "vi" ? "Mẫu CSV" : "CSV Template"}
                   </button>
                   <button
-                    onClick={() => downloadTemplateXlsx(filename, cols)}
+                    onClick={() => void downloadTemplateXlsx(filename, cols)}
                     className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700"
                   >
                     <FileSpreadsheet size={12} />
@@ -323,10 +317,10 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
 }
 
 // --- Toolbar shared ---
-export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onImportRows, templateFile, templateCols, existingKeys, extra, onExportCsv, onExportXlsx, onPrint }: {
+export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onImportRows, templateFile, templateCols, existingKeys, extra, onExportCsv, onExportXlsx, onPrint, onRefresh }: {
   onSearch?: (v: string) => void; search?: string; onCreate?: () => void; createLabel?: string
   onImport?: () => void; onImportRows?: (rows: any[]) => Promise<void>; templateFile?: string; templateCols?: string[]; existingKeys?: string[]; extra?: React.ReactNode;
-  onExportCsv?: () => void; onExportXlsx?: () => void; onPrint?: () => void
+  onExportCsv?: () => void; onExportXlsx?: () => void; onPrint?: () => void; onRefresh?: () => void
 }) {
   const { t, lang } = useLang()
   const [showImport, setShowImport] = useState(false)
@@ -338,7 +332,7 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onI
             <Plus size={13} /> {createLabel ?? t("create")}
           </button>
         )}
-        {(onExportCsv || onExportXlsx) ? (
+        {(onExportCsv || onExportXlsx) && (
           <div className="relative group">
             <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
               <Download size={13} /> {t("export")}
@@ -348,10 +342,6 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onI
               {onExportXlsx && <button onClick={onExportXlsx} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>}
             </div>
           </div>
-        ) : (
-          <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50 opacity-50 cursor-not-allowed" style={{ borderColor: "var(--border)" }}>
-            <Download size={13} /> {t("export")}
-          </button>
         )}
         {(onImport || templateCols) && (
           <button
@@ -379,9 +369,9 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onI
             <input value={search ?? ""} onChange={e => onSearch(e.target.value)} placeholder={t("searchPlaceholder")} className="h-8 pl-8 pr-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 w-52" style={{ borderColor: "var(--border)" }} />
           </div>
         )}
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        {onRefresh && <button onClick={onRefresh} className="w-8 h-8 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <RefreshCw size={13} />
-        </button>
+        </button>}
       </div>
       {showImport && templateCols && (
         <ImportModal
@@ -402,11 +392,7 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
   return (
     <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
       <span>{t("showing")} {count} {t("of")} {total} {label}</span>
-      <div className="flex items-center gap-1">
-        <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronLeft size={13} /></button>
-        <button className="w-7 h-7 flex items-center justify-center rounded-md bg-blue-600 text-white">1</button>
-        <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronRight size={13} /></button>
-      </div>
+      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
     </div>
   )
 }
@@ -414,7 +400,7 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
 // --- Customers ---
 
 
-export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile }: any) {
+export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile, readOnly = false, moduleName = "Master Data", onRefresh }: any) {
   const { t, lang } = useLang();
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -423,7 +409,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
     customer: [], supplier: [], warehouse: [], category: [], brand: [], unit: [], status: getStatusOptions(lang)
   });
   const { isDemo } = useDemo();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const importKeyField = getImportKeyField(templateCols);
   const existingKeys = data.map((item: any) => item[importKeyField]).filter(Boolean).map(String);
 
@@ -483,21 +469,26 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
   
   async function handleUpsert(newItem: any) {
     const res = await handleUpsertFor(templateFile, newItem, isDemo, profile)
+    if (res?.error) {
+      showAppToast(res.error.message ?? String(res.error))
+      return false
+    }
     if (!isDemo) {
-      if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "categories") { const r = await fetchCategories({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "brands") { const r = await fetchBrands({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "units") { const r = await fetchUnits({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
-      if (templateFile === "goodsreceipt") { const r = await fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))); return }
-      if (templateFile === "cashbook") { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))); return }
+      if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "categories") { const r = await fetchCategories({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "brands") { const r = await fetchBrands({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "units") { const r = await fetchUnits({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
+      if (templateFile === "goodsreceipt") { const r = await fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))); return true }
+      if (templateFile === "cashbook") { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))); return true }
     }
     if (editingItem) setData(data.map((x: any) => x === editingItem ? newItem : x)); else setData([...data, newItem]);
+    return true
   }
 
   async function handleImportRows(rows: any[]) {
-    if (!rows || rows.length === 0) return alert(lang === 'vi' ? 'Không có dữ liệu để import' : 'No rows to import')
+    if (!rows || rows.length === 0) return showAppToast(lang === 'vi' ? 'Không có dữ liệu để import' : 'No rows to import')
     const keyField = templateCols.includes('code') ? 'code' : (templateCols.includes('id') ? 'id' : templateCols[0])
     const duplicates: any[] = []
     const failed: any[] = []
@@ -567,15 +558,19 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       else if (templateFile === 'cashbook') { const r = await fetchCashBook({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data.map((item:any) => ({ ...item, doc_no: item.ref, type: item.type, amount: item.amount, balance: item.balance }))) }
     }
 
-    alert(lang === 'vi'
+    showAppToast(lang === 'vi'
       ? `Import xong. Thành công: ${importedCount}, Trùng: ${duplicates.length}, Lỗi: ${failed.length}`
-      : `Import complete. Success: ${importedCount}, Duplicates: ${duplicates.length}, Failed: ${failed.length}`)
+      : `Import complete. Success: ${importedCount}, Duplicates: ${duplicates.length}, Failed: ${failed.length}`, failed.length ? "info" : "success")
   }
 
   async function handleDelete(item: any) {
     if (isDemo) { setData(data.filter((x: any) => x !== item)); return }
     const id = item.id || item.code || item.ref || item.doc_no
-    await handleDeleteFor(templateFile, id, isDemo, profile)
+    const result = await handleDeleteFor(templateFile, id, isDemo, profile)
+    if (result?.error) {
+      showAppToast(result.error.message ?? String(result.error))
+      return
+    }
     if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
@@ -589,17 +584,18 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
   
   return (
     <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => { setEditingItem(null); setShowForm(true); }} createLabel={lang === "vi" ? "Thêm " + title : "Add " + title}
-        templateFile={templateFile} templateCols={templateCols} existingKeys={existingKeys} onImportRows={handleImportRows}
-        onExportCsv={() => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
-        onExportXlsx={() => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key])))}
+      <Toolbar search={search} onSearch={setSearch} onCreate={!readOnly && can(moduleName, "create") ? () => { setEditingItem(null); setShowForm(true); } : undefined} createLabel={lang === "vi" ? "Thêm " + title : "Add " + title}
+        templateFile={templateFile} templateCols={!readOnly && can(moduleName, "create") ? templateCols : undefined} existingKeys={existingKeys} onImportRows={!readOnly && can(moduleName, "create") ? handleImportRows : undefined}
+        onExportCsv={can(moduleName, "export") ? () => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
+        onExportXlsx={can(moduleName, "export") ? () => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
+        onRefresh={onRefresh}
       />
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse min-w-[900px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
               {columns.map((c: any) => <th key={c.key} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{c.label}</th>)}
-              <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap"></th>
+              {!readOnly && <th className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap"></th>}
             </tr>
           </thead>
           <tbody>
@@ -610,12 +606,12 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
                     {c.isStatus ? <StatusBadge status={item[c.key]} /> : (c.format ? c.format(item[c.key]) : item[c.key])}
                   </td>
                 ))}
-                <td className="px-4 py-2.5">
+                {!readOnly && <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                        <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowForm(true); }} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><Edit size={14} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(item) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
+                        {can(moduleName, "update") && <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); setShowForm(true); }} className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><Edit size={14} /></button>}
+                        {can(moduleName, "delete") && <button onClick={async (e) => { e.stopPropagation(); if (await confirmAppAction(lang === "vi" ? "Xóa bản ghi này?" : "Delete this record?", { destructive: true })) void handleDelete(item) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>}
                   </div>
-                </td>
+                </td>}
               </tr>
             ))}
           </tbody>
@@ -629,17 +625,17 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
               <h2 className="text-sm font-semibold">{editingItem ? (lang === "vi" ? "Sửa " + title : "Edit " + title) : (lang === "vi" ? "Thêm " + title : "Add " + title)}</h2>
               <button onClick={() => setShowForm(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
             </div>
-            <form onSubmit={e => {
+            <form onSubmit={async e => {
               e.preventDefault();
               const fd = new FormData(e.currentTarget);
               const newItem: any = { ...editingItem };
-              columns.forEach((c: any) => {
+              columns.filter((c: any) => !c.readOnly).forEach((c: any) => {
                 newItem[c.key] = fd.get(c.key) || "";
               });
-              handleUpsert(newItem).finally(() => setShowForm(false));
+              if (await handleUpsert(newItem)) setShowForm(false)
             }}>
               <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
-                {columns.map((c: any) => {
+                {columns.filter((c: any) => !c.readOnly).map((c: any) => {
                   const fkKeyNames = ["customer", "supplier", "warehouse", "category", "brand", "unit"]
                   const options = relatedOptions[c.key] || []
                   const isFkSelector = fkKeyNames.includes(c.key)
@@ -702,23 +698,6 @@ async function handleUpsertFor(templateFile: string, item: any, isDemo: boolean,
       return await upsertBrand(item, ctx)
     case "units":
       return await upsertUnit(item, ctx)
-    case "goodsreceipt":
-      return await upsertGoodsReceipt({
-        ...item,
-        ref: item.doc_no || item.ref,
-        po_ref: item.po_no,
-        supplier_name: item.supplier,
-        warehouse_name: item.warehouse,
-        status: item.status,
-      }, ctx)
-    case "cashbook":
-      return await upsertCashBook({
-        ...item,
-        ref: item.doc_no || item.ref,
-        type: item.type,
-        amount: item.amount,
-        balance: item.balance,
-      }, ctx)
     default:
       return { error: null }
   }
@@ -740,10 +719,6 @@ async function handleDeleteFor(templateFile: string, id: string, isDemo: boolean
       return await deleteBrand(id, ctx)
     case "units":
       return await deleteUnit(id, ctx)
-    case "goodsreceipt":
-      return await deleteGoodsReceipt(id, ctx)
-    case "cashbook":
-      return await deleteCashBook(id, ctx)
     default:
       return { error: null }
   }
@@ -752,7 +727,7 @@ async function handleDeleteFor(templateFile: string, id: string, isDemo: boolean
 
 export function Customers() {
   const { lang } = useLang();
-  const [data, setData] = useState(customers);
+  const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
@@ -762,21 +737,21 @@ export function Customers() {
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "phone", label: "Điện thoại" },
     { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "credit_limit", label: "Hạn mức TD", format: fmt },
-    { key: "debt", label: "Công nợ", format: fmt }, { key: "status", label: "Trạng thái", isStatus: true }
+    { key: "debt", label: "Công nợ", format: fmt, readOnly: true }, { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Customer Name" }, { key: "phone", label: "Phone" },
     { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "credit_limit", label: "Credit Limit", format: fmt },
-    { key: "debt", label: "Debt", format: fmt }, { key: "status", label: "Status", isStatus: true }
+    { key: "debt", label: "Debt", format: fmt, readOnly: true }, { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "credit_limit", "debt", "status"]} templateFile="customers" />;
+  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "credit_limit", "status"]} templateFile="customers" />;
 }
 
 // --- Suppliers ---
 
 export function Suppliers() {
   const { lang } = useLang();
-  const [data, setData] = useState(suppliers);
+  const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
@@ -785,22 +760,22 @@ export function Suppliers() {
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã NCC" }, { key: "name", label: "Tên nhà cung cấp" }, { key: "phone", label: "Điện thoại" },
-    { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "debt", label: "Công nợ", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "debt", label: "Công nợ", format: fmt, readOnly: true },
     { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Supplier Name" }, { key: "phone", label: "Phone" },
-    { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "debt", label: "Debt", format: fmt },
+    { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "debt", label: "Debt", format: fmt, readOnly: true },
     { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "nhà cung cấp" : "supplier"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "debt", "status"]} templateFile="suppliers" />;
+  return <GenericCrudList title={lang === "vi" ? "nhà cung cấp" : "supplier"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "status"]} templateFile="suppliers" />;
 }
 
 // --- Warehouses ---
 
 export function Warehouses() {
   const { lang } = useLang();
-  const [data, setData] = useState(warehouses);
+  const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
@@ -809,13 +784,13 @@ export function Warehouses() {
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã kho" }, { key: "name", label: "Tên kho" }, { key: "address", label: "Địa điểm" },
-    { key: "manager", label: "Thủ kho" }, { key: "stock_value", label: "Giá trị tồn kho", format: fmt }, { key: "status", label: "Trạng thái", isStatus: true }
+    { key: "manager", label: "Thủ kho" }, { key: "stock_value", label: "Giá trị tồn kho", format: fmt, readOnly: true }, { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
     { key: "code", label: "Code" }, { key: "name", label: "Warehouse Name" }, { key: "address", label: "Address" },
-    { key: "manager", label: "Manager" }, { key: "stock_value", label: "Stock Value", format: fmt }, { key: "status", label: "Status", isStatus: true }
+    { key: "manager", label: "Manager" }, { key: "stock_value", label: "Stock Value", format: fmt, readOnly: true }, { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "kho" : "warehouse"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "address", "manager", "stock_value", "status"]} templateFile="warehouses" />;
+  return <GenericCrudList title={lang === "vi" ? "kho" : "warehouse"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "address", "manager", "status"]} templateFile="warehouses" />;
 }
 
 // --- Sales Orders ---
@@ -823,38 +798,37 @@ export function SalesOrders() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
-  const reload = async () => { const res = await fetchSalesOrders({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : row.date ?? "", doc_no: row.ref ?? row.doc_no ?? "", customer: row.customer_name ?? row.customer ?? "" }))) }
+  const reload = async () => { const res = await fetchSalesOrders({ isDemo, orgId: profile?.org_id }); if (res.error) showAppToast(res.error.message ?? String(res.error)); setData((res.data ?? []).map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : row.date ?? "", doc_no: row.ref ?? row.doc_no ?? "", customer: row.customer_name ?? row.customer ?? "" }))) }
   useEffect(() => {
     reload()
   }, [isDemo, profile]);
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <><div className="h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} /><div className="p-5"><GenericCrudList title={lang === "vi" ? "đơn hàng" : "sales order"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","customer","total","status"]} templateFile="salesorders" /></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
+  const approve = async (row: any) => { const result = await upsertSalesOrder({ id: row.id, status: "Approved" }, { isDemo, orgId: profile?.org_id }); if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload() }
+  const heads = ["DATE", "DOC_NO", "CUSTOMER", "WAREHOUSE", "TOTAL", "STATUS"]
+  return <><div className="flex h-full flex-col"><Toolbar onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} onRefresh={() => void reload()} onExportCsv={can("Sales", "export") ? () => exportCsv("sales-orders", heads, data.map(row => [row.date, row.doc_no, row.customer, row.warehouse_name, row.total, row.status])) : undefined} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[...heads, ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.doc_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5">{row.warehouse_name}</td><td className="px-4 py-2.5 text-right font-semibold mono">{fmt(Number(row.total))}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Sales", "approve") && ["Draft", "Pending Approval"].includes(row.status) && <button onClick={() => void approve(row)} className="h-7 rounded-lg bg-blue-600 px-2 text-[10px] font-medium text-white">{lang === "vi" ? "Duyệt" : "Approve"}</button>}</td></tr>)}{!data.length && <tr><td colSpan={7} className="py-16 text-center text-slate-400">{lang === "vi" ? "Chưa có đơn bán" : "No sales orders"}</td></tr>}</tbody></table></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
 }
 
-function SalesDocumentModal({ kind, salesOrders, deliveries, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; onClose: () => void; onSaved: () => Promise<void> }) {
+function SalesDocumentModal({ kind, salesOrders, deliveries, initialDeliveryRef, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; initialDeliveryRef?: string; onClose: () => void; onSaved: () => Promise<void> }) {
   const { lang } = useLang(); const { isDemo } = useDemo(); const { profile } = useAuth()
-  const [products, setProducts] = useState<any[]>([]); const [warehouses, setWarehouses] = useState<any[]>([]); const [form, setForm] = useState<any>({ ref: "", customer_name: "", warehouse_id: "", warehouse_name: "", sales_order_id: "", sales_order_ref: "", delivery_ref: "", reason: "" }); const [items, setItems] = useState<any[]>([{ product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }]); const [saving, setSaving] = useState(false)
-  useEffect(() => { Promise.all([fetchProducts({ isDemo, orgId: profile?.org_id }), fetchWarehouses({ isDemo, orgId: profile?.org_id })]).then(([p, w]) => { setProducts(p.data ?? []); setWarehouses(w.data ?? []) }) }, [isDemo, profile])
+  const [products, setProducts] = useState<any[]>([]); const [warehouses, setWarehouses] = useState<any[]>([]); const [customers, setCustomers] = useState<any[]>([]); const [form, setForm] = useState<any>({ ref: "", customer_id: "", customer_name: "", warehouse_id: "", warehouse_name: "", sales_order_id: "", sales_order_ref: "", delivery_ref: "", reason: "" }); const [items, setItems] = useState<any[]>([{ product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }]); const [saving, setSaving] = useState(false)
+  useEffect(() => { Promise.all([fetchProducts({ isDemo, orgId: profile?.org_id }), fetchWarehouses({ isDemo, orgId: profile?.org_id }), fetchCustomers({ isDemo, orgId: profile?.org_id })]).then(([p, w, c]) => { setProducts(p.data ?? []); setWarehouses(w.data ?? []); setCustomers(c.data ?? []) }) }, [isDemo, profile])
   const title = kind === "order" ? (lang === "vi" ? "Tạo đơn bán" : "Create sales order") : kind === "delivery" ? (lang === "vi" ? "Tạo phiếu giao hàng" : "Create delivery") : (lang === "vi" ? "Tạo phiếu trả hàng" : "Create return")
   const setItem = (index: number, key: string, value: any) => setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item))
   const chooseProduct = (index: number, id: string) => { const product = products.find(row => String(row.id) === String(id)); setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_id: id, product_name: product?.name ?? "", unit_cost: Number(product?.cost ?? 0), unit_price: Number(product?.price ?? 0) } : item)) }
   const chooseWarehouse = (id: string) => { const warehouse = warehouses.find(row => String(row.id) === String(id)); setForm({ ...form, warehouse_id: id, warehouse_name: warehouse?.name ?? "" }) }
-  const chooseOrder = (id: string) => { const order = salesOrders.find(row => String(row.id) === String(id)); setForm({ ...form, sales_order_id: id, sales_order_ref: order?.ref ?? "", customer_name: order?.customer_name ?? order?.customer ?? "" }); if (order?.items?.length) setItems(order.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: kind === "delivery" ? Number(item.remaining_qty ?? item.qty ?? 0) : Number(item.qty ?? 0), unit_price: Number(item.unit_price ?? item.price ?? 0), unit_cost: Number(item.unit_cost ?? item.cost ?? 0) }))) }
-  const chooseDelivery = (ref: string) => { const delivery = deliveries.find(row => row.ref === ref); setForm({ ...form, delivery_ref: ref, customer_name: delivery?.customer_name ?? "", warehouse_id: delivery?.warehouse_id ?? "", warehouse_name: delivery?.warehouse_name ?? "" }); if (delivery?.items?.length) setItems(delivery.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: item.qty }))) }
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const validItems = items.filter(item => item.product_id && Number(item.qty) > 0); const payload = { ...form, items: validItems }; const result = kind === "order" ? await upsertSalesOrder({ ...payload, subtotal: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0), total: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0) }, { isDemo, orgId: profile?.org_id }) : kind === "delivery" ? await deliverSalesOrder(payload, { isDemo, orgId: profile?.org_id }) : await createSalesReturn(payload, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
-  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"><div className="flex items-center justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{title}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto"><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">{lang === "vi" ? "Số chứng từ" : "Reference"}<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label>{kind === "order" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Khách hàng" : "Customer"}<input required value={form.customer_name} onChange={event => setForm({ ...form, customer_name: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label> : kind === "delivery" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Đơn bán" : "Sales order"}<select required value={form.sales_order_id} onChange={event => chooseOrder(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{salesOrders.filter(row => !["Delivered", "Cancelled"].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.ref} · {row.customer_name ?? row.customer}</option>)}</select></label> : <label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu giao" : "Delivery"}<select required value={form.delivery_ref} onChange={event => chooseDelivery(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{deliveries.filter(row => row.status !== "Reversed").map(row => <option key={row.ref} value={row.ref}>{row.ref} · {row.customer_name}</option>)}</select></label>}<label className="text-[11px] font-medium">{lang === "vi" ? "Kho" : "Warehouse"}<select required value={form.warehouse_id} onChange={event => chooseWarehouse(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div><div className="border rounded-xl overflow-hidden"><div className="flex justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold"><span>{lang === "vi" ? "Sản phẩm" : "Items"}</span><button type="button" onClick={() => setItems([...items, { product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])} className="text-blue-600">+ Add</button></div>{items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_100px_110px_28px] gap-2 p-3 border-t"><select required value={item.product_id ?? ""} onChange={event => chooseProduct(index, event.target.value)} className="h-8 rounded-lg border text-xs"><option value="">Select product</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select><input required min="0.01" step="0.01" type="number" value={item.qty} onChange={event => setItem(index, "qty", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" />{kind === "order" ? <input min="0" type="number" value={item.unit_price} onChange={event => setItem(index, "unit_price", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" /> : <span className="text-[11px] text-slate-500 self-center truncate">{item.product_name}</span>}<button type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}</div></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
+  const chooseCustomer = (id: string) => { const customer = customers.find(row => String(row.id) === String(id)); setForm({ ...form, customer_id: id, customer_name: customer?.name ?? "" }) }
+  const chooseOrder = (id: string) => { const order = salesOrders.find(row => String(row.id) === String(id)); setForm({ ...form, sales_order_id: id, sales_order_ref: order?.ref ?? "", customer_id: order?.customer_id ?? "", customer_name: order?.customer_name ?? order?.customer ?? "", warehouse_id: order?.warehouse_id ?? "", warehouse_name: order?.warehouse_name ?? "" }); if (order?.items?.length) setItems(order.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: Number(item.remaining_qty ?? item.qty ?? 0), max_qty: Number(item.remaining_qty ?? item.qty ?? 0), unit_price: Number(item.unit_price ?? item.price ?? 0), unit_cost: Number(item.unit_cost ?? item.cost ?? 0) })).filter((item: any) => item.qty > 0)) }
+  const chooseDelivery = (ref: string) => { const delivery = deliveries.find(row => row.ref === ref); setForm({ ...form, delivery_ref: ref, customer_name: delivery?.customer_name ?? "", warehouse_id: delivery?.warehouse_id ?? "", warehouse_name: delivery?.warehouse_name ?? "" }); if (delivery?.items?.length) setItems(delivery.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: 0, max_qty: Number(item.qty ?? 0) }))) }
+  useEffect(() => { if (kind === "return" && initialDeliveryRef) chooseDelivery(initialDeliveryRef) }, [kind, initialDeliveryRef, deliveries])
+  async function submit(event: React.FormEvent) { event.preventDefault(); const validItems = items.filter(item => item.product_id && Number(item.qty) > 0); if (new Set(validItems.map(item => item.product_id)).size !== validItems.length) return showAppToast(lang === "vi" ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong chứng từ" : "Each product may only appear once in a document"); setSaving(true); const payload = { ...form, items: validItems }; const result = kind === "order" ? await upsertSalesOrder({ ...payload, subtotal: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0), total: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0) }, { isDemo, orgId: profile?.org_id }) : kind === "delivery" ? await deliverSalesOrder(payload, { isDemo, orgId: profile?.org_id }) : await createSalesReturn(payload, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return showAppToast(result.error.message ?? String(result.error)); await onSaved(); onClose() }
+  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"><div className="flex items-center justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{title}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto"><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">{lang === "vi" ? "Số chứng từ" : "Reference"}<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label>{kind === "order" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Khách hàng" : "Customer"}<select required value={form.customer_id} onChange={event => chooseCustomer(event.target.value)} className="mt-1 w-full h-8 rounded-lg border bg-white px-2 text-xs"><option value="">Select</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label> : kind === "delivery" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Đơn bán" : "Sales order"}<select required value={form.sales_order_id} onChange={event => chooseOrder(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{salesOrders.filter(row => ["Approved", "Partial"].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.ref} · {row.customer_name ?? row.customer}</option>)}</select></label> : <label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu giao" : "Delivery"}<select required value={form.delivery_ref} onChange={event => chooseDelivery(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{deliveries.filter(row => row.status !== "Reversed").map(row => <option key={row.ref} value={row.ref}>{row.ref} · {row.customer_name}</option>)}</select></label>}<label className="text-[11px] font-medium">{lang === "vi" ? "Kho" : "Warehouse"}<select required disabled={kind !== "order"} value={form.warehouse_id} onChange={event => chooseWarehouse(event.target.value)} className="mt-1 w-full h-8 rounded-lg border bg-white text-xs disabled:bg-slate-50"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div><div className="border rounded-xl overflow-hidden"><div className="flex justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold"><span>{lang === "vi" ? "Sản phẩm" : "Items"}</span>{kind === "order" && <button type="button" onClick={() => setItems([...items, { product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])} className="text-blue-600">+ Add</button>}</div>{items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_100px_110px_28px] gap-2 p-3 border-t"><select required disabled={kind !== "order"} value={item.product_id ?? ""} onChange={event => chooseProduct(index, event.target.value)} className="h-8 rounded-lg border text-xs disabled:bg-slate-50"><option value="">Select product</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select><input required min="0.01" step="0.01" type="number" value={item.qty} onChange={event => setItem(index, "qty", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" />{kind === "order" ? <input min="0" type="number" value={item.unit_price} onChange={event => setItem(index, "unit_price", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" /> : <span className="text-[11px] text-slate-500 self-center truncate">{item.product_name}</span>}{kind === "order" ? <button type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button> : <span />}</div>)}</div></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
 }
 
 // --- NEXT ---
 export function StockBalance() {
   const { lang } = useLang();
-  const [data, setData] = useState<any[]>([{ warehouse: "HN-Warehouse-01", product: "Dell Latitude 5540 i5", sku: "LP-DELL-001", available: 12, reserved: 3, incoming: 5, outgoing: 2, avgCost: 18500000, value: 222000000 }]);
+  const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
@@ -865,7 +839,7 @@ export function StockBalance() {
   ] : [
     { key: "product", label: "Product", isStatus: false }, { key: "sku", label: "SKU", isStatus: false }, { key: "warehouse", label: "Warehouse", isStatus: false }, { key: "available", label: "Available", isStatus: false, format: fmt }, { key: "reserved", label: "Reserved", isStatus: false, format: fmt }, { key: "incoming", label: "Incoming", isStatus: false, format: fmt }, { key: "outgoing", label: "Outgoing", isStatus: false, format: fmt }, { key: "avgCost", label: "Avg Cost", isStatus: false, format: fmt }, { key: "value", label: "Value", isStatus: false, format: fmt }
   ];
-  return <GenericCrudList title={lang === "vi" ? "tồn kho" : "stock balance"} data={data} setData={setData} columns={columns} templateCols={["product","sku","warehouse","available","reserved","incoming","outgoing","avgCost","value"]} templateFile="stockbalance" />;
+  return <GenericCrudList readOnly moduleName="Inventory" title={lang === "vi" ? "tồn kho" : "stock balance"} data={data} setData={setData} columns={columns} templateCols={["product","sku","warehouse","available","reserved","incoming","outgoing","avgCost","value"]} templateFile="stockbalance" />;
 }
 
 // --- NEXT ---
@@ -891,7 +865,7 @@ export function StockLedger() {
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "product", label: "PRODUCT", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "qty", label: "QTY", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
   ];
-  return <GenericCrudList title={lang === "vi" ? "sổ kho" : "stock ledger"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","product","type","qty","balance"]} templateFile="stockledger" />;
+  return <GenericCrudList readOnly moduleName="Inventory" title={lang === "vi" ? "sổ kho" : "stock ledger"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","product","type","qty","balance"]} templateFile="stockledger" />;
 }
 
 // --- NEXT ---
@@ -901,7 +875,7 @@ function InventoryMovementModal({ mode, onClose, onSaved }: { mode: "adjustment"
   const chooseWarehouse = (key: string, id: string) => { const row = warehouses.find(item => String(item.id) === String(id)); setForm({ ...form, [`${key}_id`]: id, [`${key}_name`]: row?.name ?? "" }) }
   const chooseProduct = (id: string) => { const row = products.find(item => String(item.id) === String(id)); setForm({ ...form, product_id: id, product_name: row?.name ?? "" }) }
   const currentQty = ledger.filter(row => String(row.product_id) === String(form.product_id) && String(row.warehouse_id) === String(form.warehouse_id)).reduce((sum, row) => sum + Number(row.qty_in ?? 0) - Number(row.qty_out ?? 0), 0)
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const delta = Number(form.qty) - currentQty; const result = mode === "adjustment" ? await upsertInventoryAdjustment({ ref: form.ref, warehouse_id: form.warehouse_id, warehouse_name: form.warehouse_name, reason: form.reason, items: [{ product_id: form.product_id, product_name: form.product_name, qty_delta: delta }] }, { isDemo, orgId: profile?.org_id }) : await upsertInventoryTransfer({ ref: form.ref, from_warehouse_id: form.from_warehouse_id, from_warehouse_name: form.from_warehouse_name, to_warehouse_id: form.to_warehouse_id, to_warehouse_name: form.to_warehouse_name, items: [{ product_id: form.product_id, product_name: form.product_name, qty: Number(form.qty) }] }, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
+  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const delta = Number(form.qty) - currentQty; const result = mode === "adjustment" ? await upsertInventoryAdjustment({ ref: form.ref, warehouse_id: form.warehouse_id, warehouse_name: form.warehouse_name, reason: form.reason, items: [{ product_id: form.product_id, product_name: form.product_name, qty_delta: delta }] }, { isDemo, orgId: profile?.org_id }) : await upsertInventoryTransfer({ ref: form.ref, from_warehouse_id: form.from_warehouse_id, from_warehouse_name: form.from_warehouse_name, to_warehouse_id: form.to_warehouse_id, to_warehouse_name: form.to_warehouse_name, items: [{ product_id: form.product_id, product_name: form.product_name, qty: Number(form.qty) }] }, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return showAppToast(result.error.message ?? String(result.error)); await onSaved(); onClose() }
   return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"><div className="flex justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{mode === "adjustment" ? (lang === "vi" ? "Tạo điều chỉnh kho" : "Create adjustment") : (lang === "vi" ? "Tạo chuyển kho" : "Create transfer")}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Product<select required value={form.product_id} onChange={event => chooseProduct(event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select></label>{mode === "adjustment" ? <label className="text-[11px] font-medium">Actual quantity<input required min="0" type="number" step="0.01" value={form.qty} onChange={event => setForm({ ...form, qty: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /><span className="text-[10px] text-slate-400">Current ledger: {currentQty}</span></label> : <label className="text-[11px] font-medium">Quantity<input required min="0.01" type="number" step="0.01" value={form.qty} onChange={event => setForm({ ...form, qty: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label>}{mode === "adjustment" ? <label className="text-[11px] font-medium">Warehouse<select required value={form.warehouse_id} onChange={event => chooseWarehouse("warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label> : <><label className="text-[11px] font-medium">From<select required value={form.from_warehouse_id} onChange={event => chooseWarehouse("from_warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label className="text-[11px] font-medium">To<select required value={form.to_warehouse_id} onChange={event => chooseWarehouse("to_warehouse", event.target.value)} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></>}<label className="text-[11px] font-medium col-span-2">Reason<input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">Save</button></div></form></div>
 }
 
@@ -909,7 +883,7 @@ export function InventoryAdjustment() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const reload = async () => { const res = await fetchInventoryAdjustments({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.doc_no ?? row.ref ?? "", warehouse: row.warehouse_name ?? row.warehouse ?? "", reason: row.reason ?? "Manual adjustment" }))) }
   useEffect(() => {
@@ -920,8 +894,8 @@ export function InventoryAdjustment() {
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "reason", label: "REASON", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  const reverse = async (ref: string) => { const result = await reverseInventoryAdjustment(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
-  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo điều chỉnh" : "Create adjustment"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "WAREHOUSE", "REASON", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.warehouse}</td><td className="px-4 py-2.5">{row.reason}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button></td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="adjustment" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
+  const reverse = async (ref: string) => { const result = await reverseInventoryAdjustment(ref, { isDemo, orgId: profile?.org_id }); if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload() }
+  return <div className="flex flex-col h-full"><Toolbar onCreate={can("Inventory", "create") ? () => setShowCreate(true) : undefined} onRefresh={() => void reload()} createLabel={lang === "vi" ? "Tạo điều chỉnh" : "Create adjustment"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "WAREHOUSE", "REASON", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.warehouse}</td><td className="px-4 py-2.5">{row.reason}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Inventory", "approve") && <button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button>}</td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="adjustment" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
 }
 
 // --- NEXT ---
@@ -960,37 +934,140 @@ export function Brands() {
 
 // --- NEXT ---
 export function Users() {
-  const { lang } = useLang();
-  const [data, setData] = useState([
-    { code: "U001", name: "Nguyễn Văn A", role: "Super Admin", email: "nva@warehouseos.vn", status: "Active" },
-    { code: "U002", name: "Trần Thị B", role: "Inventory", email: "ttb@warehouseos.vn", status: "Active" },
-    { code: "U003", name: "Lê Văn C", role: "Sales", email: "lvc@warehouseos.vn", status: "Active" },
-  ]);
-
-  const columns = lang === "vi" ? [
-    { key: "code", label: "Mã NV" }, { key: "name", label: "Họ tên" },
-    { key: "role", label: "Quyền (Role)" }, { key: "email", label: "Email" },
-    { key: "status", label: "Trạng thái", isStatus: true }
-  ] : [
-    { key: "code", label: "Code" }, { key: "name", label: "Full Name" },
-    { key: "role", label: "Role" }, { key: "email", label: "Email" },
-    { key: "status", label: "Status", isStatus: true }
-  ];
-
-  return <GenericCrudList title={lang === "vi" ? "người dùng" : "user"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "role", "email", "status"]} templateFile="users" />;
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile, can } = useAuth()
+  const [data, setData] = useState<any[]>([])
+  const [roles, setRoles] = useState<any[]>([])
+  const [error, setError] = useState("")
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState("")
+  const [inviteRole, setInviteRole] = useState("staff")
+  const [inviteLink, setInviteLink] = useState("")
+  const [inviting, setInviting] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const isCurrentAdmin = String(profile?.role ?? "").toLowerCase() === "admin"
+  const assignableRoles = isCurrentAdmin
+    ? roles
+    : roles.filter(role => String(role.code ?? "").toLowerCase() !== "admin")
+  const load = async () => {
+    const [usersResult, rolesResult] = await Promise.all([
+      fetchUsers({ isDemo, orgId: profile?.org_id }),
+      fetchRoles({ isDemo, orgId: profile?.org_id }),
+    ])
+    setData(usersResult.data ?? [])
+    setRoles(rolesResult.data ?? [])
+    const sourceError = usersResult.error ?? rolesResult.error
+    setError(sourceError ? sourceError.message ?? String(sourceError) : "")
+  }
+  useEffect(() => { void load() }, [isDemo, profile?.org_id])
+  const changeRole = async (userId: string, role: string) => {
+    const result = await updateUserRole(userId, role, { isDemo, orgId: profile?.org_id })
+    if (result.error) return setError(result.error.message ?? String(result.error))
+    await load()
+  }
+  const openInvite = () => {
+    const defaultRole = assignableRoles.find(role => String(role.code).toLowerCase() === "staff") ?? assignableRoles[0]
+    setInviteEmail("")
+    setInviteRole(String(defaultRole?.code ?? "staff").toLowerCase())
+    setInviteLink("")
+    setCopied(false)
+    setError("")
+    setShowInvite(true)
+  }
+  const submitInvite = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setInviting(true)
+    setError("")
+    const result = await createOrganizationInvitation(inviteEmail, inviteRole, { isDemo, orgId: profile?.org_id })
+    setInviting(false)
+    if (result.error || !result.data) {
+      setError(result.error?.message ?? String(result.error ?? "Invitation token was not returned."))
+      return
+    }
+    setInviteLink(`${window.location.origin}${window.location.pathname}?auth&invite=${encodeURIComponent(result.data)}`)
+  }
+  const copyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink)
+      setCopied(true)
+      setError("")
+    } catch {
+      setError(lang === "vi" ? "Không thể tự động sao chép. Hãy chọn và sao chép liên kết thủ công." : "Could not copy automatically. Please copy the link manually.")
+    }
+  }
+  return <>
+    <div className="flex h-full flex-col">
+      <Toolbar
+        onCreate={!isDemo && can("Administration", "create") ? openInvite : undefined}
+        createLabel={lang === "vi" ? "Mời thành viên" : "Invite member"}
+        onRefresh={() => void load()}
+        onExportCsv={can("Administration", "export") ? () => exportCsv("users", ["Name", "Email", "Role", "Created"], data.map(row => [row.full_name ?? "", row.email, row.role, row.created_at])) : undefined}
+      />
+      {error && <div className="border-b border-red-200 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</div>}
+      <div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[lang === "vi" ? "Họ tên" : "Full name", "Email", "Role", lang === "vi" ? "Ngày tham gia" : "Joined"].map(header => <th key={header} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>
+        {data.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5 font-medium">{row.full_name || "—"}</td><td className="px-4 py-2.5">{row.email}</td><td className="px-4 py-2.5">{can("Administration", "update") && (isCurrentAdmin || String(row.role).toLowerCase() !== "admin") ? <select value={row.role} onChange={event => void changeRole(row.id, event.target.value)} className="h-8 rounded-lg border bg-white px-2 text-xs">{assignableRoles.map(role => <option key={role.id} value={String(role.code).toLowerCase()}>{role.name}</option>)}</select> : row.role}</td><td className="px-4 py-2.5 text-slate-500">{formatDateTimeUtc7(row.created_at)}</td></tr>)}
+        {!data.length && <tr><td colSpan={4} className="py-16 text-center text-slate-400">{lang === "vi" ? "Chưa có người dùng" : "No users"}</td></tr>}
+      </tbody></table></div>
+    </div>
+    {showInvite && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowInvite(false)}>
+        <form onSubmit={submitInvite} onClick={event => event.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-center justify-between border-b px-5 py-3.5">
+            <h2 className="text-sm font-semibold">{lang === "vi" ? "Mời thành viên" : "Invite member"}</h2>
+            <button type="button" onClick={() => setShowInvite(false)} aria-label={lang === "vi" ? "Đóng" : "Close"}><X size={14} /></button>
+          </div>
+          <div className="space-y-4 p-5">
+            {!inviteLink ? <>
+              <label className="block text-[11px] font-medium">Email
+                <input required type="email" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="member@company.com" className="mt-1 h-9 w-full rounded-lg border px-3 text-xs" />
+              </label>
+              <label className="block text-[11px] font-medium">{lang === "vi" ? "Vai trò" : "Role"}
+                <select required value={inviteRole} onChange={event => setInviteRole(event.target.value)} className="mt-1 h-9 w-full rounded-lg border bg-white px-3 text-xs">
+                  {assignableRoles.map(role => <option key={role.id} value={String(role.code).toLowerCase()}>{role.name}</option>)}
+                </select>
+              </label>
+              <p className="text-[11px] leading-5 text-slate-400">{lang === "vi" ? "Liên kết chỉ dùng cho email này và hết hạn sau 7 ngày." : "The link only works for this email and expires after 7 days."}</p>
+            </> : <>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+                {lang === "vi" ? "Đã tạo lời mời. Gửi liên kết dưới đây cho thành viên." : "Invitation created. Send this link to the member."}
+              </div>
+              <label className="block text-[11px] font-medium">{lang === "vi" ? "Liên kết mời" : "Invitation link"}
+                <textarea readOnly value={inviteLink} onFocus={event => event.currentTarget.select()} rows={3} className="mt-1 w-full resize-none rounded-lg border bg-slate-50 p-3 text-xs" />
+              </label>
+            </>}
+          </div>
+          <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5">
+            <button type="button" onClick={() => setShowInvite(false)} className="h-8 rounded-lg border px-4 text-xs">{lang === "vi" ? "Đóng" : "Close"}</button>
+            {inviteLink
+              ? <button type="button" onClick={() => void copyInvite()} className="h-8 rounded-lg bg-blue-600 px-4 text-xs text-white">{copied ? (lang === "vi" ? "Đã sao chép" : "Copied") : (lang === "vi" ? "Sao chép" : "Copy")}</button>
+              : <button disabled={inviting || !assignableRoles.length} className="h-8 rounded-lg bg-blue-600 px-4 text-xs text-white disabled:opacity-50">{inviting ? (lang === "vi" ? "Đang tạo..." : "Creating...") : (lang === "vi" ? "Tạo liên kết" : "Create link")}</button>}
+          </div>
+        </form>
+      </div>
+    )}
+  </>
 }
 
 // --- Roles ---
 export function Roles() {
   const { t, lang } = useLang()
   const { isDemo } = useDemo();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [dataList, setDataList] = useState<any[]>([])
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [permissions, setPermissions] = useState<Record<string, Record<string, boolean>>>({})
   const modules = ["Dashboard", "Master Data", "Inventory", "Purchase", "Sales", "Finance", "Reports", "Administration"]
-  const actions = lang === "vi" ? ["Xem", "Tạo", "Sửa", "Xóa", "Duyệt", "Xuất"] : ["View", "Create", "Edit", "Delete", "Approve", "Export"]
+  const actions = [
+    { key: "view", label: lang === "vi" ? "Xem" : "View" },
+    { key: "create", label: lang === "vi" ? "Tạo" : "Create" },
+    { key: "update", label: lang === "vi" ? "Sửa" : "Update" },
+    { key: "delete", label: lang === "vi" ? "Xóa" : "Delete" },
+    { key: "approve", label: lang === "vi" ? "Duyệt" : "Approve" },
+    { key: "export", label: lang === "vi" ? "Xuất" : "Export" },
+  ]
+  const [feedback, setFeedback] = useState("")
 
   useEffect(() => {
     async function loadRoles() {
@@ -999,13 +1076,13 @@ export function Roles() {
         setDataList(rolesRes.data)
         setSelectedRoleId((prev) => prev ?? rolesRes.data[0]?.id ?? null)
       }
-      const permsRes = await fetchRolePermissions({ isDemo })
+      const permsRes = await fetchRolePermissions({ isDemo, orgId: profile?.org_id })
       if (permsRes.data) {
         const map: Record<string, Record<string, boolean>> = {}
         for (const p of permsRes.data) {
           const roleId = String(p.role_id)
           if (!map[roleId]) map[roleId] = {}
-          map[roleId][`${p.module}:${p.action}`] = Boolean(p.allowed)
+          map[roleId][`${p.module}:${String(p.action).toLowerCase()}`] = Boolean(p.allowed)
         }
         setPermissions(map)
       }
@@ -1016,7 +1093,7 @@ export function Roles() {
   const selectedRole = dataList.find((r) => r.id === selectedRoleId) ?? dataList[0] ?? null
 
   const togglePermission = (module: string, action: string) => {
-    if (!selectedRole?.id) return
+    if (!selectedRole?.id || String(selectedRole.code).toLowerCase() === "admin") return
     setPermissions(prev => ({
       ...prev,
       [selectedRole.id]: {
@@ -1031,11 +1108,16 @@ export function Roles() {
     const roleId = selectedRole.id
     for (const module of modules) {
       for (const action of actions) {
-        const key = `${module}:${action}`
+        const key = `${module}:${action.key}`
         const allowed = Boolean(permissions[roleId]?.[key] ?? false)
-        await upsertRolePermission({ role_id: roleId, module, action: action.toLowerCase(), allowed }, { isDemo, orgId: profile?.org_id })
+        const result = await upsertRolePermission({ role_id: roleId, module, action: action.key, allowed }, { isDemo, orgId: profile?.org_id })
+        if (result.error) {
+          setFeedback(result.error.message ?? String(result.error))
+          return
+        }
       }
     }
+    setFeedback(lang === "vi" ? "Đã lưu quyền hạn" : "Permissions saved")
   }
 
   const handleCreateRole = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -1049,14 +1131,23 @@ export function Roles() {
       const rolesRes = await fetchRoles({ isDemo, orgId: profile?.org_id })
       if (rolesRes.data) setDataList(rolesRes.data)
       setShowCreate(false)
-    }
+    } else setFeedback(res.error.message ?? String(res.error))
+  }
+
+  const handleDeleteRole = async (role: any) => {
+    if (!role.id || !await confirmAppAction(lang === "vi" ? "Xóa vai trò này?" : "Delete this role?", { destructive: true })) return
+    const result = await deleteRole(role.id, { isDemo, orgId: profile?.org_id })
+    if (result.error) return setFeedback(result.error.message ?? String(result.error))
+    const rolesResult = await fetchRoles({ isDemo, orgId: profile?.org_id })
+    setDataList(rolesResult.data ?? [])
+    setSelectedRoleId(rolesResult.data?.[0]?.id ?? null)
   }
 
   return (
     <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Thêm vai trò" : "Add Role"}
-        onExportCsv={() => exportCsv("roles", ["Code", "Name", "Users", "Is System", "Description"], dataList.map(r => [r.code, r.name, r.users, r.isSystem ? "Yes" : "No", r.desc]))}
-        onExportXlsx={() => exportXlsx("roles", ["Code", "Name", "Users", "Is System", "Description"], dataList.map(r => [r.code, r.name, r.users, r.isSystem ? "Yes" : "No", r.desc]))}
+      <Toolbar onCreate={can("Administration", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Thêm vai trò" : "Add Role"}
+        onExportCsv={can("Administration", "export") ? () => exportCsv("roles", ["Code", "Name", "Users", "Is System", "Description"], dataList.map(r => [r.code, r.name, r.users, r.isSystem ? "Yes" : "No", r.desc])) : undefined}
+        onExportXlsx={can("Administration", "export") ? () => exportXlsx("roles", ["Code", "Name", "Users", "Is System", "Description"], dataList.map(r => [r.code, r.name, r.users, r.isSystem ? "Yes" : "No", r.desc])) : undefined}
       />
       <div className="flex h-full min-h-0">
         <div className="w-64 border-r bg-white flex flex-col flex-shrink-0" style={{ borderColor: "var(--border)" }}>
@@ -1074,8 +1165,8 @@ export function Roles() {
                   <div className="text-[10px] text-slate-400 mt-0.5 truncate">{r.desc}</div>
                   <div className="text-[10px] text-slate-400">{r.users ?? 0} {lang === "vi" ? "người dùng" : "users"}</div>
                 </div>
-                {!r.isSystem && (
-                  <div onClick={(e) => { e.stopPropagation(); if (r.id) { deleteRole(r.id, { isDemo, orgId: profile?.org_id }); setDataList(dataList.filter(x => x.id !== r.id)) } }} className="absolute right-2 top-2 hidden group-hover:flex items-center justify-center w-6 h-6 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors cursor-pointer">
+                {!r.isSystem && can("Administration", "delete") && (
+                  <div onClick={(e) => { e.stopPropagation(); void handleDeleteRole(r) }} className="absolute right-2 top-2 hidden group-hover:flex items-center justify-center w-6 h-6 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors cursor-pointer">
                     <X size={12}/>
                   </div>
                 )}
@@ -1089,15 +1180,15 @@ export function Roles() {
               <h2 className="text-sm font-semibold text-slate-900">{lang === "vi" ? "Quyền hạn" : "Permissions"} — {selectedRole?.name ?? "Role"}</h2>
               <p className="text-[11px] text-slate-400">{lang === "vi" ? "Quản lý quyền truy cập theo module và hành động" : "Manage access rights by module and action"}</p>
             </div>
-            <button onClick={savePermissions} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">{t("save")}</button>
+            {can("Administration", "update") && String(selectedRole?.code ?? "").toLowerCase() !== "admin" && <button onClick={savePermissions} className="h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">{t("save")}</button>}
           </div>
           <div className="bg-white border rounded-xl overflow-hidden" style={{ borderColor: "var(--border)" }}>
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
                   <th className="px-4 py-2.5 text-left font-semibold text-slate-500 text-[10px] uppercase tracking-wider w-36">Module</th>
-                  {actions.map(a => (
-                    <th key={a} className="px-3 py-2.5 text-center font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{a}</th>
+                  {actions.map(action => (
+                    <th key={action.key} className="px-3 py-2.5 text-center font-semibold text-slate-500 text-[10px] uppercase tracking-wider">{action.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -1105,12 +1196,13 @@ export function Roles() {
                 {modules.map((mod) => (
                   <tr key={mod} className="border-b last:border-0 hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
                     <td className="px-4 py-2.5 font-medium text-slate-700">{mod}</td>
-                    {actions.map((a) => {
-                      const key = `${mod}:${a}`
-                      const checked = Boolean(selectedRole?.id ? permissions[selectedRole.id]?.[key] : false)
+                    {actions.map((action) => {
+                      const key = `${mod}:${action.key}`
+                      const isAdminRole = String(selectedRole?.code ?? "").toLowerCase() === "admin"
+                      const checked = isAdminRole || Boolean(selectedRole?.id ? permissions[selectedRole.id]?.[key] : false)
                       return (
-                        <td key={a} className="px-3 py-2.5 text-center">
-                          <input checked={checked} onChange={() => togglePermission(mod, a)} type="checkbox" className="accent-blue-600 w-4 h-4" />
+                        <td key={action.key} className="px-3 py-2.5 text-center">
+                          <input disabled={isAdminRole || !can("Administration", "update")} checked={checked} onChange={() => togglePermission(mod, action.key)} type="checkbox" className="accent-blue-600 w-4 h-4 disabled:opacity-60" />
                         </td>
                       )
                     })}
@@ -1119,6 +1211,7 @@ export function Roles() {
               </tbody>
             </table>
           </div>
+          {feedback && <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${feedback.toLowerCase().includes("denied") || feedback.toLowerCase().includes("error") ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>{feedback}</div>}
         </div>
       </div>
       {showCreate && (
@@ -1148,33 +1241,29 @@ export function Roles() {
 // --- Audit Logs ---
 export function AuditLogs() {
   const { t, lang } = useLang()
-  const [dataList, setDataList] = useState(auditLogs)
+  const [dataList, setDataList] = useState<any[]>([])
   const [search, setSearch] = useState("")
-  const [showCreate, setShowCreate] = useState(false)
   const { isDemo } = useDemo()
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
   useEffect(() => {
-    if (!isDemo) fetchAuditEvents({ isDemo, orgId: profile?.org_id }).then(result => {
-      if (result.data) setDataList(result.data.map((row: any) => ({ entity: row.entity, action: row.action, field: row.entity_ref ?? "", oldVal: row.old_value ? JSON.stringify(row.old_value) : "", newVal: row.new_value ? JSON.stringify(row.new_value) : "", user: row.actor_id ?? "System", time: row.created_at, ip: "", device: "" })))
+    if (isDemo) setDataList(auditLogs)
+    else fetchAuditEvents({ isDemo, orgId: profile?.org_id }).then(result => {
+      setDataList((result.data ?? []).map((row: any) => ({ entity: row.entity, action: row.action, field: row.entity_ref ?? "", oldVal: row.old_value ? JSON.stringify(row.old_value) : "", newVal: row.new_value ? JSON.stringify(row.new_value) : "", user: row.actor_id ?? "System", time: row.created_at })))
     })
   }, [isDemo, profile])
 
   const filtered = dataList.filter(log => search === "" || log.entity.toLowerCase().includes(search.toLowerCase()) || log.user.toLowerCase().includes(search.toLowerCase()))
   const heads = lang === "vi"
-    ? ["Đối tượng", "Hành động", "Trường", "Giá trị cũ", "Giá trị mới", "Người dùng", "Thời gian", "IP", "Thiết bị", ""]
-    : ["Entity", "Action", "Field", "Old Value", "New Value", "User", "Time", "IP", "Device", ""]
+    ? ["Đối tượng", "Hành động", "Tham chiếu", "Giá trị cũ", "Giá trị mới", "Người dùng", "Thời gian"]
+    : ["Entity", "Action", "Reference", "Old Value", "New Value", "User", "Time"]
   return (
     <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo log giả" : "Add Log"}
-        onExportCsv={() => exportCsv("audit-logs", heads.slice(0, -1), filtered.map(l => [l.entity, l.action, l.field, l.oldVal, l.newVal, l.user, l.time, l.ip, l.device]))}
-        onExportXlsx={() => exportXlsx("audit-logs", heads.slice(0, -1), filtered.map(l => [l.entity, l.action, l.field, l.oldVal, l.newVal, l.user, l.time, l.ip, l.device]))}
-        extra={
-        <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-          <Filter size={13} /> {t("filter")}
-        </button>
-      } />
+      <Toolbar search={search} onSearch={setSearch}
+        onExportCsv={can("Administration", "export") ? () => exportCsv("audit-logs", heads, filtered.map(l => [l.entity, l.action, l.field, l.oldVal, l.newVal, l.user, l.time])) : undefined}
+        onExportXlsx={can("Administration", "export") ? () => exportXlsx("audit-logs", heads, filtered.map(l => [l.entity, l.action, l.field, l.oldVal, l.newVal, l.user, l.time])) : undefined}
+      />
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[1100px]">
+        <table className="w-full text-xs border-collapse min-w-[900px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
               {heads.map((h, i) => <th key={i} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
@@ -1198,89 +1287,72 @@ export function AuditLogs() {
                 <td className="px-4 py-2.5 mono font-medium text-slate-800">{log.newVal}</td>
                 <td className="px-4 py-2.5 text-blue-600 font-medium">{log.user}</td>
                 <td className="px-4 py-2.5 mono text-slate-400 whitespace-nowrap text-[10px]">{formatDateTimeUtc7(log.time)}</td>
-                <td className="px-4 py-2.5 mono text-slate-400 text-[10px]">{log.ip}</td>
-                <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{log.device}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter((_, index) => index !== i)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "bản ghi" : "records"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo log giả" : "Add Log"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([{
-                entity: fd.get("entity") as string || "System",
-                action: fd.get("action") as string || "UPDATE",
-                field: fd.get("field") as string || "-",
-                oldVal: fd.get("oldVal") as string || "-",
-                newVal: fd.get("newVal") as string || "-",
-                user: "Current User",
-                time: new Date().toISOString(),
-                ip: "127.0.0.1",
-                device: "Web Browser"
-              }, ...dataList]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Đối tượng" : "Entity"}</label><input name="entity" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Hành động" : "Action"}</label><input name="action" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Trường" : "Field"}</label><input name="field" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
 // --- Finance Screens ---
 export function Receivables() {
-  const { t, lang } = useLang()
-  const [dataList, setDataList] = useState([
-    { ref: "INV-202608-001", customer: "FPT Telecom", date: "2026-08-01", due: "2026-08-31", amount: 98500000, paid: 0, remaining: 98500000, status: "Overdue" },
-    { ref: "INV-202608-002", customer: "VNPT Group", date: "2026-08-02", due: "2026-09-01", amount: 52000000, paid: 52000000, remaining: 0, status: "Paid" },
-    { ref: "INV-202607-045", customer: "Viettel Store", date: "2026-07-25", due: "2026-08-24", amount: 175000000, paid: 100000000, remaining: 75000000, status: "Partial" },
-    { ref: "INV-202608-003", customer: "Nguyen Kim Corp", date: "2026-08-03", due: "2026-09-02", amount: 43000000, paid: 0, remaining: 43000000, status: "Partial" },
-  ])
+  return <OutstandingDocuments type="receivable" />
+}
+
+function OutstandingDocuments({ type }: { type: "receivable" | "payable" }) {
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile, can } = useAuth()
+  const [dataList, setDataList] = useState<any[]>([])
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
-
-  const filtered = dataList.filter(r => search === "" || r.ref.toLowerCase().includes(search.toLowerCase()) || r.customer.toLowerCase().includes(search.toLowerCase()))
-  const heads = lang === "vi"
-    ? ["Số HĐ", "Khách hàng", "Ngày HĐ", "Ngày đến hạn", "Số tiền", "Đã thu", "Còn lại", "Trạng thái", ""]
-    : ["Invoice", "Customer", "Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
-  const totalRemaining = filtered.reduce((a, b) => a + b.remaining, 0)
+  const [error, setError] = useState("")
+  const isReceivable = type === "receivable"
+  const reload = async () => {
+    const result = isReceivable
+      ? await fetchInvoices({ isDemo, orgId: profile?.org_id })
+      : await fetchPurchaseOrders({ isDemo, orgId: profile?.org_id })
+    const today = formatDateKeyUtc7()
+    setDataList((result.data ?? []).map((row: any) => {
+      const remaining = Number(row.outstanding_amount ?? Math.max(0, Number(row.total ?? 0) - Number(row.paid_amount ?? 0)))
+      const due = row.due_date ?? row.expected_date ?? String(row.created_at ?? "").slice(0, 10)
+      return {
+        ref: row.ref,
+        party: isReceivable ? row.customer_name : row.supplier_name,
+        party_id: isReceivable ? row.customer_id : row.supplier_id,
+        date: String(row.created_at ?? row.date ?? "").slice(0, 10),
+        due,
+        amount: Number(row.total ?? 0),
+        paid: Number(row.paid_amount ?? 0),
+        remaining,
+        status: remaining <= 0 ? "Paid" : due && due < today ? "Overdue" : row.payment_status ?? row.status ?? "Unpaid",
+      }
+    }))
+    setError(result.error ? result.error.message ?? String(result.error) : "")
+  }
+  useEffect(() => { void reload() }, [isDemo, profile?.org_id, type])
+  const filtered = dataList.filter(row => !search || String(row.ref).toLowerCase().includes(search.toLowerCase()) || String(row.party).toLowerCase().includes(search.toLowerCase()))
+  const heads = isReceivable
+    ? (lang === "vi" ? ["Số HĐ", "Khách hàng", "Ngày HĐ", "Ngày đến hạn", "Số tiền", "Đã thu", "Còn lại", "Trạng thái"] : ["Invoice", "Customer", "Date", "Due Date", "Amount", "Paid", "Remaining", "Status"])
+    : (lang === "vi" ? ["Số PO", "Nhà cung cấp", "Ngày PO", "Ngày đến hạn", "Số tiền", "Đã trả", "Còn lại", "Trạng thái"] : ["PO", "Supplier", "Date", "Due Date", "Amount", "Paid", "Remaining", "Status"])
+  const exportRows = filtered.map(row => [row.ref, row.party, row.date, row.due, row.amount, row.paid, row.remaining, row.status])
+  const totalRemaining = filtered.reduce((sum, row) => sum + row.remaining, 0)
   return (
     <div className="flex flex-col h-full">
-      <Toolbar search={search} onSearch={setSearch} createLabel={lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"} onCreate={() => setShowCreate(true)}
-        onExportCsv={() => exportCsv("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
-        onExportXlsx={() => exportXlsx("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
-        onPrint={() => printTable("receivables", heads.slice(0, -1), filtered.map(r => [r.ref, r.customer, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
+      <Toolbar search={search} onSearch={setSearch} createLabel={isReceivable ? (lang === "vi" ? "Ghi nhận thu tiền" : "Record receipt") : (lang === "vi" ? "Ghi nhận trả tiền" : "Record payment")} onCreate={can("Finance", "create") ? () => setShowCreate(true) : undefined}
+        onExportCsv={can("Finance", "export") ? () => exportCsv(type, heads, exportRows) : undefined}
+        onExportXlsx={can("Finance", "export") ? () => exportXlsx(type, heads, exportRows) : undefined}
+        onPrint={can("Finance", "export") ? () => printTable(type, heads, exportRows) : undefined}
+        onRefresh={() => void reload()}
       />
+      {error && <div className="border-b border-red-200 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</div>}
       <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
         {[
-          { label: lang === "vi" ? "Tổng phải thu" : "Total Receivable", value: fmt(filtered.reduce((a, b) => a + b.amount, 0)), color: "text-slate-900" },
-          { label: lang === "vi" ? "Đã thu" : "Collected", value: fmt(filtered.reduce((a, b) => a + b.paid, 0)), color: "text-emerald-600" },
+          { label: isReceivable ? (lang === "vi" ? "Tổng phải thu" : "Total receivable") : (lang === "vi" ? "Tổng phải trả" : "Total payable"), value: fmt(filtered.reduce((a, b) => a + b.amount, 0)), color: "text-slate-900" },
+          { label: isReceivable ? (lang === "vi" ? "Đã thu" : "Collected") : (lang === "vi" ? "Đã trả" : "Paid"), value: fmt(filtered.reduce((a, b) => a + b.paid, 0)), color: "text-emerald-600" },
           { label: lang === "vi" ? "Còn lại" : "Outstanding", value: fmt(totalRemaining), color: "text-amber-600" },
         ].map(c => (
           <div key={c.label} className="bg-slate-50 rounded-xl p-3">
@@ -1297,64 +1369,23 @@ export function Receivables() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
-              <tr key={r.ref} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
+            {filtered.map((r) => (
+              <tr key={r.ref} className="border-b hover:bg-slate-50/60" style={{ borderColor: "var(--border)" }}>
                 <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.customer}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-800">{r.party}</td>
                 <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
                 <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
                 <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
                 <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
                 <td className="px-4 py-2.5 mono text-right font-bold text-amber-600">{fmt(r.remaining)}</td>
                 <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); setDataList(dataList.filter(x => x.ref !== r.ref)) }} className="w-7 h-7 flex items-center justify-center rounded-md text-red-400 hover:bg-red-50 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Pager count={filtered.length} total={dataList.length} label={lang === "vi" ? "hóa đơn" : "invoices"} />
-
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
-              <h2 className="text-sm font-semibold">{lang === "vi" ? "Ghi nhận thu tiền" : "Record Receipt"}</h2>
-              <button onClick={() => setShowCreate(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              setDataList([{
-                ref: fd.get("ref") as string || "INV-NEW",
-                customer: fd.get("customer") as string || "New Customer",
-                date: new Date().toISOString().split("T")[0],
-                due: new Date(Date.now() + 30*24*60*60*1000).toISOString().split("T")[0],
-                amount: Number(fd.get("amount")) || 0,
-                paid: 0,
-                remaining: Number(fd.get("amount")) || 0,
-                status: "Pending"
-              }, ...dataList]);
-              setShowCreate(false);
-            }}>
-              <div className="p-5 grid gap-3">
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số HĐ" : "Invoice"}</label><input name="ref" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Khách hàng" : "Customer"}</label><input name="customer" required className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-                <div><label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Số tiền" : "Amount"}</label><input name="amount" type="number" defaultValue="0" className="w-full h-8 px-3 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }} /></div>
-              </div>
-              <div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                <button type="button" onClick={() => setShowCreate(false)} className="h-8 px-4 rounded-lg border text-xs text-slate-600" style={{ borderColor: "var(--border)" }}>{t("cancel")}</button>
-                <button type="submit" className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium">{t("save")}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Pager count={filtered.length} total={dataList.length} label={isReceivable ? (lang === "vi" ? "hóa đơn" : "invoices") : (lang === "vi" ? "đơn mua" : "purchase orders")} />
+      {showCreate && <FinanceTransactionModal transactionType={isReceivable ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"} onClose={() => setShowCreate(false)} onSaved={reload} />}
     </div>
   )
 }
@@ -1389,30 +1420,25 @@ export async function exportXlsx(filename: string, heads: string[], rows: (strin
     heads,
     ...rows,
   ]
-  if (!chartData.length) {
-    const ws = XLSX.utils.aoa_to_sheet(wsRows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Report")
-    XLSX.writeFile(wb, filename + ".xlsx")
-    return
-  }
+  const { default: ExcelJS } = await import("exceljs")
   const workbook = new ExcelJS.Workbook()
   const reportSheet = workbook.addWorksheet("Report")
-  wsRows.forEach(row => reportSheet.addRow(row))
+  wsRows.forEach(row => reportSheet.addRow(row.map(sanitizeSpreadsheetCell)))
   reportSheet.getRow(5).font = { bold: true, color: { argb: "FFFFFFFF" } }
   reportSheet.getRow(5).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } }
   reportSheet.columns.forEach(column => { column.width = 18 })
-  const chartSheet = workbook.addWorksheet("Chart")
-  chartSheet.addRow([chartLabel])
-  chartSheet.addRow(["Label", "Value", ...(chartData.some(item => item.value2 !== undefined) ? ["Value 2"] : [])])
-  chartData.forEach(item => chartSheet.addRow([item.label, item.value, ...(item.value2 !== undefined ? [item.value2] : [])]))
-  chartSheet.getRow(2).font = { bold: true }
-  chartSheet.columns.forEach(column => { column.width = 18 })
-  const canvas = document.createElement("canvas")
-  canvas.width = 1000
-  canvas.height = 480
-  const context = canvas.getContext("2d")
-  if (context) {
+  if (chartData.length) {
+    const chartSheet = workbook.addWorksheet("Chart")
+    chartSheet.addRow([sanitizeSpreadsheetCell(chartLabel)])
+    chartSheet.addRow(["Label", "Value", ...(chartData.some(item => item.value2 !== undefined) ? ["Value 2"] : [])])
+    chartData.forEach(item => chartSheet.addRow([sanitizeSpreadsheetCell(item.label), item.value, ...(item.value2 !== undefined ? [item.value2] : [])]))
+    chartSheet.getRow(2).font = { bold: true }
+    chartSheet.columns.forEach(column => { column.width = 18 })
+    const canvas = document.createElement("canvas")
+    canvas.width = 1000
+    canvas.height = 480
+    const context = canvas.getContext("2d")
+    if (context) {
     context.fillStyle = "#ffffff"
     context.fillRect(0, 0, canvas.width, canvas.height)
     context.fillStyle = "#0f172a"
@@ -1438,17 +1464,11 @@ export async function exportXlsx(filename: string, heads: string[], rows: (strin
       context.fillText(item.label, 0, 0)
       context.restore()
     })
-    const imageId = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" })
-    chartSheet.addImage(imageId, { tl: { col: 4, row: 0 }, ext: { width: 720, height: 345 } })
+      const imageId = workbook.addImage({ base64: canvas.toDataURL("image/png"), extension: "png" })
+      chartSheet.addImage(imageId, { tl: { col: 4, row: 0 }, ext: { width: 720, height: 345 } })
+    }
   }
-  const buffer = await workbook.xlsx.writeBuffer()
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename + ".xlsx"
-  anchor.click()
-  URL.revokeObjectURL(url)
+  await saveExcelWorkbook(workbook, filename)
 }
 
 export function printTable(filename: string, heads: string[], rows: (string | number)[][], companyName = "WarehouseOS") {
@@ -1509,8 +1529,10 @@ interface ReportData {
 interface LiveReportContext {
   balance: any[]
   ledger: any[]
+  products: any[]
   salesOrders: any[]
   purchases: any[]
+  receipts: any[]
   deliveries: any[]
   invoices: any[]
   cashBook: any[]
@@ -2013,19 +2035,20 @@ function buildReportData(key: string, lang: string, live?: LiveReportContext): R
         { label: lang === "vi" ? "Hết hàng" : "Out of Stock", value: String(rows.filter(row => Number(row.qty ?? 0) <= 0).length) },
       ],
       chartData: Object.entries(grouped).slice(0, 8).map(([label, value], index) => ({ label, value, color: ["#2563eb", "#10b981", "#f59e0b", "#ef4444"][index % 4] })),
+      tableHeads: vi ? ["SKU", "Sản phẩm", "Kho", "Tồn", "Tối thiểu", "Giá trị"] : ["SKU", "Product", "Warehouse", "Stock", "Minimum", "Value"],
       tableRows: rows.map(row => [row.sku ?? "", row.product_name ?? "", row.warehouse_name ?? "", Number(row.qty ?? 0), Number(row.min_qty ?? 0), Number(row.value ?? 0)]),
     }
   }
   if (live && (key === "Sổ kho" || key === "Stock Ledger")) {
     const rows = live.ledger
     const daily = rows.reduce<Record<string, { value: number; value2: number }>>((groups, row) => {
-      const label = row.created_at ? formatDateTimeUtc7(row.created_at) : "-"
+      const label = row.created_at ? formatDateKeyUtc7(row.created_at) : "-"
       groups[label] ??= { value: 0, value2: 0 }
       groups[label].value += Number(row.qty_in ?? 0)
       groups[label].value2 += Number(row.qty_out ?? 0)
       return groups
     }, {})
-    const closing = rows.length ? rows[rows.length - 1].balance : 0
+    const closing = live.balance.reduce((sum, row) => sum + Number(row.qty ?? 0), 0)
     return {
       ...report,
       kpis: [
@@ -2035,44 +2058,178 @@ function buildReportData(key: string, lang: string, live?: LiveReportContext): R
         { label: lang === "vi" ? "Tồn cuối kỳ" : "Closing Stock", value: fmt(closing) },
       ],
       chartData: Object.entries(daily).slice(-14).map(([label, values]) => ({ label, value: values.value, value2: values.value2, color: "#2563eb" })),
+      tableHeads: vi ? ["Ngày", "Chứng từ", "Sản phẩm", "Nhập", "Xuất", "Tồn"] : ["Date", "Reference", "Product", "In", "Out", "Balance"],
       tableRows: rows.slice(0, 200).map(row => [row.created_at ? formatDateTimeUtc7(row.created_at) : "", row.ref ?? "", row.product_name ?? "", Number(row.qty_in ?? 0), Number(row.qty_out ?? 0), Number(row.balance ?? 0)]),
     }
+  }
+  if (live && (key === "Giá trị tồn kho" || key === "Inventory Value")) {
+    const productById = new Map(live.products.map(product => [String(product.id), product]))
+    const groups = live.balance.reduce<Record<string, { sku: Set<string>; qty: number; value: number; retail: number }>>((result, row) => {
+      const product = productById.get(String(row.product_id)) as any
+      const category = String(product?.category ?? (vi ? "Khác" : "Other"))
+      result[category] ??= { sku: new Set(), qty: 0, value: 0, retail: 0 }
+      result[category].sku.add(String(row.sku ?? row.product_id ?? ""))
+      result[category].qty += Number(row.qty ?? 0)
+      result[category].value += Number(row.value ?? 0)
+      result[category].retail += Number(row.qty ?? 0) * Number(product?.price ?? 0)
+      return result
+    }, {})
+    const rows = Object.entries(groups).sort((a, b) => b[1].value - a[1].value)
+    const totalValue = rows.reduce((sum, [, value]) => sum + value.value, 0)
+    const retailValue = rows.reduce((sum, [, value]) => sum + value.retail, 0)
+    return { ...report, kpis: [{ label: vi ? "Tổng giá trị" : "Total Value", value: `${fmt(totalValue)} ₫` }, { label: vi ? "Giá bán lẻ dự kiến" : "Potential Retail", value: `${fmt(retailValue)} ₫` }, { label: vi ? "Biên tiềm năng" : "Potential Margin", value: `${retailValue ? ((retailValue - totalValue) / retailValue * 100).toFixed(1) : "0.0"}%` }, { label: vi ? "Số danh mục" : "Categories", value: fmt(rows.length) }], chartData: rows.slice(0, 12).map(([label, value], index) => ({ label, value: value.value / 1000000000, color: ["#2563eb", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"][index % 6] })), tableHeads: vi ? ["Danh mục", "Số SKU", "SL tồn", "Giá nhập TB", "Giá trị"] : ["Category", "SKUs", "Qty", "Avg Cost", "Total Value"], tableRows: rows.map(([category, value]) => [category, value.sku.size, value.qty, fmt(value.qty ? value.value / value.qty : 0), fmt(value.value)]) }
+  }
+  if (live && (key === "Tồn kho thấp" || key === "Low Stock")) {
+    const productById = new Map(live.products.map(product => [String(product.id), product]))
+    const stock = live.balance.reduce<Record<string, { sku: string; name: string; qty: number; min: number; cost: number }>>((result, row) => {
+      const id = String(row.product_id ?? row.sku ?? "")
+      const product = productById.get(String(row.product_id)) as any
+      result[id] ??= { sku: row.sku ?? product?.sku ?? "", name: row.product_name ?? product?.name ?? "", qty: 0, min: Number(product?.min_qty ?? 0), cost: Number(product?.cost ?? 0) }
+      result[id].qty += Number(row.qty ?? 0)
+      return result
+    }, {})
+    const rows = Object.values(stock).filter(row => row.min > 0 && row.qty <= row.min).sort((a, b) => (a.qty - a.min) - (b.qty - b.min))
+    const reorderValue = rows.reduce((sum, row) => sum + Math.max(0, row.min - row.qty) * row.cost, 0)
+    return { ...report, kpis: [{ label: vi ? "SKU hết hàng" : "Out of Stock", value: fmt(rows.filter(row => row.qty <= 0).length) }, { label: vi ? "SKU dưới mức tối thiểu" : "Below Minimum", value: fmt(rows.length) }, { label: vi ? "Giá trị cần nhập tối thiểu" : "Minimum Reorder Value", value: `${fmt(reorderValue)} ₫` }], chartData: rows.slice(0, 12).map(row => ({ label: row.name, value: row.qty, value2: row.min, color: row.qty <= 0 ? "#ef4444" : "#f59e0b" })), tableHeads: vi ? ["SKU", "Sản phẩm", "Tồn kho", "Tồn tối thiểu", "Thiếu", "Giá trị cần nhập"] : ["SKU", "Product", "Stock", "Minimum", "Shortage", "Reorder Value"], tableRows: rows.map(row => [row.sku, row.name, row.qty, row.min, Math.max(0, row.min - row.qty), fmt(Math.max(0, row.min - row.qty) * row.cost)]) }
+  }
+  if (live && (key === "Hàng chậm luân chuyển" || key === "Slow Moving" || key === "Hàng nhanh luân chuyển" || key === "Fast Moving")) {
+    const productById = new Map(live.products.map(product => [String(product.id), product]))
+    const stockByProduct = live.balance.reduce<Record<string, { sku: string; name: string; qty: number; value: number }>>((result, row) => {
+      const id = String(row.product_id ?? row.sku ?? "")
+      result[id] ??= { sku: row.sku ?? "", name: row.product_name ?? "", qty: 0, value: 0 }
+      result[id].qty += Number(row.qty ?? 0)
+      result[id].value += Number(row.value ?? 0)
+      return result
+    }, {})
+    const soldByProduct = live.deliveries.flatMap(delivery => delivery.items ?? []).reduce<Record<string, number>>((result, item) => { const id = String(item.product_id ?? item.sku ?? ""); result[id] = (result[id] ?? 0) + Number(item.qty ?? 0); return result }, {})
+    const isFast = key === "Hàng nhanh luân chuyển" || key === "Fast Moving"
+    const rows = Object.entries(stockByProduct).map(([id, stock]) => ({ ...stock, sold: soldByProduct[id] ?? 0, min: Number((productById.get(id) as any)?.min_qty ?? 0) })).filter(row => isFast ? row.sold > 0 : row.qty > 0 && row.sold === 0).sort((a, b) => isFast ? b.sold - a.sold : b.value - a.value)
+    return { ...report, kpis: [{ label: isFast ? (vi ? "SKU có xuất kho" : "SKUs with Sales") : (vi ? "SKU chưa xuất trong kỳ" : "No Sales in Period"), value: fmt(rows.length) }, { label: vi ? "Số lượng tồn" : "Stock on Hand", value: fmt(rows.reduce((sum, row) => sum + row.qty, 0)) }, { label: vi ? "Số lượng đã bán" : "Units Sold", value: fmt(rows.reduce((sum, row) => sum + row.sold, 0)) }], chartData: rows.slice(0, 12).map(row => ({ label: row.name, value: isFast ? row.sold : row.value / 1000000, color: isFast ? "#10b981" : "#f59e0b" })), tableHeads: vi ? ["SKU", "Sản phẩm", "Đã bán trong kỳ", "Tồn kho", "Mức tối thiểu", "Giá trị tồn"] : ["SKU", "Product", "Sold in Period", "Stock", "Minimum", "Stock Value"], tableRows: rows.map(row => [row.sku, row.name, row.sold, row.qty, row.min, fmt(row.value)]) }
   }
   if (live && (key === "Doanh thu tổng hợp" || key === "Revenue Summary")) {
     const rows = live.invoices.filter(row => !["cancelled", "void"].includes(String(row.status).toLowerCase()))
     const total = rows.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0)
-    const daily = rows.reduce<Record<string, number>>((groups, row) => { const label = row.created_at ? formatDateTimeUtc7(row.created_at).slice(0, 10) : "-"; groups[label] = (groups[label] ?? 0) + Number(row.total ?? row.amount ?? 0); return groups }, {})
-    return { ...report, kpis: [{ label: vi ? "Tổng doanh thu" : "Total Revenue", value: `${fmt(total)} ₫` }, { label: vi ? "Số hóa đơn" : "Invoices", value: fmt(rows.length) }, { label: vi ? "Giá trị trung bình" : "Average", value: `${fmt(rows.length ? total / rows.length : 0)} ₫` }, { label: vi ? "Phiếu giao" : "Deliveries", value: fmt(live.deliveries.length) }], chartData: Object.entries(daily).slice(-14).map(([label, value]) => ({ label, value: value / 1000000, color: "#2563eb" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.delivery_ref ?? "", fmt(Number(row.total ?? row.amount ?? 0)), row.status ?? ""]) }
+    const daily = rows.reduce<Record<string, number>>((groups, row) => { const label = row.created_at ? formatDateKeyUtc7(row.created_at) : "-"; groups[label] = (groups[label] ?? 0) + Number(row.total ?? row.amount ?? 0); return groups }, {})
+    return { ...report, kpis: [{ label: vi ? "Tổng doanh thu" : "Total Revenue", value: `${fmt(total)} ₫` }, { label: vi ? "Số hóa đơn" : "Invoices", value: fmt(rows.length) }, { label: vi ? "Giá trị trung bình" : "Average", value: `${fmt(rows.length ? total / rows.length : 0)} ₫` }, { label: vi ? "Phiếu giao" : "Deliveries", value: fmt(live.deliveries.length) }], chartData: Object.entries(daily).slice(-14).map(([label, value]) => ({ label, value: value / 1000000, color: "#2563eb" })), tableHeads: vi ? ["Hóa đơn", "Khách hàng", "Phiếu giao", "Doanh thu", "Trạng thái"] : ["Invoice", "Customer", "Delivery", "Revenue", "Status"], tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.delivery_ref ?? "", fmt(Number(row.total ?? row.amount ?? 0)), row.status ?? ""]) }
   }
   if (live && (key === "Lãi gộp" || key === "Gross Profit")) {
     const lines = live.deliveries.flatMap(row => (row.items ?? []).map((item: any) => ({ ...item, date: row.created_at })))
     const revenue = lines.reduce((sum, item) => sum + Number(item.qty ?? 0) * Number(item.unit_price ?? 0), 0)
     const cost = lines.reduce((sum, item) => sum + Number(item.qty ?? 0) * Number(item.unit_cost ?? 0), 0)
     const profit = revenue - cost
-    return { ...report, kpis: [{ label: vi ? "Doanh thu" : "Revenue", value: `${fmt(revenue)} ₫` }, { label: vi ? "Giá vốn" : "COGS", value: `${fmt(cost)} ₫` }, { label: vi ? "Lãi gộp" : "Gross Profit", value: `${fmt(profit)} ₫` }, { label: vi ? "Biên lợi nhuận" : "Margin", value: `${revenue ? (profit / revenue * 100).toFixed(1) : "0.0"}%` }], chartData: [{ label: vi ? "Doanh thu" : "Revenue", value: revenue / 1000000, value2: profit / 1000000, color: "#2563eb" }], tableRows: lines.slice(0, 200).map(item => [item.product_name ?? "", fmt(Number(item.qty ?? 0) * Number(item.unit_price ?? 0)), fmt(Number(item.qty ?? 0) * Number(item.unit_cost ?? 0)), fmt(Number(item.qty ?? 0) * (Number(item.unit_price ?? 0) - Number(item.unit_cost ?? 0)))]) }
+    return { ...report, kpis: [{ label: vi ? "Doanh thu" : "Revenue", value: `${fmt(revenue)} ₫` }, { label: vi ? "Giá vốn" : "COGS", value: `${fmt(cost)} ₫` }, { label: vi ? "Lãi gộp" : "Gross Profit", value: `${fmt(profit)} ₫` }, { label: vi ? "Biên lợi nhuận" : "Margin", value: `${revenue ? (profit / revenue * 100).toFixed(1) : "0.0"}%` }], chartData: [{ label: vi ? "Doanh thu" : "Revenue", value: revenue / 1000000, value2: profit / 1000000, color: "#2563eb" }], tableHeads: vi ? ["Sản phẩm", "Doanh thu", "Giá vốn", "Lãi gộp"] : ["Product", "Revenue", "COGS", "Gross Profit"], tableRows: lines.slice(0, 200).map(item => [item.product_name ?? "", fmt(Number(item.qty ?? 0) * Number(item.unit_price ?? 0)), fmt(Number(item.qty ?? 0) * Number(item.unit_cost ?? 0)), fmt(Number(item.qty ?? 0) * (Number(item.unit_price ?? 0) - Number(item.unit_cost ?? 0)))]) }
+  }
+  if (live && (key === "Xếp hạng khách hàng" || key === "Customer Ranking")) {
+    const grouped = live.invoices.filter(row => !["cancelled", "void"].includes(String(row.status).toLowerCase())).reduce<Record<string, { name: string; orders: number; revenue: number; debt: number }>>((result, row) => {
+      const id = String(row.customer_id ?? row.customer_name ?? "Unknown")
+      result[id] ??= { name: row.customer_name ?? "Unknown", orders: 0, revenue: 0, debt: 0 }
+      result[id].orders += 1
+      result[id].revenue += Number(row.total ?? row.amount ?? 0)
+      result[id].debt += Number(row.outstanding_amount ?? 0)
+      return result
+    }, {})
+    const rows = Object.values(grouped).sort((a, b) => b.revenue - a.revenue)
+    const total = rows.reduce((sum, row) => sum + row.revenue, 0)
+    return { ...report, kpis: [{ label: vi ? "Khách hàng có doanh thu" : "Revenue Customers", value: fmt(rows.length) }, { label: vi ? "Tổng doanh thu" : "Total Revenue", value: `${fmt(total)} ₫` }, { label: vi ? "Top 5 chiếm" : "Top 5 Share", value: `${total ? (rows.slice(0, 5).reduce((sum, row) => sum + row.revenue, 0) / total * 100).toFixed(1) : "0.0"}%` }, { label: vi ? "Tổng công nợ" : "Outstanding", value: `${fmt(rows.reduce((sum, row) => sum + row.debt, 0))} ₫` }], chartData: rows.slice(0, 10).map((row, index) => ({ label: row.name, value: row.revenue / 1000000, color: ["#2563eb", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b"][index % 5] })), tableHeads: vi ? ["#", "Khách hàng", "Số hóa đơn", "Doanh thu", "Công nợ"] : ["#", "Customer", "Invoices", "Revenue", "Outstanding"], tableRows: rows.map((row, index) => [index + 1, row.name, row.orders, fmt(row.revenue), fmt(row.debt)]) }
+  }
+  if (live && (key === "Xếp hạng sản phẩm" || key === "Product Ranking")) {
+    const grouped = live.deliveries.flatMap(delivery => delivery.items ?? []).reduce<Record<string, { sku: string; name: string; qty: number; revenue: number; cost: number }>>((result, item) => {
+      const id = String(item.product_id ?? item.sku ?? "Unknown")
+      result[id] ??= { sku: item.sku ?? "", name: item.product_name ?? "Unknown", qty: 0, revenue: 0, cost: 0 }
+      result[id].qty += Number(item.qty ?? 0)
+      result[id].revenue += Number(item.qty ?? 0) * Number(item.unit_price ?? 0)
+      result[id].cost += Number(item.qty ?? 0) * Number(item.unit_cost ?? 0)
+      return result
+    }, {})
+    const rows = Object.values(grouped).sort((a, b) => b.qty - a.qty)
+    return { ...report, kpis: [{ label: vi ? "SKU đã bán" : "SKUs Sold", value: fmt(rows.length) }, { label: vi ? "Số lượng bán" : "Units Sold", value: fmt(rows.reduce((sum, row) => sum + row.qty, 0)) }, { label: vi ? "Sản phẩm bán chạy nhất" : "Best Seller", value: rows[0]?.name ?? "—" }, { label: vi ? "Doanh thu" : "Revenue", value: `${fmt(rows.reduce((sum, row) => sum + row.revenue, 0))} ₫` }], chartData: rows.slice(0, 10).map((row, index) => ({ label: row.name, value: row.revenue / 1000000, color: ["#2563eb", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b"][index % 5] })), tableHeads: vi ? ["#", "SKU", "Sản phẩm", "SL bán", "Doanh thu", "Biên LN"] : ["#", "SKU", "Product", "Qty", "Revenue", "Margin"], tableRows: rows.map((row, index) => [index + 1, row.sku, row.name, row.qty, fmt(row.revenue), `${row.revenue ? ((row.revenue - row.cost) / row.revenue * 100).toFixed(1) : "0.0"}%`]) }
+  }
+  if (live && (key === "Doanh thu theo nhân viên" || key === "Sales by Employee")) {
+    const grouped = live.salesOrders.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase())).reduce<Record<string, { name: string; orders: number; revenue: number }>>((result, row) => {
+      const name = String(row.created_by ?? row.createdBy ?? (vi ? "Không xác định" : "Unknown"))
+      result[name] ??= { name, orders: 0, revenue: 0 }
+      result[name].orders += 1
+      result[name].revenue += Number(row.total ?? 0)
+      return result
+    }, {})
+    const rows = Object.values(grouped).sort((a, b) => b.revenue - a.revenue)
+    const total = rows.reduce((sum, row) => sum + row.revenue, 0)
+    return { ...report, kpis: [{ label: vi ? "Nhân viên bán hàng" : "Sales Staff", value: fmt(rows.length) }, { label: vi ? "Giá trị đơn bán" : "Sales Order Value", value: `${fmt(total)} ₫` }, { label: vi ? "TB mỗi nhân viên" : "Average per Staff", value: `${fmt(rows.length ? total / rows.length : 0)} ₫` }, { label: vi ? "Nhân viên dẫn đầu" : "Top Performer", value: rows[0]?.name ?? "—" }], chartData: rows.slice(0, 10).map((row, index) => ({ label: row.name, value: row.revenue / 1000000, color: ["#10b981", "#2563eb", "#8b5cf6", "#06b6d4"][index % 4] })), tableHeads: vi ? ["Nhân viên", "Số đơn", "Giá trị đơn", "% Tổng"] : ["Employee", "Orders", "Order Value", "% Total"], tableRows: rows.map(row => [row.name, row.orders, fmt(row.revenue), `${total ? (row.revenue / total * 100).toFixed(1) : "0.0"}%`]) }
   }
   if (live && (key === "Tổng hợp mua hàng" || key === "Purchase Summary")) {
     const rows = live.purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
     const total = rows.reduce((sum, row) => sum + Number(row.total ?? 0), 0)
-    return { ...report, kpis: [{ label: vi ? "Tổng mua hàng" : "Purchase Value", value: `${fmt(total)} ₫` }, { label: vi ? "Số đơn mua" : "Purchase Orders", value: fmt(rows.length) }, { label: vi ? "Đã nhập kho" : "Received", value: fmt(live.deliveries.length) }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.total ?? 0) / 1000000, color: "#7c3aed" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.warehouse_name ?? row.warehouse ?? "", fmt(Number(row.total ?? 0)), row.status ?? ""]) }
+    return { ...report, kpis: [{ label: vi ? "Tổng mua hàng" : "Purchase Value", value: `${fmt(total)} ₫` }, { label: vi ? "Số đơn mua" : "Purchase Orders", value: fmt(rows.length) }, { label: vi ? "Phiếu nhập" : "Receipts", value: fmt(live.receipts.length) }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.total ?? 0) / 1000000, color: "#7c3aed" })), tableHeads: vi ? ["Đơn mua", "Nhà cung cấp", "Kho", "Giá trị", "Trạng thái"] : ["PO", "Supplier", "Warehouse", "Value", "Status"], tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.warehouse_name ?? row.warehouse ?? "", fmt(Number(row.total ?? 0)), row.status ?? ""]) }
+  }
+  if (live && (key === "Xếp hạng nhà cung cấp" || key === "Supplier Ranking")) {
+    const grouped = live.purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase())).reduce<Record<string, { name: string; orders: number; value: number; paid: number }>>((result, row) => {
+      const id = String(row.supplier_id ?? row.supplier_name ?? "Unknown")
+      result[id] ??= { name: row.supplier_name ?? row.supplier ?? "Unknown", orders: 0, value: 0, paid: 0 }
+      result[id].orders += 1
+      result[id].value += Number(row.total ?? 0)
+      result[id].paid += Number(row.paid_amount ?? 0)
+      return result
+    }, {})
+    const rows = Object.values(grouped).sort((a, b) => b.value - a.value)
+    return { ...report, kpis: [{ label: vi ? "Nhà cung cấp" : "Suppliers", value: fmt(rows.length) }, { label: vi ? "Tổng giá trị mua" : "Purchase Value", value: `${fmt(rows.reduce((sum, row) => sum + row.value, 0))} ₫` }, { label: vi ? "Đã thanh toán" : "Paid", value: `${fmt(rows.reduce((sum, row) => sum + row.paid, 0))} ₫` }], chartData: rows.slice(0, 10).map((row, index) => ({ label: row.name, value: row.value / 1000000, color: ["#8b5cf6", "#2563eb", "#06b6d4", "#f59e0b", "#10b981"][index % 5] })), tableHeads: vi ? ["#", "Nhà cung cấp", "Số PO", "Giá trị", "Đã thanh toán"] : ["#", "Supplier", "POs", "Value", "Paid"], tableRows: rows.map((row, index) => [index + 1, row.name, row.orders, fmt(row.value), fmt(row.paid)]) }
+  }
+  if (live && (key === "Xu hướng mua hàng" || key === "Purchase Trend")) {
+    const grouped = live.purchases.filter(row => !["cancelled", "rejected"].includes(String(row.status).toLowerCase())).reduce<Record<string, { count: number; value: number; suppliers: Record<string, number> }>>((result, row) => {
+      const monthKey = formatDateKeyUtc7(row.date ?? row.created_at).slice(0, 7) || "Unknown"
+      result[monthKey] ??= { count: 0, value: 0, suppliers: {} }
+      result[monthKey].count += 1
+      result[monthKey].value += Number(row.total ?? 0)
+      const supplier = String(row.supplier_name ?? row.supplier ?? "Unknown")
+      result[monthKey].suppliers[supplier] = (result[monthKey].suppliers[supplier] ?? 0) + Number(row.total ?? 0)
+      return result
+    }, {})
+    const rows = Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b))
+    const total = rows.reduce((sum, [, value]) => sum + value.value, 0)
+    return { ...report, kpis: [{ label: vi ? "Số tháng có dữ liệu" : "Months", value: fmt(rows.length) }, { label: vi ? "Trung bình/tháng" : "Monthly Average", value: `${fmt(rows.length ? total / rows.length : 0)} ₫` }, { label: vi ? "Tổng trong kỳ" : "Period Total", value: `${fmt(total)} ₫` }], chartData: rows.map(([label, value]) => ({ label, value: value.value / 1000000, color: "#7c3aed" })), tableHeads: vi ? ["Tháng", "Số PO", "Giá trị", "Nhà cung cấp lớn nhất"] : ["Month", "POs", "Value", "Top Supplier"], tableRows: rows.map(([monthKey, value]) => [monthKey, value.count, fmt(value.value), Object.entries(value.suppliers).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—"]) }
+  }
+  if (live && (key === "Tổng hợp nhập kho" || key === "GRN Summary")) {
+    const rows = live.receipts
+    const receiptQty = (receipt: any) => (receipt.items_detail ?? []).reduce((sum: number, item: any) => sum + Number(item.qty ?? 0), 0)
+    const receiptValue = (receipt: any) => (receipt.items_detail ?? []).reduce((sum: number, item: any) => sum + Number(item.qty ?? 0) * Number(item.unit_cost ?? 0), 0)
+    const warehouses = rows.reduce<Record<string, number>>((result, row) => { const name = String(row.warehouse_name ?? "Unknown"); result[name] = (result[name] ?? 0) + receiptQty(row); return result }, {})
+    return { ...report, kpis: [{ label: vi ? "Tổng phiếu nhập" : "Total GRNs", value: fmt(rows.length) }, { label: vi ? "Số lượng nhập" : "Units Received", value: fmt(rows.reduce((sum, row) => sum + receiptQty(row), 0)) }, { label: vi ? "Giá trị nhập" : "Value Received", value: `${fmt(rows.reduce((sum, row) => sum + receiptValue(row), 0))} ₫` }, { label: vi ? "Phiếu chưa hoàn tất" : "Incomplete", value: fmt(rows.filter(row => !["completed"].includes(String(row.status).toLowerCase())).length) }], chartData: Object.entries(warehouses).map(([label, value], index) => ({ label, value, color: ["#2563eb", "#8b5cf6", "#06b6d4"][index % 3] })), tableHeads: vi ? ["Phiếu nhập", "Đơn mua/Báo giá", "Nhà cung cấp", "Kho", "Số lượng", "Trạng thái"] : ["GRN", "PO/Quotation", "Supplier", "Warehouse", "Qty", "Status"], tableRows: rows.map(row => [row.ref ?? "", row.po_ref ?? "", row.supplier_name ?? "", row.warehouse_name ?? "", receiptQty(row), row.status ?? ""]) }
   }
   if (live && (key === "Lưu chuyển tiền tệ" || key === "Cash Flow" || key === "Sổ quỹ ngày" || key === "Daily Cash Book")) {
     const rows = live.cashBook
     const receipts = rows.filter(row => String(row.type).toLowerCase() === "receipt").reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
     const payments = rows.filter(row => String(row.type).toLowerCase() === "payment").reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
-    return { ...report, kpis: [{ label: vi ? "Thu" : "Receipts", value: `${fmt(receipts)} ₫` }, { label: vi ? "Chi" : "Payments", value: `${fmt(payments)} ₫` }, { label: vi ? "Số dư" : "Balance", value: `${fmt(receipts - payments)} ₫` }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.amount ?? 0), color: String(row.type).toLowerCase() === "receipt" ? "#10b981" : "#ef4444" })), tableRows: rows.slice(0, 200).map(row => [row.created_at ? formatDateTimeUtc7(row.created_at) : "", row.type ?? "", row.description ?? "", String(row.type).toLowerCase() === "receipt" ? fmt(Number(row.amount ?? 0)) : "", String(row.type).toLowerCase() === "payment" ? fmt(Number(row.amount ?? 0)) : "", fmt(Number(row.balance ?? 0))]) }
+    return { ...report, kpis: [{ label: vi ? "Thu" : "Receipts", value: `${fmt(receipts)} ₫` }, { label: vi ? "Chi" : "Payments", value: `${fmt(payments)} ₫` }, { label: vi ? "Số dư" : "Balance", value: `${fmt(calculateCashBalance(rows))} ₫` }], chartData: rows.slice(0, 14).map(row => ({ label: row.ref ?? "-", value: Number(row.amount ?? 0), color: String(row.type).toLowerCase() === "receipt" ? "#10b981" : "#ef4444" })), tableHeads: vi ? ["Ngày", "Loại", "Diễn giải", "Thu", "Chi", "Số dư"] : ["Date", "Type", "Description", "In", "Out", "Balance"], tableRows: rows.slice(0, 200).map(row => [row.created_at ? formatDateTimeUtc7(row.created_at) : "", row.type ?? "", row.description ?? "", String(row.type).toLowerCase() === "receipt" ? fmt(Number(row.amount ?? 0)) : "", String(row.type).toLowerCase() === "payment" ? fmt(Number(row.amount ?? 0)) : "", fmt(Number(row.balance ?? 0))]) }
+  }
+  if (live && (key === "Tổng hợp chi phí" || key === "Expense Summary")) {
+    const payments = live.cashBook.filter(row => String(row.type).toLowerCase() === "payment")
+    const grouped = payments.reduce<Record<string, { count: number; amount: number }>>((result, row) => {
+      const label = String(row.method ?? row.description ?? (vi ? "Thanh toán" : "Payment"))
+      result[label] ??= { count: 0, amount: 0 }
+      result[label].count += 1
+      result[label].amount += Number(row.amount ?? 0)
+      return result
+    }, {})
+    const rows = Object.entries(grouped).sort((a, b) => b[1].amount - a[1].amount)
+    const total = rows.reduce((sum, [, value]) => sum + value.amount, 0)
+    return { ...report, kpis: [{ label: vi ? "Tổng chi" : "Total Expenses", value: `${fmt(total)} ₫` }, { label: vi ? "Số khoản chi" : "Payments", value: fmt(payments.length) }, { label: vi ? "Khoản chi trung bình" : "Average Payment", value: `${fmt(payments.length ? total / payments.length : 0)} ₫` }], chartData: rows.map(([label, value], index) => ({ label, value: value.amount / 1000000, color: ["#ef4444", "#f59e0b", "#8b5cf6", "#2563eb"][index % 4] })), tableHeads: vi ? ["Nhóm chi", "Số giao dịch", "Số tiền"] : ["Expense Group", "Transactions", "Amount"], tableRows: rows.map(([label, value]) => [label, value.count, fmt(value.amount)]) }
   }
   if (live && (key === "Tuổi nợ phải thu" || key === "Receivable Aging")) {
-    const rows = live.invoices.filter(row => !["paid", "cancelled", "void"].includes(String(row.status).toLowerCase()))
-    const buckets = buildAgingBuckets(rows, ["remaining", "outstanding", "total", "amount"])
+    const rows = live.invoices.filter(row => Number(row.outstanding_amount ?? Math.max(0, Number(row.total ?? 0) - Number(row.paid_amount ?? 0))) > 0 && !["cancelled", "void"].includes(String(row.status).toLowerCase()))
+    const buckets = buildAgingBuckets(rows, ["outstanding_amount", "remaining", "outstanding", "total", "amount"])
     const total = Object.values(buckets).reduce((sum, value) => sum + value, 0)
-    return { ...report, kpis: [{ label: vi ? "Tổng phải thu" : "Total Receivable", value: `${fmt(total)} ₫` }, { label: vi ? "Hóa đơn mở" : "Open Invoices", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#f59e0b" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.remaining ?? row.outstanding ?? row.total ?? row.amount ?? 0)), row.status ?? ""]) }
+    return { ...report, kpis: [{ label: vi ? "Tổng phải thu" : "Total Receivable", value: `${fmt(total)} ₫` }, { label: vi ? "Hóa đơn mở" : "Open Invoices", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#f59e0b" })), tableHeads: vi ? ["Hóa đơn", "Khách hàng", "Đến hạn", "Còn phải thu", "Trạng thái"] : ["Invoice", "Customer", "Due", "Outstanding", "Status"], tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.customer_name ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.outstanding_amount ?? row.remaining ?? row.outstanding ?? row.total ?? row.amount ?? 0)), row.status ?? ""]) }
   }
   if (live && (key === "Tuổi nợ phải trả" || key === "Payable Aging")) {
-    const rows = live.purchases.filter(row => !["paid", "cancelled", "rejected"].includes(String(row.status).toLowerCase()))
-    const buckets = buildAgingBuckets(rows, ["remaining", "outstanding", "total"])
+    const rows = live.purchases.filter(row => Number(row.outstanding_amount ?? Math.max(0, Number(row.total ?? 0) - Number(row.paid_amount ?? 0))) > 0 && !["cancelled", "rejected"].includes(String(row.status).toLowerCase()))
+    const buckets = buildAgingBuckets(rows, ["outstanding_amount", "remaining", "outstanding", "total"])
     const total = Object.values(buckets).reduce((sum, value) => sum + value, 0)
-    return { ...report, kpis: [{ label: vi ? "Tổng phải trả" : "Total Payable", value: `${fmt(total)} ₫` }, { label: vi ? "Đơn mua mở" : "Open POs", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#ef4444" })), tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.remaining ?? row.outstanding ?? row.total ?? 0)), row.status ?? ""]) }
+    return { ...report, kpis: [{ label: vi ? "Tổng phải trả" : "Total Payable", value: `${fmt(total)} ₫` }, { label: vi ? "Đơn mua mở" : "Open POs", value: fmt(rows.length) }], chartData: Object.entries(buckets).map(([label, value]) => ({ label, value: value / 1000000, color: "#ef4444" })), tableHeads: vi ? ["Đơn mua", "Nhà cung cấp", "Đến hạn", "Còn phải trả", "Trạng thái"] : ["PO", "Supplier", "Due", "Outstanding", "Status"], tableRows: rows.slice(0, 200).map(row => [row.ref ?? "", row.supplier_name ?? row.supplier ?? "", row.due_date ?? row.due ?? row.created_at ?? "", fmt(Number(row.outstanding_amount ?? row.remaining ?? row.outstanding ?? row.total ?? 0)), row.payment_status ?? row.status ?? ""]) }
+  }
+  if (live) return {
+    title: report?.title ?? key,
+    kpis: [{ label: lang === "vi" ? "Không có nguồn dữ liệu phù hợp" : "No compatible data source", value: "—" }],
+    chartLabel: "", chartType: "bar" as const, chartData: [],
+    tableHeads: [], tableRows: [],
   }
   return report ?? {
     title: key,
@@ -2082,7 +2239,7 @@ function buildReportData(key: string, lang: string, live?: LiveReportContext): R
   }
 }
 
-function ReportDetailModal({ reportKey, onClose, lang, live }: { reportKey: string; onClose: () => void; lang: string; live?: LiveReportContext }) {
+function ReportDetailModal({ reportKey, onClose, lang, live, canExport }: { reportKey: string; onClose: () => void; lang: string; live?: LiveReportContext; canExport: boolean }) {
   const data = buildReportData(reportKey, lang, live)
   const vi = lang === "vi"
   const chartRows = data.chartData.map(d => ({ name: d.label, [vi ? "Giá trị" : "Value"]: d.value, ...(d.value2 !== undefined ? { [vi ? "Giá trị 2" : "Value 2"]: d.value2 } : {}) }))
@@ -2096,21 +2253,18 @@ function ReportDetailModal({ reportKey, onClose, lang, live }: { reportKey: stri
         <div className="flex items-center justify-between px-5 py-3.5 border-b" style={{ borderColor: "var(--border)" }}>
           <h2 className="text-sm font-semibold text-slate-900">{data.title}</h2>
           <div className="flex items-center gap-2">
-            <select className="h-7 px-2 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }}>
-              {(vi ? ["Tháng 8/2026", "Quý 3/2026", "Năm 2026"] : ["August 2026", "Q3 2026", "FY 2026"]).map(o => <option key={o}>{o}</option>)}
-            </select>
-            <button
+            {canExport && <button
               onClick={() => exportCsv(filename, data.tableHeads, data.tableRows)}
               className="flex items-center gap-1 h-7 px-2.5 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}
             >
               <Download size={12} /> CSV
-            </button>
-            <button
+            </button>}
+            {canExport && <button
               onClick={() => exportXlsx(filename, data.tableHeads, data.tableRows, "WarehouseOS", data.chartData, data.chartLabel)}
               className="flex items-center gap-1 h-7 px-2.5 rounded-lg border text-xs text-emerald-700 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}
             >
               <FileSpreadsheet size={12} /> Excel
-            </button>
+            </button>}
             <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={14} /></button>
           </div>
         </div>
@@ -2198,13 +2352,24 @@ function ReportDetailModal({ reportKey, onClose, lang, live }: { reportKey: stri
 export function Reports() {
   const { t, lang } = useLang()
   const { isDemo } = useDemo()
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
+  const currentDateKey = formatDateKeyUtc7()
+  const [year, monthNumber] = currentDateKey.split("-").map(Number)
+  const month = monthNumber - 1
+  const now = new Date(`${currentDateKey}T12:00:00+07:00`)
+  const quarterStartMonth = Math.floor(month / 3) * 3
+  const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  const periodOptions = [
+    { label: new Intl.DateTimeFormat(lang === "vi" ? "vi-VN" : "en-US", { month: "short", year: "numeric" }).format(now), from: dateKey(new Date(year, month, 1)), to: dateKey(new Date(year, month + 1, 0)) },
+    { label: `Q${Math.floor(month / 3) + 1}/${year}`, from: dateKey(new Date(year, quarterStartMonth, 1)), to: dateKey(new Date(year, quarterStartMonth + 3, 0)) },
+    { label: lang === "vi" ? `Năm ${year}` : `FY ${year}`, from: `${year}-01-01`, to: `${year}-12-31` },
+  ]
   const [period, setPeriod] = useState(0)
   const [activeReport, setActiveReport] = useState<string | null>(null)
-  const [liveReports, setLiveReports] = useState<LiveReportContext>({ balance: [], ledger: [], salesOrders: [], purchases: [], deliveries: [], invoices: [], cashBook: [] })
+  const [liveReports, setLiveReports] = useState<LiveReportContext>({ balance: [], ledger: [], products: [], salesOrders: [], purchases: [], receipts: [], deliveries: [], invoices: [], cashBook: [] })
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
-  const [filters, setFilters] = useState({ from: "", to: "", warehouseId: "", productId: "", status: "" })
+  const [filters, setFilters] = useState(() => ({ from: periodOptions[0].from, to: periodOptions[0].to, warehouseId: "", productId: "", status: "" }))
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const liveMode = !isDemo && Boolean(profile?.org_id)
@@ -2218,27 +2383,41 @@ export function Reports() {
       fetchInventoryLedger({ isDemo, orgId: profile?.org_id }),
       fetchSalesOrders({ isDemo, orgId: profile?.org_id }),
       fetchPurchaseOrders({ isDemo, orgId: profile?.org_id }),
+      fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }),
       fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }),
       fetchInvoices({ isDemo, orgId: profile?.org_id }),
       fetchCashBook({ isDemo, orgId: profile?.org_id }),
       fetchWarehouses({ isDemo, orgId: profile?.org_id }),
       fetchProducts({ isDemo, orgId: profile?.org_id }),
-    ]).then(([balance, ledger, salesOrders, purchases, deliveries, invoices, cashBook, warehouseResult, productResult]) => {
+    ]).then(([balance, ledger, salesOrders, purchases, receipts, deliveries, invoices, cashBook, warehouseResult, productResult]) => {
+      const sourceError = [balance, ledger, salesOrders, purchases, receipts, deliveries, invoices, cashBook, warehouseResult, productResult].find(result => result.error)?.error
+      if (sourceError) throw sourceError
       const ledgerRows = ledger.data ?? []
       const warehouseMatches = (row: any) => !filters.warehouseId || String(row.warehouse_id ?? "") === filters.warehouseId
       const productMatches = (row: any) => !filters.productId || String(row.product_id ?? "") === filters.productId
       const filteredLedger = filterReportRows(ledgerRows, { ...filters, status: "" })
       const filteredBalanceSource = (balance.data ?? []).filter((row: any) => warehouseMatches(row) && productMatches(row))
-      const filteredPurchases = filterReportRows(purchases.data ?? [], filters)
-      const filteredDeliveries = (deliveries.data ?? []).filter((row: any) => filterReportRows([row], filters).length > 0 && (!filters.productId || (row.items ?? []).some((item: any) => String(item.product_id ?? "") === filters.productId)))
+      const documentFilters = { ...filters, productId: "" }
+      const containsSelectedProduct = (row: any) => !filters.productId || (row.items ?? row.items_detail ?? []).some((item: any) => String(item.product_id ?? "") === filters.productId)
+      const filteredPurchases = filterReportRows(purchases.data ?? [], documentFilters).filter(containsSelectedProduct)
+      const filteredReceipts = filterReportRows(receipts.data ?? [], documentFilters).filter(containsSelectedProduct)
+      const filteredSalesOrders = filterReportRows(salesOrders.data ?? [], documentFilters).filter(containsSelectedProduct)
+      const filteredDeliveries = filterReportRows(deliveries.data ?? [], documentFilters).filter(containsSelectedProduct)
       const filteredInvoices = filterReportRows(invoices.data ?? [], { ...filters, warehouseId: "", productId: "" })
       const filteredCashBook = filterReportRows(cashBook.data ?? [], { ...filters, warehouseId: "", productId: "", status: "" })
-      const derivedBalance = deriveLedgerBalance(ledgerRows)
-      const filteredDerivedBalance = derivedBalance.filter((row: any) => warehouseMatches(row) && productMatches(row))
+      const balanceLedgerRows = ledgerRows.filter((row: any) => !filters.to || formatDateKeyUtc7(row.created_at) <= filters.to)
+      const derivedBalance = deriveLedgerBalance(balanceLedgerRows)
+      const productById = new Map((productResult.data ?? []).map((row: any) => [String(row.id), row]))
+      const filteredDerivedBalance = derivedBalance
+        .filter((row: any) => warehouseMatches(row) && productMatches(row))
+        .map((row: any) => {
+          const product = productById.get(String(row.product_id)) as any
+          return { ...row, min_qty: Number(product?.min_qty ?? 0), max_qty: Number(product?.max_qty ?? 0) }
+        })
       if (active) {
         setWarehouses(warehouseResult.data ?? [])
         setProducts(productResult.data ?? [])
-        setLiveReports({ balance: filteredDerivedBalance.length ? filteredDerivedBalance : filteredBalanceSource, ledger: filteredLedger.filter(productMatches), salesOrders: salesOrders.data ?? [], purchases: filteredPurchases, deliveries: filteredDeliveries, invoices: filteredInvoices, cashBook: filteredCashBook })
+        setLiveReports({ balance: liveMode ? filteredDerivedBalance : (filteredDerivedBalance.length ? filteredDerivedBalance : filteredBalanceSource), ledger: filteredLedger.filter(productMatches), products: productResult.data ?? [], salesOrders: filteredSalesOrders, purchases: filteredPurchases, receipts: filteredReceipts, deliveries: filteredDeliveries, invoices: filteredInvoices, cashBook: filteredCashBook })
         setLoading(false)
       }
     }).catch(error => {
@@ -2259,7 +2438,7 @@ export function Reports() {
   }))
 
   const summaryKpis = [
-    { label: lang === "vi" ? "Doanh thu tháng này" : "Monthly Revenue", value: liveMode ? `${fmt(liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) / 1000000)} triệu` : "405 triệu", icon: <TrendingUp size={14} />, color: "text-emerald-600", bg: "bg-emerald-50", trend: liveMode ? "live" : "+18%" },
+    { label: lang === "vi" ? "Doanh thu trong kỳ" : "Period Revenue", value: liveMode ? `${fmt(liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) / 1000000)} triệu` : "405 triệu", icon: <TrendingUp size={14} />, color: "text-emerald-600", bg: "bg-emerald-50", trend: liveMode ? "live" : "+18%" },
     { label: lang === "vi" ? "Giá trị tồn kho" : "Inventory Value", value: liveMode ? `${fmt(liveReports.balance.reduce((sum, row) => sum + Number(row.value ?? 0), 0) / 1000000)} triệu` : "8.42 tỷ", icon: <Layers size={14} />, color: "text-blue-600", bg: "bg-blue-50", trend: liveMode ? "live" : "+5%" },
     { label: lang === "vi" ? "Tổng mua hàng" : "Purchase Value", value: liveMode ? `${fmt(liveReports.purchases.reduce((sum, row) => sum + Number(row.total ?? 0), 0) / 1000000)} triệu` : "3.09 tỷ", icon: <ShoppingCart size={14} />, color: "text-violet-600", bg: "bg-violet-50", trend: liveMode ? "live" : "+24%" },
     { label: lang === "vi" ? "Số dư quỹ" : "Cash Balance", value: liveMode ? `${fmt(calculateCashBalance(liveReports.cashBook) / 1000000)} triệu` : "185 triệu", icon: <CreditCard size={14} />, color: "text-amber-600", bg: "bg-amber-50", trend: liveMode ? "live" : "+20%" },
@@ -2274,19 +2453,19 @@ export function Reports() {
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <span>{lang === "vi" ? "Kỳ:" : "Period:"}</span>
             <div className="flex rounded-lg overflow-hidden border text-xs" style={{ borderColor: "var(--border)" }}>
-              {(lang === "vi" ? ["T8/2026", "Q3/2026", "2026"] : ["Aug 2026", "Q3 2026", "FY 2026"]).map((o, i) => (
-                <button key={o} onClick={() => { setPeriod(i); setFilters({ ...filters, from: i === 0 ? "2026-08-01" : i === 1 ? "2026-07-01" : "2026-01-01", to: i === 0 ? "2026-08-31" : i === 1 ? "2026-09-30" : "2026-12-31" }) }} className={`h-7 px-3 whitespace-nowrap ${period === i ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{o}</button>
+              {periodOptions.map((option, i) => (
+                <button key={option.label} onClick={() => { setPeriod(i); setFilters({ ...filters, from: option.from, to: option.to }) }} className={`h-7 px-3 whitespace-nowrap ${period === i ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{option.label}</button>
               ))}
             </div>
           </div>
-          <button onClick={() => exportXlsx("reports-summary", [lang === "vi" ? "Báo cáo" : "Report", lang === "vi" ? "Giá trị" : "Value"], [
+          {can("Reports", "export") && <button onClick={() => exportXlsx("reports-summary", [lang === "vi" ? "Báo cáo" : "Report", lang === "vi" ? "Giá trị" : "Value"], [
             [lang === "vi" ? "Doanh thu" : "Revenue", liveMode ? liveReports.invoices.reduce((sum, row) => sum + Number(row.total ?? row.amount ?? 0), 0) : 0],
             [lang === "vi" ? "Tồn kho" : "Inventory", liveMode ? liveReports.balance.reduce((sum, row) => sum + Number(row.value ?? 0), 0) : 0],
             [lang === "vi" ? "Mua hàng" : "Purchases", liveMode ? liveReports.purchases.reduce((sum, row) => sum + Number(row.total ?? 0), 0) : 0],
             [lang === "vi" ? "Số dư quỹ" : "Cash Balance", liveMode ? calculateCashBalance(liveReports.cashBook) : 0],
           ])} className="flex items-center gap-1.5 h-7 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={12} /> {lang === "vi" ? "Xuất tất cả" : "Export All"}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -2297,7 +2476,7 @@ export function Reports() {
         <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Sản phẩm" : "Product"}<select value={filters.productId} onChange={event => setFilters({ ...filters, productId: event.target.value })} className="block mt-1 h-8 min-w-48 rounded-lg border px-2 text-xs font-normal"><option value="">{lang === "vi" ? "Tất cả sản phẩm" : "All products"}</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select></label>
         <label className="text-[10px] font-semibold text-slate-500">{lang === "vi" ? "Trạng thái" : "Status"}<select value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })} className="block mt-1 h-8 min-w-32 rounded-lg border px-2 text-xs font-normal"><option value="">{lang === "vi" ? "Tất cả" : "All"}</option>{["Draft", "Partial", "Completed", "Delivered", "Paid", "Overdue", "Cancelled", "Reversed"].map(status => <option key={status} value={status}>{status}</option>)}</select></label>
         <button onClick={() => setFilters({ from: "", to: "", warehouseId: "", productId: "", status: "" })} className="h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50">{lang === "vi" ? "Xóa lọc" : "Clear"}</button>
-        {loading && <span className="text-[11px] text-slate-400">{lang === "vi" ? "Đang tải dữ liệu..." : "Loading live data..."}</span>}
+        {loading && <span role="status" aria-label={lang === "vi" ? "Đang tải dữ liệu" : "Loading live data"} className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />}
         {loadError && <span className="text-[11px] text-red-600">{loadError}</span>}
       </div>
 
@@ -2345,7 +2524,7 @@ export function Reports() {
       </div>
 
       {activeReport && (
-        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} live={liveMode ? liveReports : undefined} />
+        <ReportDetailModal reportKey={activeReport} onClose={() => setActiveReport(null)} lang={lang} live={liveMode ? liveReports : undefined} canExport={can("Reports", "export")} />
       )}
     </div>
   )
@@ -2361,38 +2540,27 @@ function SettingField({ label, defaultVal, value, onChange, type = "text", hint 
     </div>
   )
 }
-function SettingSelect({ label, val, opts }: { label: string; val: string; opts: string[] }) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-slate-500 mb-1">{label}</label>
-      <select defaultValue={val} className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-white" style={{ borderColor: "var(--border)" }}>
-        {opts.map(o => <option key={o}>{o}</option>)}
-      </select>
-    </div>
-  )
-}
-function SettingToggle({ label, hint, defaultChecked }: { label: string; hint?: string; defaultChecked?: boolean }) {
-  const [on, setOn] = useState(defaultChecked ?? false)
-  return (
-    <div className="flex items-start justify-between gap-4 py-2.5 border-b last:border-0" style={{ borderColor: "var(--border)" }}>
-      <div>
-        <div className="text-xs font-medium text-slate-700">{label}</div>
-        {hint && <div className="text-[10px] text-slate-400 mt-0.5">{hint}</div>}
-      </div>
-      <button onClick={() => setOn(v => !v)} className={`w-9 h-5 rounded-full transition-colors flex-shrink-0 mt-0.5 ${on ? "bg-blue-600" : "bg-slate-200"}`}>
-        <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${on ? "translate-x-4" : "translate-x-0"}`} />
-      </button>
-    </div>
-  )
-}
-function SaveBtn({ label, onSave }: { label: string; onSave?: () => void }) {
+function SaveBtn({ label, onSave }: { label: string; onSave?: () => void | Promise<void> }) {
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   return (
     <button
-      onClick={() => { onSave?.(); setSaved(true); setTimeout(() => setSaved(false), 2000) }}
-      className={`h-9 px-5 rounded-lg text-xs font-medium transition-colors ${saved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"}`}
+      disabled={saving}
+      onClick={async () => {
+        setSaving(true)
+        try {
+          await onSave?.()
+          setSaved(true)
+          setTimeout(() => setSaved(false), 2000)
+        } catch (error: any) {
+          showAppToast(error?.message ?? String(error))
+        } finally {
+          setSaving(false)
+        }
+      }}
+      className={`h-9 px-5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60 ${saved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"}`}
     >
-      {saved ? "✓ Đã lưu" : label}
+      {saving ? "..." : saved ? "✓ Đã lưu" : label}
     </button>
   )
 }
@@ -2400,266 +2568,72 @@ function SaveBtn({ label, onSave }: { label: string; onSave?: () => void }) {
 export function Settings() {
   const { t, lang } = useLang()
   const vi = lang === "vi"
-  const sections = vi
-    ? ["Chung", "Công ty", "Giao diện", "Tiền tệ & Số", "Thuế", "Email", "Lưu trữ", "Sao lưu"]
-    : ["General", "Company", "Appearance", "Currency & Numbers", "Tax", "Email", "Storage", "Backup"]
-  const [active, setActive] = useState(0)
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
   const { isDemo } = useDemo()
   const [company, setCompany] = useState<CompanySettings>(() => loadCompanySettings(profile?.org_id))
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
+    let active = true
+    setLoadError(null)
+    if (isDemo) {
+      setCompany(loadCompanySettings(profile?.org_id))
+      return () => { active = false }
+    }
     fetchCompanySettings({ isDemo, orgId: profile?.org_id }).then(result => {
-      setCompany(result.error ? loadCompanySettings(profile?.org_id) : result.data)
+      if (!active) return
+      if (result.error) {
+        setLoadError(result.error.message ?? String(result.error))
+        setCompany(loadCompanySettings(profile?.org_id))
+      } else {
+        setCompany(result.data)
+      }
     })
+    return () => { active = false }
   }, [isDemo, profile?.org_id])
 
-  const updateCompany = (key: keyof CompanySettings, value: string) => setCompany(current => ({ ...current, [key]: value }))
+  const updateCompany = (key: keyof CompanySettings, value: string) =>
+    setCompany(current => ({ ...current, [key]: value }))
 
   return (
-    <div className="flex h-full">
-      <div className="w-48 border-r bg-white flex-shrink-0 py-2" style={{ borderColor: "var(--border)" }}>
-        {sections.map((s, i) => (
-          <button key={s} onClick={() => setActive(i)} className={`w-full flex items-center h-8 px-4 text-xs transition-colors ${active === i ? "bg-blue-50 text-blue-700 font-semibold border-r-2 border-blue-600" : "text-slate-600 hover:bg-slate-50"}`}>
-            {s}
-          </button>
-        ))}
-      </div>
-      <div className="flex-1 p-6 overflow-auto">
-        <h2 className="text-sm font-semibold text-slate-900 mb-4">{sections[active]}</h2>
-        <div className="max-w-lg space-y-4">
-
-          {/* 0 – General */}
-          {active === 0 && (
-            <>
-              <SettingField label={vi ? "Tên hệ thống" : "System Name"} defaultVal="WarehouseOS" />
-              <SettingSelect label={vi ? "Ngôn ngữ mặc định" : "Default Language"} val={vi ? "Tiếng Việt" : "English"} opts={["Tiếng Việt", "English"]} />
-              <SettingSelect label={vi ? "Múi giờ" : "Timezone"} val="Asia/Ho_Chi_Minh (UTC+7)" opts={["Asia/Ho_Chi_Minh (UTC+7)", "Asia/Bangkok (UTC+7)", "UTC"]} />
-              <SettingSelect label={vi ? "Định dạng ngày" : "Date Format"} val="DD/MM/YYYY" opts={["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Xác nhận trước khi xóa" : "Confirm before delete"} defaultChecked hint={vi ? "Hiển thị hộp thoại xác nhận khi xóa dữ liệu" : "Show confirmation dialog when deleting data"} />
-                <SettingToggle label={vi ? "Lưu tự động" : "Auto-save"} defaultChecked={true} hint={vi ? "Tự động lưu form sau 30 giây" : "Auto-save forms after 30 seconds"} />
-                <SettingToggle label={vi ? "Âm thanh thông báo" : "Notification sounds"} hint={vi ? "Phát âm khi có thông báo mới" : "Play sound on new notifications"} />
-              </div>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 1 – Company */}
-          {active === 1 && (
-            <>
-              <SettingField label={vi ? "Tên công ty" : "Company Name"} value={company.name} onChange={value => updateCompany("name", value)} />
-              <SettingField label={vi ? "Người đại diện" : "Representative"} value={company.representative} onChange={value => updateCompany("representative", value)} />
-              <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} value={company.taxId} onChange={value => updateCompany("taxId", value)} />
-              <SettingField label={vi ? "Địa chỉ" : "Address"} value={company.address} onChange={value => updateCompany("address", value)} />
-              <SettingField label={vi ? "Điện thoại" : "Phone"} value={company.phone} onChange={value => updateCompany("phone", value)} />
-              <SettingField label={vi ? "Website" : "Website"} value={company.website} onChange={value => updateCompany("website", value)} />
-              <SettingField label={vi ? "Email liên hệ" : "Contact Email"} value={company.email} onChange={value => updateCompany("email", value)} type="email" />
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Logo công ty" : "Company Logo"}</label>
-                <div className="border-2 border-dashed rounded-xl p-6 text-center" style={{ borderColor: "var(--border)" }}>
-                  <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-lg mx-auto mb-2">W</div>
-                  <p className="text-xs text-slate-400">{vi ? "Kéo thả hoặc click để thay đổi logo (PNG, SVG — max 2MB)" : "Drag & drop or click to change logo (PNG, SVG — max 2MB)"}</p>
-                </div>
-              </div>
-              <SaveBtn label={t("saveSettings")} onSave={async () => {
-                saveCompanySettings(company, profile?.org_id)
-                const result = await upsertCompanySettings(company, { isDemo, orgId: profile?.org_id })
-                if (result.error) alert(vi ? "Không thể lưu thông tin công ty lên máy chủ" : "Could not save company settings to server")
-              }} />
-            </>
-          )}
-
-          {/* 2 – Appearance */}
-          {active === 2 && (
-            <>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-2">{vi ? "Chủ đề giao diện" : "Theme"}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { key: "light", label: vi ? "Sáng" : "Light", preview: "bg-white border-2 border-blue-500" },
-                    { key: "dark", label: vi ? "Tối" : "Dark", preview: "bg-slate-800" },
-                    { key: "system", label: vi ? "Theo hệ thống" : "System", preview: "bg-gradient-to-r from-white to-slate-800" },
-                    { key: "blue", label: vi ? "Xanh dương" : "Blue", preview: "bg-blue-600" },
-                  ].map(t => (
-                    <button key={t.key} className={`flex items-center gap-2.5 h-10 px-3 rounded-lg border text-xs text-left ${t.key === "light" ? "border-blue-500 bg-blue-50 text-blue-700 font-semibold" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                      <div className={`w-5 h-5 rounded ${t.preview} flex-shrink-0 border border-slate-200`} />
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <SettingSelect label={vi ? "Màu nhấn (Accent color)" : "Accent Color"} val="Blue (#3b82f6)" opts={["Blue (#3b82f6)", "Indigo (#6366f1)", "Violet (#8b5cf6)", "Green (#10b981)", "Orange (#f59e0b)"]} />
-              <SettingSelect label={vi ? "Mật độ hiển thị" : "Display Density"} val={vi ? "Tiêu chuẩn" : "Default"} opts={vi ? ["Nhỏ gọn", "Tiêu chuẩn", "Thoáng"] : ["Compact", "Default", "Comfortable"]} />
-              <SettingSelect label={vi ? "Cỡ chữ" : "Font Size"} val="14px" opts={["12px", "13px", "14px", "15px", "16px"]} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Sidebar thu gọn khi màn hình nhỏ" : "Collapse sidebar on small screens"} defaultChecked />
-                <SettingToggle label={vi ? "Hiệu ứng chuyển trang" : "Page transition animations"} defaultChecked={true} />
-                <SettingToggle label={vi ? "Highlight dòng khi hover" : "Highlight row on hover"} defaultChecked={true} />
-              </div>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 3 – Currency & Numbers */}
-          {active === 3 && (
-            <>
-              <SettingSelect label={vi ? "Tiền tệ mặc định" : "Default Currency"} val="VND — Việt Nam Đồng (₫)" opts={["VND — Việt Nam Đồng (₫)", "USD — US Dollar ($)", "EUR — Euro (€)", "JPY — Japanese Yen (¥)"]} />
-              <SettingSelect label={vi ? "Định dạng số" : "Number Format"} val={vi ? "1.000.000 (dấu chấm)" : "1,000,000 (comma)"} opts={vi ? ["1.000.000 (dấu chấm)", "1,000,000 (dấu phẩy)", "1 000 000 (khoảng trắng)"] : ["1,000,000 (comma)", "1.000.000 (period)", "1 000 000 (space)"]} />
-              <SettingSelect label={vi ? "Số chữ số thập phân" : "Decimal Places"} val="0" opts={["0", "1", "2", "3"]} />
-              <SettingField label={vi ? "Tỷ giá USD/VND" : "USD/VND Exchange Rate"} defaultVal="25,450" hint={vi ? "Dùng để hiển thị tương đương khi cần" : "Used for equivalent display when needed"} />
-              <SettingField label={vi ? "Tỷ giá EUR/VND" : "EUR/VND Exchange Rate"} defaultVal="27,820" />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Hiển thị ký hiệu tiền tệ trước số" : "Show currency symbol before number"} defaultChecked />
-                <SettingToggle label={vi ? "Hiển thị tương đương USD trên báo cáo" : "Show USD equivalent on reports"} />
-              </div>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 4 – Tax */}
-          {active === 4 && (
-            <>
-              <SettingSelect label={vi ? "Mức thuế GTGT mặc định" : "Default VAT Rate"} val="10%" opts={["0%", "5%", "8%", "10%"]} />
-              <SettingField label={vi ? "Mã số thuế công ty" : "Company Tax ID (MST)"} defaultVal="0123456789" hint={vi ? "Tự động điền trên hóa đơn" : "Auto-filled on invoices"} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Giá niêm yết đã bao gồm thuế" : "Listed prices include tax"} hint={vi ? "Giá hiển thị đã bao gồm VAT" : "Displayed price already includes VAT"} />
-                <SettingToggle label={vi ? "Tách thuế trên hóa đơn" : "Show tax breakdown on invoices"} defaultChecked />
-                <SettingToggle label={vi ? "Tự động tính thuế khi tạo đơn" : "Auto-calculate tax when creating orders"} defaultChecked={true} />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-2">{vi ? "Mức thuế đặc biệt theo danh mục" : "Category-specific Tax Rates"}</label>
-                <div className="border rounded-xl overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                  {[
-                    { cat: vi ? "Thiết bị điện tử" : "Electronics", rate: "10%" },
-                    { cat: vi ? "Phần mềm & Dịch vụ" : "Software & Services", rate: "10%" },
-                    { cat: vi ? "Hàng thiết yếu" : "Essential Goods", rate: "5%" },
-                  ].map(r => (
-                    <div key={r.cat} className="flex items-center justify-between px-3 py-2.5 border-b last:border-0 text-xs" style={{ borderColor: "var(--border)" }}>
-                      <span className="text-slate-700">{r.cat}</span>
-                      <select defaultValue={r.rate} className="h-7 px-2 rounded-lg border text-xs outline-none" style={{ borderColor: "var(--border)" }}>
-                        {["0%", "5%", "8%", "10%"].map(o => <option key={o}>{o}</option>)}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 5 – Email */}
-          {active === 5 && (
-            <>
-              <SettingField label="SMTP Host" defaultVal="smtp.gmail.com" />
-              <div className="grid grid-cols-2 gap-3">
-                <SettingField label="SMTP Port" defaultVal="587" />
-                <SettingSelect label="Encryption" val="TLS" opts={["TLS", "SSL", "None"]} />
-              </div>
-              <SettingField label={vi ? "Tài khoản gửi (From)" : "Sender Address"} defaultVal="noreply@warehouseos.vn" type="email" />
-              <SettingField label={vi ? "Tên hiển thị" : "Display Name"} defaultVal="WarehouseOS" />
-              <SettingField label={vi ? "Mật khẩu ứng dụng" : "App Password"} defaultVal="••••••••••••" type="password" hint={vi ? "Dùng App Password của Google nếu bật 2FA" : "Use Google App Password if 2FA is enabled"} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Gửi email khi tạo đơn mua hàng" : "Send email on new purchase order"} defaultChecked />
-                <SettingToggle label={vi ? "Gửi email xác nhận hóa đơn" : "Send invoice confirmation email"} defaultChecked={true} />
-                <SettingToggle label={vi ? "Thông báo tồn kho thấp qua email" : "Low stock email alerts"} />
-                <SettingToggle label={vi ? "Bản sao (CC) cho quản lý" : "CC manager on all emails"} />
-              </div>
-              <button className="flex items-center gap-2 h-9 px-4 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                {vi ? "Gửi email kiểm tra →" : "Send test email →"}
-              </button>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 6 – Storage */}
-          {active === 6 && (
-            <>
-              <div className="bg-slate-50 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-slate-700">{vi ? "Dung lượng đã dùng" : "Storage Used"}</span>
-                  <span className="text-xs text-slate-500 mono">2.4 GB / 10 GB</span>
-                </div>
-                <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: "24%" }} />
-                </div>
-                <div className="grid grid-cols-3 gap-2 mt-3 text-[10px]">
-                  {[
-                    { label: vi ? "File đính kèm" : "Attachments", val: "1.2 GB", color: "bg-blue-500" },
-                    { label: vi ? "Báo cáo" : "Reports", val: "0.8 GB", color: "bg-violet-500" },
-                    { label: vi ? "Nhật ký" : "Logs", val: "0.4 GB", color: "bg-slate-400" },
-                  ].map(s => (
-                    <div key={s.label} className="flex items-center gap-1.5 text-slate-600">
-                      <div className={`w-2 h-2 rounded-full ${s.color}`} />
-                      <span>{s.label}: <span className="font-semibold">{s.val}</span></span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <SettingSelect label={vi ? "Nhà cung cấp lưu trữ" : "Storage Provider"} val={vi ? "Cục bộ (Local)" : "Local"} opts={vi ? ["Cục bộ (Local)", "Amazon S3", "Google Cloud Storage", "MinIO"] : ["Local", "Amazon S3", "Google Cloud Storage", "MinIO"]} />
-              <SettingField label={vi ? "Thư mục lưu file" : "File Upload Path"} defaultVal="/var/warehouseos/uploads" hint={vi ? "Đường dẫn tuyệt đối trên server" : "Absolute path on the server"} />
-              <SettingSelect label={vi ? "Giới hạn file upload" : "Max Upload File Size"} val="10 MB" opts={["5 MB", "10 MB", "25 MB", "50 MB", "100 MB"]} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Nén ảnh tự động" : "Auto-compress images"} defaultChecked />
-                <SettingToggle label={vi ? "Xóa file tạm sau 24 giờ" : "Delete temp files after 24h"} defaultChecked={true} />
-              </div>
-              <SaveBtn label={t("saveSettings")} />
-            </>
-          )}
-
-          {/* 7 – Backup */}
-          {active === 7 && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: vi ? "Sao lưu gần nhất" : "Last Backup", val: "2026-08-04 02:00", color: "text-emerald-600" },
-                  { label: vi ? "Kích thước" : "Backup Size", val: "324 MB", color: "text-slate-900" },
-                  { label: vi ? "Lịch tiếp theo" : "Next Scheduled", val: "2026-08-05 02:00", color: "text-blue-600" },
-                  { label: vi ? "Số bản lưu" : "Backups Kept", val: "14 / 30", color: "text-slate-900" },
-                ].map(s => (
-                  <div key={s.label} className="bg-slate-50 rounded-xl p-3">
-                    <div className="text-[10px] text-slate-400">{s.label}</div>
-                    <div className={`text-sm font-bold mono mt-0.5 ${s.color}`}>{s.val}</div>
-                  </div>
-                ))}
-              </div>
-              <SettingSelect label={vi ? "Lịch sao lưu tự động" : "Auto-backup Schedule"} val={vi ? "Hàng ngày lúc 02:00" : "Daily at 02:00"} opts={vi ? ["Hàng ngày lúc 02:00", "Hàng tuần (Chủ nhật)", "Hàng tháng (ngày 1)", "Thủ công"] : ["Daily at 02:00", "Weekly (Sunday)", "Monthly (1st)", "Manual only"]} />
-              <SettingField label={vi ? "Số bản lưu tối đa" : "Max Backups to Keep"} defaultVal="30" hint={vi ? "Các bản cũ hơn sẽ tự động xóa" : "Older backups are automatically deleted"} />
-              <SettingSelect label={vi ? "Nơi lưu bản sao" : "Backup Destination"} val={vi ? "Cục bộ + Cloud" : "Local + Cloud"} opts={vi ? ["Chỉ cục bộ", "Chỉ Cloud", "Cục bộ + Cloud"] : ["Local only", "Cloud only", "Local + Cloud"]} />
-              <div className="bg-slate-50 rounded-xl p-4 space-y-0">
-                <SettingToggle label={vi ? "Mã hóa bản sao lưu" : "Encrypt backups"} defaultChecked={true} />
-                <SettingToggle label={vi ? "Thông báo qua email khi hoàn tất" : "Email notification on completion"} defaultChecked />
-              </div>
-              <div className="flex gap-2">
-                <button className="flex-1 h-9 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
-                  {vi ? "Sao lưu ngay" : "Backup Now"}
-                </button>
-                <button className="h-9 px-4 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                  {vi ? "Khôi phục..." : "Restore..."}
-                </button>
-              </div>
-              <div className="border rounded-xl overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                <div className="bg-slate-50 px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider border-b" style={{ borderColor: "var(--border)" }}>
-                  {vi ? "Lịch sử sao lưu" : "Backup History"}
-                </div>
-                {[
-                  { date: "2026-08-04 02:00", size: "324 MB", status: vi ? "Thành công" : "Success" },
-                  { date: "2026-08-03 02:00", size: "321 MB", status: vi ? "Thành công" : "Success" },
-                  { date: "2026-08-02 02:00", size: "318 MB", status: vi ? "Thành công" : "Success" },
-                  { date: "2026-08-01 02:00", size: "315 MB", status: vi ? "Thành công" : "Success" },
-                ].map(b => (
-                  <div key={b.date} className="flex items-center justify-between px-3 py-2.5 border-b last:border-0 text-xs" style={{ borderColor: "var(--border)" }}>
-                    <span className="mono text-slate-600">{b.date}</span>
-                    <span className="text-slate-400">{b.size}</span>
-                    <span className="text-emerald-600 font-medium">{b.status}</span>
-                    <button className="text-[10px] text-blue-600 hover:underline">{vi ? "Khôi phục" : "Restore"}</button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
+    <div className="flex-1 overflow-auto p-6">
+      <div className="mx-auto max-w-2xl">
+        <div className="mb-4">
+          <h1 className="text-base font-semibold text-slate-900">{vi ? "Cài đặt công ty" : "Company Settings"}</h1>
+          <p className="mt-1 text-xs text-slate-500">
+            {vi ? "Thông tin này được dùng trên báo giá, chứng từ và file xuất." : "These details are used on quotations, documents, and exports."}
+          </p>
         </div>
+        <section className="space-y-4 rounded-2xl border bg-white p-5" style={{ borderColor: "var(--border)" }}>
+          {loadError && (
+            <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              {vi ? "Không tải được dữ liệu máy chủ; đang hiển thị bản lưu cục bộ: " : "Server settings could not be loaded; showing the local copy: "}{loadError}
+            </div>
+          )}
+          <SettingField label={vi ? "Tên công ty" : "Company Name"} value={company.name} onChange={value => updateCompany("name", value)} />
+          <SettingField label={vi ? "Người đại diện" : "Representative"} value={company.representative} onChange={value => updateCompany("representative", value)} />
+          <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} value={company.taxId} onChange={value => updateCompany("taxId", value)} />
+          <SettingField label={vi ? "Địa chỉ" : "Address"} value={company.address} onChange={value => updateCompany("address", value)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SettingField label={vi ? "Điện thoại" : "Phone"} value={company.phone} onChange={value => updateCompany("phone", value)} />
+            <SettingField label={vi ? "Email liên hệ" : "Contact Email"} value={company.email} onChange={value => updateCompany("email", value)} type="email" />
+          </div>
+          <SettingField label="Website" value={company.website} onChange={value => updateCompany("website", value)} />
+          <div className="rounded-xl border bg-slate-50 p-3 text-[11px] text-slate-500" style={{ borderColor: "var(--border)" }}>
+            {vi ? "Logo, SMTP, lưu trữ và sao lưu là cấu hình triển khai phía máy chủ, nên không hiển thị nút thao tác khi chưa có backend an toàn." : "Logo, SMTP, storage, and backups are server deployment settings and are not exposed without a secure backend."}
+          </div>
+          {can("Administration", "update") ? (
+            <SaveBtn label={t("saveSettings")} onSave={async () => {
+              if (!company.name.trim()) throw new Error(vi ? "Tên công ty là bắt buộc" : "Company name is required")
+              const result = await upsertCompanySettings(company, { isDemo, orgId: profile?.org_id })
+              if (result.error) throw new Error(result.error.message ?? (vi ? "Không thể lưu thông tin công ty lên máy chủ" : "Could not save company settings to server"))
+              saveCompanySettings(company, profile?.org_id)
+              setLoadError(null)
+            }} />
+          ) : (
+            <div className="text-xs text-slate-400">{vi ? "Bạn chỉ có quyền xem cài đặt." : "You have read-only access to settings."}</div>
+          )}
+        </section>
       </div>
     </div>
   )
@@ -2685,30 +2659,72 @@ export function Units() {
 // --- NEXT ---
 export function GoodsReceipt() {
   const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", po_no: "Sample po_no", warehouse: "Sample warehouse", status: "Sample status" }]);
+  const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
-    fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))) })
+    fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, date: item.created_at ? formatDateTimeUtc7(item.created_at) : "", doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))) })
   }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "nhập kho" : "goods receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","po_no","warehouse","status"]} templateFile="goodsreceipt" />;
+  return <GenericCrudList readOnly moduleName="Purchase" title={lang === "vi" ? "nhập kho" : "goods receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","po_no","warehouse","status"]} templateFile="goodsreceipt" />;
 }
 
 // --- NEXT ---
 export function PurchaseReturn() {
-  const { lang } = useLang();
-  const [data, setData] = useState([{ date: "Sample date", doc_no: "Sample doc_no", supplier: "Sample supplier", total: "Sample total", status: "Sample status" }]);
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "total", label: "TOTAL", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <GenericCrudList title={lang === "vi" ? "trả hàng NCC" : "purchase return"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","supplier","total","status"]} templateFile="purchasereturn" />;
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile, can } = useAuth()
+  const [data, setData] = useState<any[]>([])
+  const [receipts, setReceipts] = useState<any[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const reload = async () => {
+    const [returnResult, receiptResult] = await Promise.all([
+      fetchPurchaseReturns({ isDemo, orgId: profile?.org_id }),
+      fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }),
+    ])
+    if (returnResult.error ?? receiptResult.error) showAppToast((returnResult.error ?? receiptResult.error)?.message)
+    setData(returnResult.data ?? [])
+    setReceipts(receiptResult.data ?? [])
+  }
+  useEffect(() => { void reload() }, [isDemo, profile?.org_id])
+  const reverse = async (ref: string) => {
+    if (!await confirmAppAction(lang === "vi" ? `Đảo phiếu trả ${ref}?` : `Reverse return ${ref}?`, { destructive: true })) return
+    const result = await reversePurchaseReturn(ref, { isDemo, orgId: profile?.org_id })
+    if (result.error) return showAppToast(result.error.message ?? String(result.error))
+    await reload()
+  }
+  return <div className="flex h-full flex-col"><Toolbar onCreate={can("Purchase", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Tạo phiếu trả NCC" : "Create purchase return"} onRefresh={() => void reload()} onExportCsv={can("Purchase", "export") ? () => exportCsv("purchase-returns", ["DATE", "DOC_NO", "RECEIPT", "SUPPLIER", "TOTAL", "STATUS"], data.map(row => [row.created_at, row.ref, row.receipt_ref, row.supplier_name, (row.items ?? []).reduce((sum: number, item: any) => sum + Number(item.qty) * Number(item.unit_cost), 0), row.status])) : undefined} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{["DATE", "DOC_NO", lang === "vi" ? "PHIẾU NHẬP" : "RECEIPT", "SUPPLIER", "TOTAL", "STATUS", ""].map(header => <th key={header} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5">{formatDateTimeUtc7(row.created_at)}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.ref}</td><td className="px-4 py-2.5">{row.receipt_ref}</td><td className="px-4 py-2.5">{row.supplier_name}</td><td className="px-4 py-2.5 text-right font-semibold mono">{fmt((row.items ?? []).reduce((sum: number, item: any) => sum + Number(item.qty) * Number(item.unit_cost), 0))}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Purchase", "approve") && row.status !== "Reversed" && <button onClick={() => void reverse(row.ref)} className="h-7 rounded border px-2 text-[10px]">{lang === "vi" ? "Đảo phiếu" : "Reverse"}</button>}</td></tr>)}{!data.length && <tr><td colSpan={7} className="py-16 text-center text-slate-400">{lang === "vi" ? "Chưa có phiếu trả hàng" : "No purchase returns"}</td></tr>}</tbody></table></div>{showCreate && <PurchaseReturnModal receipts={receipts} onClose={() => setShowCreate(false)} onSaved={reload} />}</div>
+}
+
+function PurchaseReturnModal({ receipts, onClose, onSaved }: { receipts: any[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
+  const [form, setForm] = useState({ ref: `PR-${Date.now()}`, receipt_ref: "", reason: "" })
+  const [items, setItems] = useState<any[]>([])
+  const [saving, setSaving] = useState(false)
+  const chooseReceipt = (ref: string) => {
+    const receipt = receipts.find(row => row.ref === ref)
+    setForm(previous => ({ ...previous, receipt_ref: ref }))
+    setItems((receipt?.items_detail ?? []).map((item: any) => ({ ...item, qty: 0, max_qty: Number(item.qty ?? 0) })))
+  }
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const selectedItems = items.filter(item => Number(item.qty) > 0)
+    if (!selectedItems.length) return showAppToast(lang === "vi" ? "Vui lòng nhập số lượng trả" : "Enter a return quantity")
+    if (new Set(selectedItems.map(item => item.product_id)).size !== selectedItems.length) return showAppToast(lang === "vi" ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong phiếu trả" : "Each product may only appear once in a return")
+    setSaving(true)
+    const result = await createPurchaseReturn({ ...form, items: selectedItems, created_by: profile?.full_name || profile?.email }, { isDemo, orgId: profile?.org_id })
+    setSaving(false)
+    if (result.error) return showAppToast(result.error.message ?? String(result.error))
+    await onSaved()
+    onClose()
+  }
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex justify-between border-b px-5 py-3.5"><h2 className="text-sm font-semibold">{lang === "vi" ? "Tạo phiếu trả nhà cung cấp" : "Create purchase return"}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="max-h-[70vh] space-y-4 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu nhập nguồn" : "Source receipt"}<select required value={form.receipt_ref} onChange={event => chooseReceipt(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs"><option value="">--</option>{receipts.map(receipt => <option key={receipt.id} value={receipt.ref}>{receipt.ref} · {receipt.supplier_name}</option>)}</select></label><label className="col-span-2 text-[11px] font-medium">{lang === "vi" ? "Lý do" : "Reason"}<input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" /></label></div><div className="overflow-hidden rounded-xl border"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[lang === "vi" ? "Sản phẩm" : "Product", "SKU", lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Trả lần này" : "Return now"].map(header => <th key={header} className="px-3 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{items.map((item, index) => <tr key={item.id} className="border-b"><td className="px-3 py-2 font-medium">{item.product_name}</td><td className="px-3 py-2 mono">{item.sku}</td><td className="px-3 py-2 mono">{item.max_qty}</td><td className="px-3 py-2"><input min="0" max={item.max_qty} step="0.01" type="number" value={item.qty} onChange={event => setItems(previous => previous.map((row, rowIndex) => rowIndex === index ? { ...row, qty: Number(event.target.value) } : row))} className="h-8 w-28 rounded border px-2 text-right" /></td></tr>)}</tbody></table></div></div><div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5"><button type="button" onClick={onClose} className="h-8 rounded-lg border px-4 text-xs">{lang === "vi" ? "Hủy" : "Cancel"}</button><button disabled={saving} className="h-8 rounded-lg bg-blue-600 px-4 text-xs text-white">{saving ? (lang === "vi" ? "Đang lưu..." : "Saving...") : (lang === "vi" ? "Xác nhận trả" : "Confirm return")}</button></div></form></div>
 }
 
 // --- NEXT ---
@@ -2717,18 +2733,40 @@ export function SupplierPayment() {
 }
 
 function FinanceTransactionList({ transactionType }: { transactionType: "CUSTOMER_RECEIPT" | "SUPPLIER_PAYMENT" }) {
-  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile, permissions } = useAuth(); const [data, setData] = useState<any[]>([]); const [showCreate, setShowCreate] = useState(false)
+  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile, can } = useAuth(); const [data, setData] = useState<any[]>([]); const [showCreate, setShowCreate] = useState(false)
   const reload = async () => { const result = await fetchFinanceTransactions({ isDemo, orgId: profile?.org_id }); if (result.data) setData(result.data.filter(row => row.transaction_type === transactionType)) }
   useEffect(() => { reload() }, [isDemo, profile])
   const isReceipt = transactionType === "CUSTOMER_RECEIPT"
-  const canCreate = isDemo || Boolean(permissions["Finance:create"])
-  return <div className="flex flex-col h-full"><Toolbar onCreate={canCreate ? () => setShowCreate(true) : undefined} createLabel={isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền" : "Record receipt") : (lang === "vi" ? "Ghi nhận thanh toán" : "Record payment")} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", isReceipt ? "CUSTOMER" : "SUPPLIER", "SOURCE", "AMOUNT", "METHOD"].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.ref} className="border-b"><td className="px-4 py-2.5">{row.created_at ? formatDateTimeUtc7(row.created_at) : ""}</td><td className="px-4 py-2.5 font-medium">{row.ref}</td><td className="px-4 py-2.5">{isReceipt ? row.customer_name : row.supplier_name}</td><td className="px-4 py-2.5">{row.source_ref ?? "-"}</td><td className="px-4 py-2.5 font-semibold">{fmt(Number(row.amount ?? 0))}</td><td className="px-4 py-2.5">{row.method}</td></tr>)}</tbody></table></div>{showCreate && <FinanceTransactionModal transactionType={transactionType} onClose={() => setShowCreate(false)} onSaved={reload} />}</div>
+  return <div className="flex flex-col h-full"><Toolbar onCreate={can("Finance", "create") ? () => setShowCreate(true) : undefined} onRefresh={() => void reload()} createLabel={isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền" : "Record receipt") : (lang === "vi" ? "Ghi nhận thanh toán" : "Record payment")} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", isReceipt ? "CUSTOMER" : "SUPPLIER", "SOURCE", "AMOUNT", "METHOD"].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.ref} className="border-b"><td className="px-4 py-2.5">{row.created_at ? formatDateTimeUtc7(row.created_at) : ""}</td><td className="px-4 py-2.5 font-medium">{row.ref}</td><td className="px-4 py-2.5">{isReceipt ? row.customer_name : row.supplier_name}</td><td className="px-4 py-2.5">{row.source_ref ?? "-"}</td><td className="px-4 py-2.5 font-semibold">{fmt(Number(row.amount ?? 0))}</td><td className="px-4 py-2.5">{row.method}</td></tr>)}</tbody></table></div>{showCreate && <FinanceTransactionModal transactionType={transactionType} onClose={() => setShowCreate(false)} onSaved={reload} />}</div>
 }
 
 function FinanceTransactionModal({ transactionType, onClose, onSaved }: { transactionType: "CUSTOMER_RECEIPT" | "SUPPLIER_PAYMENT"; onClose: () => void; onSaved: () => Promise<void> }) {
-  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile } = useAuth(); const [form, setForm] = useState({ ref: "", source_ref: "", party: "", amount: "", method: "Cash", description: "" }); const [saving, setSaving] = useState(false); const isReceipt = transactionType === "CUSTOMER_RECEIPT"
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); const result = await recordFinanceTransaction({ ref: form.ref, source_ref: form.source_ref, amount: form.amount, method: form.method, description: form.description, ...(isReceipt ? { customer_name: form.party } : { supplier_name: form.party }), transaction_type: transactionType }, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return alert(result.error.message ?? String(result.error)); await onSaved(); onClose() }
-  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"><div className="flex justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền khách hàng" : "Record customer receipt") : (lang === "vi" ? "Ghi nhận thanh toán nhà cung cấp" : "Record supplier payment")}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">{isReceipt ? "Customer" : "Supplier"}<input required value={form.party} onChange={event => setForm({ ...form, party: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Source reference<input value={form.source_ref} onChange={event => setForm({ ...form, source_ref: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Amount<input required min="1" type="number" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Method<select value={form.method} onChange={event => setForm({ ...form, method: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs"><option>Cash</option><option>Bank transfer</option><option>Card</option></select></label><label className="text-[11px] font-medium">Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} className="mt-1 w-full h-8 rounded-lg border px-2 text-xs" /></label></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
+  const isReceipt = transactionType === "CUSTOMER_RECEIPT"
+  const [sources, setSources] = useState<any[]>([])
+  const [form, setForm] = useState({ ref: `${isReceipt ? "RCPT" : "PAY"}-${Date.now()}`, source_ref: "", party: "", party_id: "", amount: "", max_amount: 0, method: "Cash", description: "" })
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    const request = isReceipt ? fetchInvoices({ isDemo, orgId: profile?.org_id }) : fetchPurchaseOrders({ isDemo, orgId: profile?.org_id })
+    request.then(result => setSources((result.data ?? []).filter((row: any) => Number(row.outstanding_amount ?? Number(row.total ?? 0) - Number(row.paid_amount ?? 0)) > 0 && (isReceipt || ["Approved", "Receiving", "Completed"].includes(row.status)))))
+  }, [isDemo, profile?.org_id, isReceipt])
+  const chooseSource = (ref: string) => {
+    const source = sources.find(row => row.ref === ref)
+    const outstanding = Number(source?.outstanding_amount ?? Number(source?.total ?? 0) - Number(source?.paid_amount ?? 0))
+    setForm(previous => ({ ...previous, source_ref: ref, party: isReceipt ? source?.customer_name ?? "" : source?.supplier_name ?? "", party_id: isReceipt ? source?.customer_id ?? "" : source?.supplier_id ?? "", amount: String(outstanding), max_amount: outstanding }))
+  }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    const result = await recordFinanceTransaction({ ref: form.ref, source_ref: form.source_ref, amount: form.amount, method: form.method, description: form.description, ...(isReceipt ? { customer_id: form.party_id || null, customer_name: form.party } : { supplier_id: form.party_id || null, supplier_name: form.party }), transaction_type: transactionType, created_by: profile?.full_name || profile?.email }, { isDemo, orgId: profile?.org_id })
+    setSaving(false)
+    if (result.error) return showAppToast(result.error.message ?? String(result.error))
+    await onSaved()
+    onClose()
+  }
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex justify-between border-b px-5 py-3.5"><h2 className="text-sm font-semibold">{isReceipt ? (lang === "vi" ? "Ghi nhận thu tiền khách hàng" : "Record customer receipt") : (lang === "vi" ? "Ghi nhận thanh toán nhà cung cấp" : "Record supplier payment")}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="grid grid-cols-2 gap-3 p-5"><label className="text-[11px] font-medium">Reference<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">{isReceipt ? (lang === "vi" ? "Hóa đơn" : "Invoice") : "PO"}<select required value={form.source_ref} onChange={event => chooseSource(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs"><option value="">-- {lang === "vi" ? "Chọn chứng từ" : "Select source"} --</option>{sources.map(source => <option key={source.ref} value={source.ref}>{source.ref} · {isReceipt ? source.customer_name : source.supplier_name} · {fmt(Number(source.outstanding_amount ?? Number(source.total) - Number(source.paid_amount)))}</option>)}</select></label><label className="text-[11px] font-medium">{isReceipt ? "Customer" : "Supplier"}<input readOnly value={form.party} className="mt-1 h-8 w-full rounded-lg border bg-slate-50 px-2 text-xs" /></label><label className="text-[11px] font-medium">Amount<input required min="1" max={form.max_amount || undefined} type="number" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" /></label><label className="text-[11px] font-medium">Method<select value={form.method} onChange={event => setForm({ ...form, method: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs"><option>Cash</option><option>Bank transfer</option><option>Card</option></select></label><label className="text-[11px] font-medium">Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" /></label></div><div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5"><button type="button" onClick={onClose} className="h-8 rounded-lg border px-4 text-xs">{lang === "vi" ? "Hủy" : "Cancel"}</button><button disabled={saving || !form.source_ref} className="h-8 rounded-lg bg-blue-600 px-4 text-xs text-white disabled:opacity-50">{saving ? (lang === "vi" ? "Đang lưu..." : "Saving...") : (lang === "vi" ? "Lưu" : "Save")}</button></div></form></div>
 }
 
 // --- NEXT ---
@@ -2736,7 +2774,7 @@ export function InventoryTransfer() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const reload = async () => { const res = await fetchInventoryTransfers({ isDemo, orgId: profile?.org_id }); if (res.data) setData(res.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.doc_no ?? row.ref ?? "", from: row.from_warehouse_name ?? row.from_warehouse ?? "", to: row.to_warehouse_name ?? row.to_warehouse ?? "" }))) }
   useEffect(() => {
@@ -2747,56 +2785,101 @@ export function InventoryTransfer() {
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "from", label: "FROM", isStatus: false }, { key: "to", label: "TO", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  const reverse = async (ref: string) => { const result = await reverseInventoryTransfer(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
-  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo chuyển kho" : "Create transfer"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "FROM", "TO", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.from}</td><td className="px-4 py-2.5">{row.to}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button></td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="transfer" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
+  const reverse = async (ref: string) => { const result = await reverseInventoryTransfer(ref, { isDemo, orgId: profile?.org_id }); if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload() }
+  return <div className="flex flex-col h-full"><Toolbar onCreate={can("Inventory", "create") ? () => setShowCreate(true) : undefined} onRefresh={() => void reload()} createLabel={lang === "vi" ? "Tạo chuyển kho" : "Create transfer"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{["DATE", "DOC_NO", "FROM", "TO", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.doc_no} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5">{row.doc_no}</td><td className="px-4 py-2.5">{row.from}</td><td className="px-4 py-2.5">{row.to}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Inventory", "approve") && <button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">Reverse</button>}</td></tr>)}</tbody></table></div>{showCreate && <InventoryMovementModal mode="transfer" onClose={() => setShowCreate(false)} onSaved={reload} />}</div>;
 }
 
 // --- NEXT ---
 export function DeliveryNotes() {
-  const { lang } = useLang();
-  const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  const [salesOrders, setSalesOrders] = useState<any[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showReturn, setShowReturn] = useState(false);
-  useEffect(() => {
-    reload()
-  }, [isDemo, profile]);
+  const { lang } = useLang()
+  const [data, setData] = useState<any[]>([])
+  const [returns, setReturns] = useState<any[]>([])
+  const { isDemo } = useDemo()
+  const { profile, can } = useAuth()
+  const [salesOrders, setSalesOrders] = useState<any[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [returnDeliveryRef, setReturnDeliveryRef] = useState<string | null>(null)
+  const [error, setError] = useState("")
   const reload = async () => {
-    const [deliveryResult, orderResult] = await Promise.all([fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }), fetchSalesOrders({ isDemo, orgId: profile?.org_id })])
-    if (deliveryResult.data) setData(deliveryResult.data.map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref ?? "", so_no: row.sales_order_ref ?? "", customer: row.customer_name ?? "" })))
-    if (orderResult.data) setSalesOrders(orderResult.data)
+    const [deliveryResult, orderResult, returnResult] = await Promise.all([
+      fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }),
+      fetchSalesOrders({ isDemo, orgId: profile?.org_id }),
+      fetchSalesReturns({ isDemo, orgId: profile?.org_id }),
+    ])
+    setData((deliveryResult.data ?? []).map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref ?? "", so_no: row.sales_order_ref ?? "", customer: row.customer_name ?? "" })))
+    setSalesOrders(orderResult.data ?? [])
+    setReturns(returnResult.data ?? [])
+    const firstError = deliveryResult.error ?? orderResult.error ?? returnResult.error
+    setError(firstError ? firstError.message ?? String(firstError) : "")
   }
-  const reverse = async (ref: string) => { const result = await reverseDeliveryNote(ref, { isDemo, orgId: profile?.org_id }); if (result.error) alert(result.error.message ?? String(result.error)); else await reload() }
-  const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "so_no", label: "SO_NO", isStatus: false }, { key: "customer", label: "CUSTOMER", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
-  ];
-  return <div className="flex flex-col h-full"><Toolbar onCreate={() => setShowCreate(true)} createLabel={lang === "vi" ? "Tạo phiếu giao" : "Create delivery"} /><div className="flex-1 overflow-auto"><table className="w-full text-xs border-collapse min-w-[900px]"><thead><tr className="bg-slate-50 border-b">{["DATE", "DOC_NO", "SO_NO", "CUSTOMER", "STATUS", "INVOICE", ""].map(head => <th key={head} className="px-4 py-2.5 text-left font-semibold text-slate-500 text-[10px]">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.ref} className="border-b hover:bg-slate-50/60"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium">{row.doc_no}</td><td className="px-4 py-2.5">{row.so_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5 text-blue-600">{row.invoice_ref ?? "-"}</td><td className="px-4 py-2.5 flex gap-1"><button disabled={row.status === "Reversed"} onClick={() => reverse(row.ref)} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">{lang === "vi" ? "Đảo" : "Reverse"}</button><button disabled={row.status === "Reversed"} onClick={() => { setShowReturn(true); }} className="h-7 px-2 rounded border text-[10px] disabled:opacity-40">{lang === "vi" ? "Trả" : "Return"}</button></td></tr>)}</tbody></table></div>{showCreate && <SalesDocumentModal kind="delivery" salesOrders={salesOrders} deliveries={data} onClose={() => setShowCreate(false)} onSaved={reload} />}{showReturn && <SalesDocumentModal kind="return" salesOrders={salesOrders} deliveries={data} onClose={() => setShowReturn(false)} onSaved={reload} />}</div>;
+  useEffect(() => { void reload() }, [isDemo, profile?.org_id])
+  const reverseDelivery = async (ref: string) => {
+    const result = await reverseDeliveryNote(ref, { isDemo, orgId: profile?.org_id })
+    if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload()
+  }
+  const reverseReturn = async (ref: string) => {
+    const result = await reverseSalesReturn(ref, { isDemo, orgId: profile?.org_id })
+    if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload()
+  }
+  return (
+    <div className="flex h-full flex-col">
+      <Toolbar onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined} onRefresh={() => void reload()} createLabel={lang === "vi" ? "Tạo phiếu giao" : "Create delivery"} />
+      {error && <div className="border-b border-red-200 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</div>}
+      <div className="flex-1 overflow-auto">
+        <div className="border-b bg-slate-50 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{lang === "vi" ? "Phiếu giao hàng" : "Delivery notes"}</div>
+        <table className="w-full min-w-[900px] border-collapse text-xs">
+          <thead><tr className="border-b bg-slate-50">{["DATE", "DOC_NO", "SO_NO", "CUSTOMER", "STATUS", "INVOICE", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500">{head}</th>)}</tr></thead>
+          <tbody>
+            {data.map(row => <tr key={row.ref} className="border-b hover:bg-slate-50/60"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium">{row.doc_no}</td><td className="px-4 py-2.5">{row.so_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5 text-blue-600">{row.invoice_ref ?? "-"}</td><td className="flex gap-1 px-4 py-2.5">{can("Sales", "approve") && <button disabled={row.status === "Reversed"} onClick={() => void reverseDelivery(row.ref)} className="h-7 rounded border px-2 text-[10px] disabled:opacity-40">{lang === "vi" ? "Đảo" : "Reverse"}</button>}{can("Sales", "create") && <button disabled={row.status === "Reversed"} onClick={() => setReturnDeliveryRef(row.ref)} className="h-7 rounded border px-2 text-[10px] disabled:opacity-40">{lang === "vi" ? "Trả" : "Return"}</button>}</td></tr>)}
+            {!data.length && <tr><td colSpan={7} className="py-12 text-center text-slate-400">{lang === "vi" ? "Chưa có phiếu giao" : "No delivery notes"}</td></tr>}
+          </tbody>
+        </table>
+        <div className="border-y bg-slate-50 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{lang === "vi" ? "Phiếu khách trả hàng" : "Sales returns"}</div>
+        <table className="w-full min-w-[900px] border-collapse text-xs">
+          <thead><tr className="border-b bg-slate-50">{["DATE", "DOC_NO", "DELIVERY", "CUSTOMER", "QTY", "STATUS", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500">{head}</th>)}</tr></thead>
+          <tbody>
+            {returns.map(row => <tr key={row.ref} className="border-b hover:bg-slate-50/60"><td className="px-4 py-2.5">{row.created_at ? formatDateTimeUtc7(row.created_at) : ""}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.ref}</td><td className="px-4 py-2.5">{row.delivery_ref}</td><td className="px-4 py-2.5">{row.customer_name}</td><td className="px-4 py-2.5 mono">{(row.items ?? []).reduce((sum: number, item: any) => sum + Number(item.qty ?? 0), 0)}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Sales", "approve") && row.status !== "Reversed" && <button onClick={() => void reverseReturn(row.ref)} className="h-7 rounded border px-2 text-[10px]">{lang === "vi" ? "Đảo phiếu" : "Reverse"}</button>}</td></tr>)}
+            {!returns.length && <tr><td colSpan={7} className="py-12 text-center text-slate-400">{lang === "vi" ? "Chưa có phiếu trả hàng" : "No sales returns"}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {showCreate && <SalesDocumentModal kind="delivery" salesOrders={salesOrders} deliveries={data} onClose={() => setShowCreate(false)} onSaved={reload} />}
+      {returnDeliveryRef && <SalesDocumentModal kind="return" salesOrders={salesOrders} deliveries={data} initialDeliveryRef={returnDeliveryRef} onClose={() => setReturnDeliveryRef(null)} onSaved={reload} />}
+    </div>
+  )
 }
 
 // --- NEXT ---
 export function Invoices() {
   const { lang } = useLang()
-  const { isDemo } = useDemo(); const { profile } = useAuth(); const [invoices, setInvoices] = useState<any[]>([])
-  useEffect(() => { fetchInvoices({ isDemo, orgId: profile?.org_id }).then(result => { if (result.data) setInvoices(result.data.map((row: any) => ({ ...row, id: row.ref, so: row.so_ref ?? "", customer: row.customer_name, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "" }))) }) }, [isDemo, profile])
+  const { isDemo } = useDemo(); const { profile, can } = useAuth(); const [invoices, setInvoices] = useState<any[]>([])
+  const [error, setError] = useState("")
+  const reload = async () => {
+    const result = await fetchInvoices({ isDemo, orgId: profile?.org_id })
+    setInvoices((result.data ?? []).map((row: any) => ({ ...row, id: row.ref, so: row.so_ref ?? "", customer: row.customer_name, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "" })))
+    setError(result.error ? result.error.message ?? String(result.error) : "")
+  }
+  useEffect(() => { void reload() }, [isDemo, profile?.org_id])
   const heads = lang === "vi"
     ? ["Số HĐ", "Đơn bán", "Khách hàng", "Tiền hàng", "Thuế", "Tổng TT", "Trạng thái", "Ngày HĐ", ""]
     : ["Invoice #", "SO", "Customer", "Amount", "Tax", "Total", "Status", "Date", ""]
-  const totalRevenue = invoices.reduce((a, b) => a + b.total, 0)
+  const totalRevenue = invoices.reduce((sum, row) => sum + Number(row.total ?? 0), 0)
+  const totalPaid = invoices.reduce((sum, row) => sum + Number(row.paid_amount ?? 0), 0)
+  const totalOutstanding = invoices.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(0, Number(row.total ?? 0) - Number(row.paid_amount ?? 0))), 0)
+  const totalOverdue = invoices.filter(row => row.status === "Overdue").reduce((sum, row) => sum + Number(row.outstanding_amount ?? 0), 0)
   return (
     <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Tạo hóa đơn" : "Create Invoice"}
-        onPrint={() => printTable("invoices", heads.slice(0, -1), invoices.map(inv => [inv.id, inv.so, inv.customer, inv.amount, inv.tax, inv.total, inv.status, inv.date]))}
+      <Toolbar
+        onRefresh={() => void reload()}
+        onPrint={can("Sales", "export") ? () => printTable("invoices", heads.slice(0, -1), invoices.map(inv => [inv.id, inv.so, inv.customer, inv.amount, inv.tax, inv.total, inv.status, inv.date])) : undefined}
       />
+      {error && <div className="border-b border-red-200 bg-red-50 px-5 py-2 text-xs text-red-700">{error}</div>}
       <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
         {[
           { l: lang === "vi" ? "Tổng doanh thu" : "Total Revenue", v: fmt(totalRevenue), c: "text-blue-700" },
-          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(invoices.filter(i => i.status === "Paid").reduce((a, b) => a + b.total, 0)), c: "text-emerald-600" },
-          { l: lang === "vi" ? "Còn nợ" : "Outstanding", v: fmt(invoices.filter(i => i.status !== "Paid" && i.status !== "Draft").reduce((a, b) => a + b.total, 0)), c: "text-amber-600" },
-          { l: lang === "vi" ? "Quá hạn" : "Overdue", v: fmt(invoices.filter(i => i.status === "Overdue").reduce((a, b) => a + b.total, 0)), c: "text-red-600" },
+          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(totalPaid), c: "text-emerald-600" },
+          { l: lang === "vi" ? "Còn nợ" : "Outstanding", v: fmt(totalOutstanding), c: "text-amber-600" },
+          { l: lang === "vi" ? "Quá hạn" : "Overdue", v: fmt(totalOverdue), c: "text-red-600" },
         ].map(c => (
           <div key={c.l} className="bg-slate-50 rounded-xl p-3">
             <div className="text-[10px] text-slate-400">{c.l}</div>
@@ -2840,60 +2923,7 @@ export function CustomerReceipts() {
 
 // --- NEXT ---
 export function Payables() {
-  const { lang } = useLang()
-  const data = [
-    { ref: "PO-202608-000002", supplier: "Samsung Vietnam", date: "2026-08-02", due: "2026-09-01", amount: 392000000, paid: 0, remaining: 392000000, status: "Partial" },
-    { ref: "PO-202608-000004", supplier: "Apple Vietnam", date: "2026-08-03", due: "2026-09-02", amount: 2250000000, paid: 0, remaining: 2250000000, status: "Partial" },
-    { ref: "PO-202607-000044", supplier: "WD Technologies", date: "2026-07-25", due: "2026-08-24", amount: 140000000, paid: 140000000, remaining: 0, status: "Paid" },
-  ]
-  const totalRemaining = data.reduce((a, b) => a + b.remaining, 0)
-  const heads = lang === "vi"
-    ? ["Số ĐM", "Nhà cung cấp", "Ngày ĐM", "Ngày đến hạn", "Số tiền", "Đã trả", "Còn lại", "Trạng thái", ""]
-    : ["PO", "Supplier", "PO Date", "Due Date", "Amount", "Paid", "Remaining", "Status", ""]
-  return (
-    <div className="flex flex-col h-full">
-      <Toolbar onCreate={() => {}} createLabel={lang === "vi" ? "Ghi nhận trả tiền" : "Record Payment"}
-        onPrint={() => printTable("payables", heads.slice(0, -1), data.map(r => [r.ref, r.supplier, r.date, r.due, r.amount, r.paid, r.remaining, r.status]))}
-      />
-      <div className="grid grid-cols-3 gap-3 px-5 py-3 bg-white border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
-        {[
-          { l: lang === "vi" ? "Tổng phải trả" : "Total Payable", v: fmt(data.reduce((a, b) => a + b.amount, 0)), c: "text-slate-900" },
-          { l: lang === "vi" ? "Đã thanh toán" : "Paid", v: fmt(data.reduce((a, b) => a + b.paid, 0)), c: "text-emerald-600" },
-          { l: lang === "vi" ? "Còn lại" : "Outstanding", v: fmt(totalRemaining), c: "text-red-600" },
-        ].map(c => (
-          <div key={c.l} className="bg-slate-50 rounded-xl p-3">
-            <div className="text-[10px] text-slate-400">{c.l}</div>
-            <div className={`text-sm font-bold mono mt-0.5 ${c.c}`}>{c.v}</div>
-          </div>
-        ))}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse min-w-[950px]">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
-              {heads.map(h => <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 uppercase tracking-wider text-[10px] whitespace-nowrap">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map(r => (
-              <tr key={r.ref} className="border-b hover:bg-slate-50/60 cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                <td className="px-4 py-2.5 mono text-blue-600 font-medium">{r.ref}</td>
-                <td className="px-4 py-2.5 font-medium text-slate-800">{r.supplier}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.date}</td>
-                <td className="px-4 py-2.5 mono text-slate-400">{r.due}</td>
-                <td className="px-4 py-2.5 mono font-semibold text-right">{fmt(r.amount)}</td>
-                <td className="px-4 py-2.5 mono text-right text-emerald-600">{fmt(r.paid)}</td>
-                <td className="px-4 py-2.5 mono text-right font-bold text-red-600">{fmt(r.remaining)}</td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-                <td className="px-4 py-2.5"><button className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"><MoreHorizontal size={14} /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <Pager count={data.length} total={data.length} label={lang === "vi" ? "khoản phải trả" : "payables"} />
-    </div>
-  )
+  return <OutstandingDocuments type="payable" />
 }
 
 // --- NEXT ---
@@ -2907,7 +2937,7 @@ export function CashBook() {
   ] : [
     { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "type", label: "TYPE", isStatus: false }, { key: "amount", label: "AMOUNT", isStatus: false }, { key: "balance", label: "BALANCE", isStatus: false }
   ];
-  return <GenericCrudList title={lang === "vi" ? "sổ quỹ" : "cash book"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","type","amount","balance"]} templateFile="cashbook" />;
+  return <GenericCrudList readOnly moduleName="Finance" title={lang === "vi" ? "sổ quỹ" : "cash book"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","type","amount","balance"]} templateFile="cashbook" />;
 }
 
 // --- NEXT ---

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Plus, Search, FileSpreadsheet, Download, ChevronLeft, ChevronRight, Check, X, FileText, Save, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
+import { Plus, Search, FileSpreadsheet, Download, Check, X, FileText, Save, Info, ExternalLink, Edit, Trash2, Send, Ban } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { useLang } from "../i18n/LangContext"
 import { quotations as mockQuotations, products, suppliers } from "../data/mockData"
@@ -8,12 +8,9 @@ import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
 import { fetchQuotations, upsertQuotation, deleteQuotation, fetchProducts, fetchSuppliers, fetchCustomers, fetchWarehouses, fetchLatestImport, receiveQuotation } from "../lib/dataService"
 import { defaultCompanySettings, loadCompanySettings } from "../lib/companySettings"
-import * as XLSX from "xlsx-js-style"
-import ExcelJS from "exceljs"
-import jsPDF from "jspdf"
-import html2canvas from "html2canvas"
 import logoUrl from "../data/logo.png"
-import { formatDateTimeUtc7 } from "../lib/dateUtils"
+import { formatDateKeyUtc7, formatDateTimeUtc7 } from "../lib/dateUtils"
+import { confirmAppAction, showAppToast } from "../lib/appEvents"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -21,80 +18,8 @@ function quotationFileName(quotationId: string | undefined, extension: string) {
   return `quotation-${quotationId || "new"}.${extension}`
 }
 
-function exportQuotationExcelLegacy(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
-  const labels = vi
-    ? ["BÁO GIÁ", "Mã báo giá", "Khách hàng", "Ngày lập", "Hiệu lực đến", "Ghi chú", "Sản phẩm", "Nhà cung cấp", "Đơn vị", "Số lượng", "Đơn giá", "VAT %", "Thành tiền", "Cộng tiền hàng", "Chiết khấu", "Tiền trước VAT", "Tổng VAT", "Tổng thanh toán"]
-    : ["QUOTATION", "Quotation ID", "Customer", "Date", "Valid until", "Notes", "Product", "Supplier", "Unit", "Quantity", "Unit price", "VAT %", "Amount", "Subtotal", "Discount", "Before VAT", "Total VAT", "Grand total"]
-  const rows: any[][] = [
-    [labels[0]],
-    ["CÔNG TY", data.company.name],
-    ["Người đại diện", data.company.representative],
-    ["MST", data.company.taxId],
-    ["Địa chỉ", data.company.address],
-    ["Điện thoại", data.company.phone],
-    [],
-    [labels[1], data.id || ""],
-    ["THÔNG TIN KHÁCH HÀNG"],
-    ["Tên khách hàng", data.customer.name],
-    ["Người đại diện", data.customer.representative || ""],
-    ["Địa chỉ", data.customer.address || ""],
-    ["Điện thoại", data.customer.phone || ""],
-    ["Email", data.customer.email || ""],
-    ["MST", data.customer.tax_code || ""],
-    [labels[3], data.date],
-    [labels[4], data.validUntil],
-    [labels[5], data.notes],
-    [],
-    [labels[6], labels[7], labels[8], labels[9], labels[10], labels[11], labels[12]],
-    ...data.items.map(item => [item.productName || item.product_id, item.supplierName || item.supplier_id, item.sell_unit, item.qty, item.selling_price, item.vat_pct, item.total]),
-    [],
-    [labels[13], data.subtotal],
-    [labels[14], data.discountAmount],
-    [labels[15], data.totalBeforeVat],
-    [labels[16], data.totalVat],
-    [labels[17], data.finalTotal],
-  ]
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  ws["!merges"] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-    { s: { r: 8, c: 0 }, e: { r: 8, c: 6 } },
-    ...[1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(row => ({ s: { r: row, c: 1 }, e: { r: row, c: 6 } })),
-  ]
-  ws["!cols"] = [{ wch: 30 }, { wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 18 }]
-  ws["!rows"] = rows.map((_, row) => ({ hpt: row === 0 || row === 8 ? 26 : row === 19 ? 22 : 19 }))
-  ws["!freeze"] = { xSplit: 0, ySplit: 20 }
-  const border = { top: { style: "thin", color: { rgb: "D1D5DB" } }, bottom: { style: "thin", color: { rgb: "D1D5DB" } }, left: { style: "thin", color: { rgb: "D1D5DB" } }, right: { style: "thin", color: { rgb: "D1D5DB" } } }
-  const setCellStyle = (row: number, column: number, style: any) => {
-    const address = XLSX.utils.encode_cell({ r: row, c: column })
-    if (!ws[address]) ws[address] = { t: "s", v: "" }
-    ws[address].s = style
-  }
-  setCellStyle(0, 0, { font: { bold: true, sz: 18, color: { rgb: "1D4ED8" } }, alignment: { horizontal: "center", vertical: "center" } })
-  setCellStyle(8, 0, { font: { bold: true, sz: 12, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1D4ED8" } }, alignment: { horizontal: "center", vertical: "center" }, border })
-  for (const row of [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
-    for (let column = 0; column < 7; column++) {
-      setCellStyle(row, column, { border, alignment: { wrapText: true, vertical: "center", horizontal: column === 0 ? "left" : "left" } })
-    }
-    setCellStyle(row, 0, { font: { bold: true, color: { rgb: "475569" } }, fill: { fgColor: { rgb: "F8FAFC" } }, border, alignment: { vertical: "center" } })
-  }
-  const headerRow = 19
-  for (let column = 0; column < 7; column++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: column })]
-    if (cell) cell.s = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "2563EB" } }, alignment: { horizontal: "center", vertical: "center", wrapText: true }, border }
-  }
-  for (let row = 20; row < 20 + data.items.length; row++) {
-    for (let column = 0; column < 7; column++) setCellStyle(row, column, { border, alignment: { vertical: "center", horizontal: column >= 3 ? "right" : "left" }, numFmt: column >= 4 && column !== 5 ? "#,##0" : undefined })
-  }
-  for (let row = 21 + data.items.length; row < rows.length; row++) {
-    setCellStyle(row, 0, { font: { bold: row === rows.length - 1, color: { rgb: row === rows.length - 1 ? "1D4ED8" : "475569" } }, alignment: { horizontal: "right" } })
-    setCellStyle(row, 1, { font: { bold: true, color: { rgb: row === rows.length - 1 ? "1D4ED8" : "0F172A" } }, alignment: { horizontal: "right" }, numFmt: "#,##0" })
-  }
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, ws, "Quotation")
-  XLSX.writeFile(workbook, quotationFileName(data.id, "xlsx"), { cellStyles: true })
-}
-
 async function exportQuotationExcel(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
+  const { default: ExcelJS } = await import("exceljs")
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet(vi ? "Báo giá" : "Quotation", { views: [{ state: "frozen", ySplit: 20 }] })
   sheet.columns = [{ width: 28 }, { width: 24 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 12 }, { width: 18 }]
@@ -164,6 +89,7 @@ async function exportQuotationExcel(data: { id?: string; company: typeof default
 }
 
 async function exportQuotationPdf(data: { id?: string; company: typeof defaultCompanySettings; customer: any; date: string; validUntil: string; notes: string; items: any[]; subtotal: number; discountAmount: number; totalBeforeVat: number; totalVat: number; finalTotal: number }, vi: boolean) {
+  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")])
   const labels = vi ? { title: "BÁO GIÁ", id: "Mã báo giá", customer: "Khách hàng", date: "Ngày lập", valid: "Hiệu lực đến", product: "Sản phẩm", unit: "Đơn vị", qty: "Số lượng", price: "Đơn giá", vat: "VAT %", amount: "Thành tiền", subtotal: "Cộng tiền hàng", discount: "Chiết khấu", beforeVat: "Tiền trước VAT", totalVat: "Tổng VAT", total: "Tổng thanh toán" } : { title: "QUOTATION", id: "Quotation ID", customer: "Customer", date: "Date", valid: "Valid until", product: "Product", unit: "Unit", qty: "Quantity", price: "Unit price", vat: "VAT %", amount: "Amount", subtotal: "Subtotal", discount: "Discount", beforeVat: "Before VAT", totalVat: "Total VAT", total: "Grand total" }
   const escape = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character] || character))
   const itemRows = data.items.map(item => `<tr><td>${escape(item.productName || item.product_id)}</td><td>${escape(item.sell_unit)}</td><td class="number">${item.qty}</td><td class="number">${fmt(item.selling_price)}</td><td class="number">${item.vat_pct}%</td><td class="number">${fmt(item.total)}</td></tr>`).join("")
@@ -203,11 +129,11 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
   }
 }
 
-function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], supplierOptions = [], customerOptions = [], warehouseOptions = [] }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: Array<{value: string, label: string}>, supplierOptions?: Array<{value: string, label: string}>, customerOptions?: Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>, warehouseOptions?: Array<{value: string, label: string}> }) {
+function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], supplierOptions = [], customerOptions = [], warehouseOptions = [], canExport = true }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: Array<{value: string, label: string}>, supplierOptions?: Array<{value: string, label: string}>, customerOptions?: Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>, warehouseOptions?: Array<{value: string, label: string}>, canExport?: boolean }) {
   const { profile } = useAuth()
   const { isDemo } = useDemo()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
-  const [date, setDate] = useState(initialData?.date || new Date().toISOString().split("T")[0])
+  const [date, setDate] = useState(initialData?.date || formatDateKeyUtc7())
   const [validUntil, setValidUntil] = useState(initialData?.valid_until || "")
   const [globalDiscount, setGlobalDiscount] = useState(initialData?.discount_val || 0)
   const [discountType, setDiscountType] = useState<"pct" | "amount">(initialData?.discount_type || "pct")
@@ -339,14 +265,16 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   }
   
   const validateAndSave = () => {
-    if (!customerId) return alert(vi ? "Vui lòng chọn khách hàng" : "Please select a customer")
-    if (!date) return alert(vi ? "Vui lòng chọn ngày báo giá" : "Please select a date")
-    if (discountType === "pct" && (globalDiscount < 0 || globalDiscount > 100)) return alert(vi ? "Chiết khấu % phải từ 0 đến 100" : "Discount % must be between 0 and 100")
-    if (discountType === "amount" && (globalDiscount < 0 || globalDiscount > subtotal)) return alert(vi ? "Chiết khấu không được vượt quá tổng tiền hàng" : "Discount cannot exceed the subtotal")
-    if (items.some(i => i.qty <= 0)) return alert(vi ? "Số lượng phải lớn hơn 0" : "Quantity must be greater than 0")
-    if (items.some(i => i.selling_price < 0)) return alert(vi ? "Đơn giá bán không hợp lệ" : "Selling price is invalid")
-    if (items.length === 0) return alert(vi ? "Báo giá phải có ít nhất một sản phẩm" : "Quotation must have at least one item")
-    if (items.some(i => !i.product_id)) return alert(vi ? "Vui lòng chọn sản phẩm cho tất cả các dòng" : "Please select product for all rows")
+    if (!customerId) return showAppToast(vi ? "Vui lòng chọn khách hàng" : "Please select a customer")
+    if (!warehouseId) return showAppToast(vi ? "Vui lòng chọn kho nhập dự kiến" : "Please select a receiving warehouse")
+    if (!date) return showAppToast(vi ? "Vui lòng chọn ngày báo giá" : "Please select a date")
+    if (discountType === "pct" && (globalDiscount < 0 || globalDiscount > 100)) return showAppToast(vi ? "Chiết khấu % phải từ 0 đến 100" : "Discount % must be between 0 and 100")
+    if (discountType === "amount" && (globalDiscount < 0 || globalDiscount > subtotal)) return showAppToast(vi ? "Chiết khấu không được vượt quá tổng tiền hàng" : "Discount cannot exceed the subtotal")
+    if (items.some(i => i.qty <= 0)) return showAppToast(vi ? "Số lượng phải lớn hơn 0" : "Quantity must be greater than 0")
+    if (items.some(i => i.selling_price < 0)) return showAppToast(vi ? "Đơn giá bán không hợp lệ" : "Selling price is invalid")
+    if (items.length === 0) return showAppToast(vi ? "Báo giá phải có ít nhất một sản phẩm" : "Quotation must have at least one item")
+    if (items.some(i => !i.product_id)) return showAppToast(vi ? "Vui lòng chọn sản phẩm cho tất cả các dòng" : "Please select product for all rows")
+    if (new Set(items.map(i => i.product_id)).size !== items.length) return showAppToast(vi ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong báo giá" : "Each product may only appear once in a quotation")
     if (onSave) {
       onSave({
         customer_id: customerId,
@@ -367,7 +295,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
       <div className="flex items-center justify-between px-5 py-3 border-b bg-white" style={{ borderColor: "var(--border)" }}>
         <h2 className="text-base font-semibold">{vi ? (mode === "create" ? "Tạo báo giá mới" : mode === "edit" ? "Sửa báo giá" : "Chi tiết báo giá") : (mode === "create" ? "New Quotation" : mode === "edit" ? "Edit Quotation" : "Quotation Details")}</h2>
         <div className="flex items-center gap-2">
-          <div className="relative">
+          {canExport && <div className="relative">
             <button onClick={() => setExportMenuOpen(open => !open)} className="h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-1" style={{ borderColor: "var(--border)" }}>
               <Download size={13} /> {vi ? "Xuất báo giá" : "Export quotation"}
             </button>
@@ -375,7 +303,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               <button onClick={() => exportData("xlsx")} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"><FileSpreadsheet size={13} /> Excel</button>
               <button onClick={() => exportData("pdf")} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"><FileText size={13} /> PDF</button>
             </div>}
-          </div>
+          </div>}
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500"><X size={16} /></button>
         </div>
       </div>
@@ -642,13 +570,13 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
 export default function Quotations() {
   const { lang, t } = useLang()
   const vi = lang === "vi"
-  const [data, setData] = useState<any[]>(mockQuotations)
+  const [data, setData] = useState<any[]>([])
   const [productOptions, setProductOptions] = useState<Array<{value: string, label: string}>>([])
   const [supplierOptions, setSupplierOptions] = useState<Array<{value: string, label: string}>>([])
   const [customerOptions, setCustomerOptions] = useState<Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>>([])
   const [warehouseOptions, setWarehouseOptions] = useState<Array<{value: string, label: string}>>([])
   const { isDemo } = useDemo()
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
 
   useEffect(() => {
     Promise.all([
@@ -721,27 +649,26 @@ export default function Quotations() {
     if (!q || !q.items) return
     
     try {
-      const warehouse = warehouseOptions.find(option => option.value === q.warehouse_id) || warehouseOptions[0]
-      const receiptResult = await receiveQuotation({ quotationId: id, warehouseId: warehouse?.value, warehouseName: warehouse?.label || (vi ? "Chưa xác định" : "Unassigned"), items: q.items }, { isDemo, orgId: profile?.org_id })
+      const warehouse = warehouseOptions.find(option => option.value === q.warehouse_id)
+      if (!warehouse) throw new Error(vi ? "Báo giá chưa có kho nhập hợp lệ" : "Quotation has no valid receiving warehouse")
+      const receiptResult = await receiveQuotation({ quotationId: id, warehouseId: warehouse.value, warehouseName: warehouse.label, items: q.items }, { isDemo, orgId: profile?.org_id })
       if (receiptResult.error) throw receiptResult.error
-      const quotationResult = await upsertQuotation({ id, status: "converted" } as any, { isDemo, orgId: profile?.org_id })
-      if (quotationResult.error) throw quotationResult.error
       
       // Refresh data
       const res = await fetchQuotations({ isDemo, orgId: profile?.org_id })
       if (res.data) setData(res.data)
       
-      alert(vi ? `Đã chuyển báo giá ${id} thành Phiếu nhập kho (Goods Receipt) thành công!` : `Quotation ${id} converted to Goods Receipt successfully!`)
-    } catch (error) {
-      console.error("Error converting quotation:", error)
-      alert(vi ? "Lỗi khi chuyển báo giá" : "Error converting quotation")
+      showAppToast(vi ? `Đã chuyển báo giá ${id} thành Phiếu nhập kho (Goods Receipt) thành công!` : `Quotation ${id} converted to Goods Receipt successfully!`, "success")
+    } catch (error: any) {
+      if (import.meta.env.DEV) console.error("Error converting quotation:", error)
+      showAppToast(error?.message ?? (vi ? "Lỗi khi chuyển báo giá" : "Error converting quotation"))
     }
   }
 
   const updateStatus = (id: string, st: string) => {
     // persist status change
     upsertQuotation({ id, status: st } as any, { isDemo, orgId: profile?.org_id }).then(res => {
-      if (res && res.error) alert(vi ? "Lỗi" : "Error")
+      if (res && res.error) showAppToast(res.error.message ?? String(res.error))
       else fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
     })
   }
@@ -751,21 +678,21 @@ export default function Quotations() {
     const normalizedForm = { ...form, customer_name: customerName }
     if (editingItem) {
       upsertQuotation({ id: editingItem.id, ...normalizedForm } as any, { isDemo, orgId: profile?.org_id }).then(res => {
-        if (res && res.error) alert(vi ? "Lỗi khi lưu" : "Save failed")
+        if (res && res.error) showAppToast(res.error.message ?? String(res.error))
         else {
           setEditingItem(null)
           fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
-          alert(vi ? "Cập nhật thành công!" : "Updated successfully!")
+          showAppToast(vi ? "Cập nhật thành công!" : "Updated successfully!", "success")
         }
       })
     } else {
       const payload: any = { ...normalizedForm, status: "Draft" }
       upsertQuotation(payload, { isDemo, orgId: profile?.org_id }).then(res => {
-        if (res && res.error) alert(vi ? "Lỗi khi tạo báo giá" : "Create failed")
+        if (res && res.error) showAppToast(res.error.message ?? String(res.error))
         else {
           fetchQuotations({ isDemo, orgId: profile?.org_id }).then(r => { if (r.data) setData(r.data) })
           setShowCreate(false)
-          alert(vi ? "Tạo báo giá thành công!" : "Quotation created!")
+          showAppToast(vi ? "Tạo báo giá thành công!" : "Quotation created!", "success")
         }
       })
     }
@@ -802,12 +729,9 @@ export default function Quotations() {
       <Toolbar 
         search={search} 
         onSearch={setSearch} 
-        onCreate={() => setShowCreate(true)} 
+        onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined}
         createLabel={vi ? "Tạo báo giá" : "Create Quote"}
-        onExportXlsx={exportData}
-        onImport={() => {}}
-        templateFile="quotations"
-        templateCols={heads}
+        onExportXlsx={can("Sales", "export") ? exportData : undefined}
       />
 
       <div className="flex-1 overflow-auto p-5">
@@ -835,22 +759,22 @@ export default function Quotations() {
                 </td>
                 <td className="py-3 text-right">
                   <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {(q.status.toLowerCase() === "draft" || q.status.toLowerCase() === "pending") && (
+                    {can("Sales", "update") && (q.status.toLowerCase() === "draft" || q.status.toLowerCase() === "pending") && (
                       <button onClick={() => updateStatus(q.id, "Sent")} title={vi ? "Gửi khách hàng" : "Send"} className="w-7 h-7 flex items-center justify-center rounded border text-blue-600 hover:bg-blue-50" style={{ borderColor: "var(--border)" }}>
                         <Send size={14} />
                       </button>
                     )}
                     {q.status.toLowerCase() === "sent" && (
                       <>
-                        <button onClick={() => updateStatus(q.id, "Accepted")} title={vi ? "Chấp thuận báo giá" : "Accept quotation"} className="w-7 h-7 flex items-center justify-center rounded border text-emerald-600 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}>
+                        {can("Sales", "approve") && <button onClick={() => updateStatus(q.id, "Accepted")} title={vi ? "Chấp thuận báo giá" : "Accept quotation"} className="w-7 h-7 flex items-center justify-center rounded border text-emerald-600 hover:bg-emerald-50" style={{ borderColor: "var(--border)" }}>
                           <Check size={14} />
-                        </button>
-                        <button onClick={() => updateStatus(q.id, "Rejected")} title={vi ? "Từ chối" : "Reject"} className="w-7 h-7 flex items-center justify-center rounded border text-red-600 hover:bg-red-50" style={{ borderColor: "var(--border)" }}>
+                        </button>}
+                        {can("Sales", "update") && <button onClick={() => updateStatus(q.id, "Rejected")} title={vi ? "Từ chối" : "Reject"} className="w-7 h-7 flex items-center justify-center rounded border text-red-600 hover:bg-red-50" style={{ borderColor: "var(--border)" }}>
                           <Ban size={14} />
-                        </button>
+                        </button>}
                       </>
                     )}
-                    {q.status.toLowerCase() === "accepted" && (
+                    {can("Purchase", "create") && q.status.toLowerCase() === "accepted" && (
                       <button onClick={() => convertToGoodsReceipt(q.id)} title={vi ? "Tạo phiếu nhập kho" : "Create goods receipt"} className="w-7 h-7 flex items-center justify-center rounded border bg-emerald-50 text-emerald-700 hover:bg-emerald-100" style={{ borderColor: "var(--border)" }}>
                         <Check size={14} />
                       </button>
@@ -858,14 +782,14 @@ export default function Quotations() {
                     <button onClick={() => setViewingItem(q)} className="w-7 h-7 flex items-center justify-center rounded border text-slate-400 hover:text-slate-600 hover:bg-white" style={{ borderColor: "var(--border)" }} title={vi ? "Xem chi tiết" : "View Details"}>
                       <FileText size={14} />
                     </button>
-                    {(q.status.toLowerCase() === "draft" || q.status.toLowerCase() === "pending") && (
+                    {can("Sales", "update") && (q.status.toLowerCase() === "draft" || q.status.toLowerCase() === "pending") && (
                       <button onClick={() => setEditingItem(q)} className="w-7 h-7 flex items-center justify-center rounded border text-slate-400 hover:text-slate-600 hover:bg-white" style={{ borderColor: "var(--border)" }} title={vi ? "Sửa" : "Edit"}>
                         <Edit size={14} />
                       </button>
                     )}
-                    <button onClick={() => { if(confirm(vi ? "Bạn có chắc muốn hủy/xóa báo giá này?" : "Are you sure to cancel this quote?")) updateStatus(q.id, "Cancelled") }} className="w-7 h-7 flex items-center justify-center rounded border text-slate-400 hover:text-red-500 hover:bg-red-50" style={{ borderColor: "var(--border)" }} title={vi ? "Hủy" : "Cancel"}>
+                    {can("Sales", "update") && !["converted", "cancelled"].includes(q.status.toLowerCase()) && <button onClick={async () => { if (await confirmAppAction(vi ? "Bạn có chắc muốn hủy báo giá này?" : "Are you sure to cancel this quote?", { destructive: true })) updateStatus(q.id, "Cancelled") }} className="w-7 h-7 flex items-center justify-center rounded border text-slate-400 hover:text-red-500 hover:bg-red-50" style={{ borderColor: "var(--border)" }} title={vi ? "Hủy" : "Cancel"}>
                       <Trash2 size={14} />
-                    </button>
+                    </button>}
                   </div>
                 </td>
               </tr>
@@ -883,16 +807,12 @@ export default function Quotations() {
 
       <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
         <span>{vi ? "Đang hiển thị" : "Showing"} {data.length} {vi ? "báo giá" : "quotations"}</span>
-        <div className="flex items-center gap-1">
-          <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronLeft size={13} /></button>
-          <button className="w-7 h-7 flex items-center justify-center rounded-md bg-blue-600 text-white">1</button>
-          <button className="w-7 h-7 flex items-center justify-center rounded-md border hover:bg-slate-50" style={{ borderColor: "var(--border)" }}><ChevronRight size={13} /></button>
-        </div>
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
       </div>
 
-      {showCreate && <QuotationForm onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
-      {editingItem && <QuotationForm onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
-      {viewingItem && <QuotationForm onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
+      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
+      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
+      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} productOptions={productOptions} supplierOptions={supplierOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
     </div>
   )
 }

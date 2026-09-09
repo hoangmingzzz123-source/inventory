@@ -1,10 +1,12 @@
 {
-  "description": "Streamline project management by providing tools for task tracking, collaboration, and reporting, designed for teams seeking efficiency and organization.",
+  "title": "WarehouseOS — Quản lý kho hàng",
+  "description": "Hệ thống quản lý kho, mua hàng, bán hàng, công nợ và báo cáo theo thời gian thực cho doanh nghiệp.",
+  "language": "vi",
   "robots": {
     "index": false
   },
   "accessibility": {
-    "addBypassLinks": false,
+    "addBypassLinks": true,
     "ignoreReducedMotion": false
   }
 }

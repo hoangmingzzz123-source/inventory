@@ -12,9 +12,9 @@ import { useAuth } from "../contexts/AuthContext"
 import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBrands, fetchUnits, fetchWarehouses } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
-import * as XLSX from "xlsx"
-import { importFromExcel } from "../lib/excelUtils"
+import { exportRowsToExcel, importFromExcel } from "../lib/excelUtils"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
+import { confirmAppAction } from "../lib/appEvents"
 
 function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
 
@@ -27,14 +27,11 @@ function downloadCsvTemplate(filename: string, cols: string[]) {
   URL.revokeObjectURL(url)
 }
 
-function downloadXlsxTemplate(filename: string, cols: string[]) {
-  const ws = XLSX.utils.aoa_to_sheet([cols, cols.map(() => "")])
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, "Template")
-  XLSX.writeFile(wb, filename + "_template.xlsx")
+async function downloadXlsxTemplate(filename: string, cols: string[]) {
+  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Template")
 }
 
-const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","min_stock","max_stock","description","status"]
+const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","qty","min_stock","max_stock","description","status"]
 
 function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehouseId, onWarehouseChange }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void>; warehouseOptions: MasterOption[]; warehouseId: string; onWarehouseChange: (value: string) => void }) {
   const [dragging, setDragging] = useState(false)
@@ -67,7 +64,7 @@ function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehou
                   <button onClick={() => downloadCsvTemplate("products", PRODUCT_TEMPLATE_COLS)} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700">
                     <FileDown size={12} /> {lang === "vi" ? "Mẫu CSV" : "CSV Template"}
                   </button>
-                  <button onClick={() => downloadXlsxTemplate("products", PRODUCT_TEMPLATE_COLS)} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700">
+                  <button onClick={() => void downloadXlsxTemplate("products", PRODUCT_TEMPLATE_COLS)} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700">
                     <FileSpreadsheet size={12} /> {lang === "vi" ? "Mẫu Excel" : "Excel Template"}
                   </button>
                 </div>
@@ -145,12 +142,15 @@ const emptyForm: FormState = {
 }
 
 function productToForm(p: Product): FormState {
+  const row = p as any
   return {
     name: p.name, sku: p.sku, barcode: p.barcode, category: p.category,
     brand: p.brand, unit: p.unit, purchasePrice: String(p.cost),
-    sellingPrice: String(p.price), tax: "", qty: String(p.qty ?? 0), minStock: "", maxStock: "",
-    description: "", status: p.status,
-    trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
+    sellingPrice: String(p.price), tax: String(row.tax_pct ?? 0), qty: String(p.qty ?? 0),
+    minStock: String(row.min_qty ?? 0), maxStock: String(row.max_qty ?? 0),
+    description: row.description ?? "", status: p.status,
+    trackInventory: row.track_inventory ?? true, trackSerial: row.track_serial ?? false,
+    trackBatch: row.track_batch ?? false, allowNegative: row.allow_negative ?? false,
     warehouseId: "",
   }
 }
@@ -269,9 +269,10 @@ function ProductFormModal({ editingProduct, form, setForm, categoryOptions, bran
               ] as [string, string][]).map(([label, key]) => (
                 <div key={key}>
                   <label className="block text-[11px] font-medium text-slate-600 mb-1">{label}</label>
-                  <input type="number" placeholder="0" value={(form as any)[key]}
+                  <input type="number" min="0" placeholder="0" value={(form as any)[key]} readOnly={Boolean(editingProduct && key === "qty")}
                     onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                    className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 mono" style={{ borderColor: "var(--border)" }} />
+                    className={`w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 mono ${editingProduct && key === "qty" ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`} style={{ borderColor: "var(--border)" }} />
+                  {editingProduct && key === "qty" && <span className="mt-1 block text-[10px] text-slate-400">{lang === "vi" ? "Điều chỉnh tồn kho tại phân hệ Kho" : "Adjust stock in Inventory"}</span>}
                 </div>
               ))}
             </div>
@@ -343,9 +344,9 @@ function DeleteConfirmDialog({ product, onConfirm, onCancel }: DeleteConfirmProp
 }
 
 // ---- Product Detail Modal ----
-interface ProductDetailProps { product: Product; onEdit: (p: Product) => void; onDelete: (p: Product) => void; onClose: () => void }
+interface ProductDetailProps { product: Product; onEdit: (p: Product) => void; onDelete: (p: Product) => void; onClose: () => void; canEdit: boolean; canDelete: boolean }
 
-function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetailProps) {
+function ProductDetailModal({ product, onEdit, onDelete, onClose, canEdit, canDelete }: ProductDetailProps) {
   const { t, lang } = useLang()
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -386,12 +387,12 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetai
             </div>
           </div>
           <div className="flex gap-2 px-5 py-3.5 border-t bg-slate-50" style={{ borderColor: "var(--border)" }}>
-            <button onClick={() => onEdit(product)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center justify-center gap-1.5">
+            {canEdit && <button onClick={() => onEdit(product)} className="flex-1 h-8 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 flex items-center justify-center gap-1.5">
               <Edit size={12} /> {t("edit")}
-            </button>
-            <button onClick={() => onDelete(product)} className="h-8 px-4 rounded-lg border text-xs text-red-600 hover:bg-red-50 flex items-center gap-1.5" style={{ borderColor: "var(--border)" }}>
+            </button>}
+            {canDelete && <button onClick={() => onDelete(product)} className="h-8 px-4 rounded-lg border text-xs text-red-600 hover:bg-red-50 flex items-center gap-1.5" style={{ borderColor: "var(--border)" }}>
               <Trash2 size={12} /> {t("delete")}
-            </button>
+            </button>}
           </div>
         </div>
       </div>
@@ -402,9 +403,9 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose }: ProductDetai
 // ---- Main Products screen ----
 export default function Products() {
   const { t, lang } = useLang()
-  const [products, setProducts] = useState<any[]>(initialProducts)
   const { isDemo } = useDemo()
-  const { profile } = useAuth()
+  const [products, setProducts] = useState<any[]>([])
+  const { profile, can } = useAuth()
   const [categoryOptions, setCategoryOptions] = useState<MasterOption[]>([])
   const [brandOptions, setBrandOptions] = useState<MasterOption[]>([])
   const [unitOptions, setUnitOptions] = useState<MasterOption[]>([])
@@ -459,8 +460,8 @@ export default function Products() {
   const filtered = products.filter(p =>
     (filterStatus === "all" || p.status === filterStatus) &&
     (filterCategory === "all" || p.category === filterCategory) &&
-    (search === "" || p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase()) || p.barcode.includes(search))
+    (search === "" || String(p.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      String(p.sku ?? "").toLowerCase().includes(search.toLowerCase()) || String(p.barcode ?? "").includes(search))
   )
 
   const pageSize = viewMode === "grid" ? PAGE_SIZE_GRID : PAGE_SIZE_LIST
@@ -480,12 +481,19 @@ export default function Products() {
     setTimeout(() => setToast(null), 2500)
   }
 
+  const refreshProducts = async () => {
+    const result = await fetchProducts({ isDemo, orgId: profile?.org_id })
+    if (result.error) showToast(result.error.message ?? String(result.error), false)
+    setProducts(result.data ?? [])
+  }
+
   const openCreate = () => { setForm(emptyForm); setShowCreate(true) }
   const openEdit = (p: Product) => { setEditingProduct(p); setForm(productToForm(p)); setActionRow(null); setDetailProduct(null) }
   const closeForm = () => { setShowCreate(false); setEditingProduct(null) }
 
   const handleSave = async () => {
     if (!form.name.trim()) { showToast(lang === "vi" ? "Vui lòng nhập tên sản phẩm" : "Please enter product name", false); return }
+    if (!form.sku.trim()) { showToast(lang === "vi" ? "Vui lòng nhập SKU" : "Please enter an SKU", false); return }
     const payload: any = {
       name: form.name,
       sku: form.sku || undefined,
@@ -500,6 +508,14 @@ export default function Products() {
       warehouse_name: warehouseOptions.find(option => option.value === form.warehouseId)?.label || undefined,
       status: form.status,
       updated_by: profile?.full_name || profile?.email || "system",
+      tax_pct: Number(form.tax) || 0,
+      min_qty: Number(form.minStock) || 0,
+      max_qty: Number(form.maxStock) || 0,
+      description: form.description || null,
+      track_inventory: form.trackInventory,
+      track_serial: form.trackSerial,
+      track_batch: form.trackBatch,
+      allow_negative: form.allowNegative,
     }
     if (editingProduct) payload.id = editingProduct.id
     if (!editingProduct && Number(payload.qty) > 0 && !payload.warehouse_id) {
@@ -508,7 +524,7 @@ export default function Products() {
     }
     const res = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
     if (res && res.error) {
-      showToast(lang === "vi" ? "Lỗi khi lưu" : "Save failed", false)
+      showToast(res.error.message ?? String(res.error), false)
     } else {
       // refresh
       const r = await fetchProducts({ isDemo, orgId: profile?.org_id })
@@ -541,6 +557,10 @@ export default function Products() {
           warehouse_id: importWarehouseId,
           warehouse_name: importWarehouse?.label,
           status: row.status || "Active",
+          tax_pct: Number(row.tax_pct ?? 0),
+          min_qty: Number(row.min_stock ?? row.min_qty ?? 0),
+          max_qty: Number(row.max_stock ?? row.max_qty ?? 0),
+          description: row.description ?? null,
         }
         if (!payload.sku || !payload.name) continue
         const result = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
@@ -551,7 +571,7 @@ export default function Products() {
       setShowImportModal(false)
       showToast(lang === "vi" ? `Đã nhập ${imported} sản phẩm` : `Imported ${imported} products`)
     } catch (error) {
-      console.error(error)
+      if (import.meta.env.DEV) console.error(error)
       showToast(lang === "vi" ? "Không thể đọc file sản phẩm" : "Could not read product file", false)
     }
   }
@@ -559,7 +579,7 @@ export default function Products() {
   const handleDelete = async () => {
     if (!deleteTarget) return
     const res = await deleteProduct(deleteTarget.id, { isDemo, orgId: profile?.org_id })
-    if (res && res.error) showToast(lang === "vi" ? "Lỗi khi xóa" : "Delete failed", false)
+    if (res && res.error) showToast(res.error.message ?? String(res.error), false)
     else {
       const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
       setDetailProduct(null)
@@ -593,19 +613,19 @@ export default function Products() {
   const makeActionMenu = (p: Product) => (
     <div className="absolute right-0 top-8 z-30 bg-white border rounded-xl shadow-xl py-1 min-w-[150px]" style={{ borderColor: "var(--border)" }}>
       {[
-        { icon: <Eye size={13} />, label: t("view"), onClick: () => { setDetailProduct(p); setActionRow(null) } },
-        { icon: <Edit size={13} />, label: t("edit"), onClick: () => openEdit(p) },
-        { icon: <Copy size={13} />, label: t("duplicate"), onClick: () => handleDuplicate(p) },
-        { icon: <Archive size={13} />, label: t("archive"), onClick: () => { setActionRow(null); showToast(lang === "vi" ? "Đã lưu trữ" : "Archived") } },
-      ].map(a => (
+        { show: true, icon: <Eye size={13} />, label: t("view"), onClick: () => { setDetailProduct(p); setActionRow(null) } },
+        { show: can("Master Data", "update"), icon: <Edit size={13} />, label: t("edit"), onClick: () => openEdit(p) },
+        { show: can("Master Data", "create"), icon: <Copy size={13} />, label: t("duplicate"), onClick: () => handleDuplicate(p) },
+        { show: can("Master Data", "update"), icon: <Archive size={13} />, label: t("archive"), onClick: async () => { const result = await upsertProduct({ ...(p as any), id: p.id, qty: 0, status: "Inactive" }, { isDemo, orgId: profile?.org_id }); setActionRow(null); if (result.error) showToast(result.error.message ?? String(result.error), false); else { await refreshProducts(); showToast(lang === "vi" ? "Đã lưu trữ" : "Archived") } } },
+      ].filter(action => action.show).map(a => (
         <button key={a.label} onClick={a.onClick} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-slate-700 hover:bg-slate-50">
           {a.icon} {a.label}
         </button>
       ))}
-      <div className="border-t my-1" style={{ borderColor: "var(--border)" }} />
+      {can("Master Data", "delete") && <><div className="border-t my-1" style={{ borderColor: "var(--border)" }} />
       <button onClick={() => { setDeleteTarget(p); setActionRow(null) }} className="w-full flex items-center gap-2 px-3 h-8 text-xs text-red-600 hover:bg-red-50">
         <Trash2 size={13} /> {t("delete")}
-      </button>
+      </button></>}
     </div>
   )
 
@@ -621,13 +641,13 @@ export default function Products() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-5 py-2.5 bg-white border-b flex-shrink-0 flex-wrap gap-y-2" style={{ borderColor: "var(--border)" }}>
-        <button onClick={openCreate} className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
+        {can("Master Data", "create") && <button onClick={openCreate} className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">
           <Plus size={13} /> {t("create")}
-        </button>
-        <button onClick={() => setShowImportModal(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        </button>}
+        {can("Master Data", "create") && <button onClick={() => setShowImportModal(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Upload size={13} /> {t("import")}
-        </button>
-        <div className="relative group">
+        </button>}
+        {can("Master Data", "export") && <div className="relative group">
           <button className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
             <Download size={13} /> {t("export")}
           </button>
@@ -635,14 +655,14 @@ export default function Products() {
             <button onClick={() => exportCsv("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
             <button onClick={() => exportXlsx("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
           </div>
-        </div>
-        <button onClick={() => printTable(
+        </div>}
+        {can("Master Data", "export") && <button onClick={() => printTable(
           "products",
           ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")],
           filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]),
         )} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Printer size={13} /> {t("print")}
-        </button>
+        </button>}
         <div className="flex-1" />
         <div className="relative">
           <Tag size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -677,7 +697,7 @@ export default function Products() {
             </button>
           ))}
         </div>
-        <button className="w-8 h-8 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
+        <button onClick={() => void refreshProducts()} className="w-8 h-8 flex items-center justify-center rounded-lg border text-slate-500 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <RefreshCw size={13} />
         </button>
       </div>
@@ -686,13 +706,13 @@ export default function Products() {
           {selected.length > 0 && (
         <div className="flex items-center gap-3 px-5 py-2 bg-blue-50 border-b text-xs" style={{ borderColor: "var(--border)" }}>
           <span className="text-blue-700 font-semibold">{selected.length} {t("selected")}</span>
-          <button onClick={() => showToast(lang === "vi" ? "Đã lưu trữ" : "Archived")} className="text-blue-600 hover:underline">{t("archive")}</button>
-          <button onClick={async () => {
+          {can("Master Data", "delete") && <button onClick={async () => {
+              if (!await confirmAppAction(lang === "vi" ? `Xóa ${selected.length} sản phẩm đã chọn?` : `Delete ${selected.length} selected products?`, { destructive: true })) return
               for (const id of selected) { await deleteProduct(id, { isDemo, orgId: profile?.org_id }) }
               const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
               setSelected([])
               showToast(lang === "vi" ? "Đã xóa" : "Deleted")
-            }} className="text-red-600 hover:underline">{t("delete")}</button>
+            }} className="text-red-600 hover:underline">{t("delete")}</button>}
           <button onClick={() => setSelected([])} className="text-slate-500 hover:underline ml-auto">{t("clearSelection")}</button>
         </div>
       )}
@@ -860,6 +880,8 @@ export default function Products() {
           onEdit={openEdit}
           onDelete={p => { setDeleteTarget(p); setDetailProduct(null) }}
           onClose={() => setDetailProduct(null)}
+          canEdit={can("Master Data", "update")}
+          canDelete={can("Master Data", "delete")}
         />
       )}
       {deleteTarget && (
