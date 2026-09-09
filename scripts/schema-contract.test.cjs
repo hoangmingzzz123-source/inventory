@@ -11,9 +11,22 @@ const productionMigration = fs.readFileSync(
   "supabase/migrations/20260916000000_production_readiness.sql",
   "utf8",
 )
+const costingMigration = fs.readFileSync(
+  "supabase/migrations/20260917000000_inventory_lot_costing.sql",
+  "utf8",
+)
+const allocationMigration = fs.readFileSync(
+  "supabase/migrations/20260918000000_quotation_category_allocation.sql",
+  "utf8",
+)
 const dataService = fs.readFileSync("src/lib/dataService.ts", "utf8")
 const authContext = fs.readFileSync("src/contexts/AuthContext.tsx", "utf8")
 const genericScreens = fs.readFileSync("src/screens/GenericList.tsx", "utf8")
+const quotationScreen = fs.readFileSync("src/screens/Quotations.tsx", "utf8")
+const purchaseOrderScreen = fs.readFileSync(
+  "src/screens/PurchaseOrders.tsx",
+  "utf8",
+)
 const notificationContext = fs.readFileSync(
   "src/contexts/NotificationContext.tsx",
   "utf8",
@@ -309,6 +322,78 @@ test("production migration rebuilds generated purchase totals before changing qu
     productionMigration,
     /alter table purchase_order_items drop column if exists total;[\s\S]{0,180}alter table purchase_order_items alter column qty type numeric\(18,2\) using qty::numeric;[\s\S]{0,180}add column if not exists total numeric\(18,0\)[\s\S]{0,80}generated always as \(qty \* unit_cost\) stored;/,
   )
+})
+
+test("lot-costing migration defines valuation layers and guarded allocation triggers", () => {
+  for (const table of [
+    "inventory_cost_layers",
+    "inventory_cost_allocations",
+  ]) {
+    assert.match(costingMigration, new RegExp(`create table if not exists ${table}`))
+    assert.match(
+      costingMigration,
+      new RegExp(`alter table ${table} enable row level security`),
+    )
+  }
+  assert.match(costingMigration, /costing_method in \('FIFO', 'MOVING_AVERAGE'\)/)
+  assert.match(costingMigration, /'LEGACY_BASELINE', stock\.qty, stock\.qty/)
+  assert.match(costingMigration, /create or replace function apply_inventory_outbound_cost/)
+  assert.match(costingMigration, /create or replace function apply_inventory_inbound_cost_and_sync/)
+  assert.match(costingMigration, /create trigger cost_inventory_outbound_before_ledger/)
+  assert.match(costingMigration, /create trigger zz_cost_inventory_after_ledger/)
+  assert.match(costingMigration, /insert into inventory_cost_allocations/)
+  assert.match(costingMigration, /new\.unit_cost := round\(total_cost \/ required_qty, 4\)/)
+  assert.match(costingMigration, /cost_layer_quantity_mismatches/)
+  assert.match(
+    costingMigration,
+    /revoke all on inventory_cost_layers, inventory_cost_allocations from anon, authenticated/,
+  )
+})
+
+test("receiving and quotation screens capture actual cost and batch metadata", () => {
+  for (const source of [purchaseOrderScreen, quotationScreen]) {
+    assert.match(source, /batch_number|batchNumber/)
+    assert.match(source, /manufacture_date|manufactureDate/)
+    assert.match(source, /expiry_date|expiryDate/)
+    assert.match(source, /unit_cost|unitCost/)
+  }
+  assert.match(costingMigration, /Batch number is required for product/)
+  assert.match(dataService, /rpc\("get_product_pricing"/)
+  assert.match(dataService, /latest_cost/)
+  assert.match(quotationScreen, /averageCost/)
+  assert.match(quotationScreen, /unit_cost/)
+  assert.doesNotMatch(
+    quotationScreen,
+    /sheet\.addRow\(\[item\.productName[^\n]+item\.cost_price/,
+  )
+})
+
+test("category quotations allocate SKUs, reserve stock, and issue only on delivery", () => {
+  for (const table of [
+    "product_suppliers",
+    "quotation_allocations",
+    "inventory_reservations",
+  ]) {
+    assert.match(allocationMigration, new RegExp(`create table if not exists ${table}`))
+    assert.match(allocationMigration, new RegExp(`alter table ${table} enable row level security`))
+  }
+  assert.match(allocationMigration, /alter table quotation_items add column if not exists category_id/)
+  assert.match(allocationMigration, /create or replace function convert_quotation_allocations/)
+  assert.match(allocationMigration, /Every quotation category must be allocated exactly/)
+  assert.match(allocationMigration, /create or replace function deliver_quotation/)
+  assert.match(allocationMigration, /create or replace function cancel_quotation_conversion/)
+  assert.match(allocationMigration, /status = 'ACTIVE'/)
+  assert.match(allocationMigration, /status = 'CONSUMED'/)
+  assert.match(allocationMigration, /status = 'RELEASED'/)
+  assert.match(allocationMigration, /reserved_other_qty/)
+  assert.match(allocationMigration, /unlinked_quotation_categories/)
+  assert.match(allocationMigration, /Fixed discount cannot exceed quotation subtotal/)
+  assert.match(dataService, /rpc\("convert_quotation_allocations"/)
+  assert.match(dataService, /rpc\("deliver_quotation"/)
+  assert.match(dataService, /rpc\("cancel_quotation_conversion"/)
+  assert.match(quotationScreen, /category_id/)
+  assert.match(quotationScreen, /NEW_STOCK/)
+  assert.match(quotationScreen, /awaiting delivery/i)
 })
 
 test("production migration protects ledger, cash balance, and helper functions", () => {

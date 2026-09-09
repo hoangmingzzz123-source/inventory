@@ -9,11 +9,86 @@ import { formatDateKeyUtc7 } from "./dateUtils"
 
 type Ctx = { isDemo: boolean; orgId?: string }
 
+export type ProductPricing = {
+  product_id: string
+  product_name: string
+  sku: string
+  unit: string | null
+  list_price: number
+  costing_method: "FIFO" | "MOVING_AVERAGE"
+  available_qty: number
+  average_cost: number
+  estimated_cost: number
+  reference_cost: number
+  suggested_price: number
+  latest_cost: number | null
+  previous_cost: number | null
+  cost_change_pct: number | null
+  receipt_ref: string | null
+  receipt_date: string | null
+  supplier_name: string | null
+  receipt_qty: number | null
+  receipt_unit: string | null
+  batch_number: string | null
+  manufacture_date: string | null
+  expiry_date: string | null
+  quotation_source_ref: string | null
+  latest_customer_price: number | null
+  latest_customer_quotation_id: string | null
+  latest_customer_quotation_date: string | null
+}
+
+export type QuotationAllocationContext = {
+  quotation: {
+    id: string
+    status: string
+    customer_id: string
+    customer_name: string
+    warehouse_id: string
+    warehouse_name: string
+    total: number
+  }
+  items: Array<{
+    id: string
+    category_id: string
+    category_name: string
+    qty: number
+    sell_unit: string | null
+    selling_price: number
+    vat_pct: number
+  }>
+  products: Array<{
+    id: string
+    category_id: string
+    sku: string
+    name: string
+    unit: string | null
+    price: number
+    reference_cost: number
+    track_batch: boolean
+    on_hand: number
+    reserved: number
+    available: number
+    average_cost: number
+  }>
+  allocations: Array<Record<string, any>>
+}
+
 export async function fetchCompanySettings({ isDemo, orgId }: Ctx) {
   if (isDemo || !orgId) return { data: defaultCompanySettings, error: null }
   const { data, error } = await safeSelect("company_settings", "*", query => query.eq("org_id", orgId).maybeSingle())
   const row = (data as any[])[0] ?? data as any
-  return { data: row ? { ...defaultCompanySettings, ...row, taxId: row.tax_id ?? defaultCompanySettings.taxId } : defaultCompanySettings, error }
+  return {
+    data: row
+      ? {
+          ...defaultCompanySettings,
+          ...row,
+          taxId: row.tax_id ?? defaultCompanySettings.taxId,
+          costingMethod: row.costing_method ?? defaultCompanySettings.costingMethod,
+        }
+      : defaultCompanySettings,
+    error,
+  }
 }
 
 export async function upsertCompanySettings(settings: CompanySettings, { isDemo, orgId }: Ctx) {
@@ -28,6 +103,7 @@ export async function upsertCompanySettings(settings: CompanySettings, { isDemo,
     website: settings.website,
     email: settings.email,
     logo_url: settings.logoUrl ?? null,
+    costing_method: settings.costingMethod,
     updated_at: new Date().toISOString(),
   })
   return { error }
@@ -49,6 +125,17 @@ function normalizeNameField(row: Record<string, any>) {
 function normalizeStatusValue(value: unknown) {
   if (value == null || value === "") return "Active"
   return String(value)
+}
+
+function normalizeDemoId(value: unknown) {
+  return String(value ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase()
+}
+
+function findDemoProduct(value: unknown) {
+  const key = normalizeDemoId(value)
+  return (mock.products as any[]).find(product =>
+    normalizeDemoId(product.id) === key || normalizeDemoId(product.sku) === key,
+  )
 }
 
 const demoGoodsReceipts: any[] = []
@@ -84,22 +171,71 @@ async function safeSelect(table: string, columns = "*", configure?: (query: any)
 
 // ─── Products ────────────────────────────────────────────────
 export async function fetchProducts({ isDemo, orgId }: Ctx) {
-  if (isDemo) return { data: mock.products, error: null }
+  if (isDemo) {
+    const reservedByProduct = (mock.quotations as any[]).flatMap(quotation =>
+      quotation.allocations ?? [],
+    ).reduce<Record<string, number>>((totals, allocation) => {
+      if (String(allocation.reservation_status).toUpperCase() === "ACTIVE" && allocation.product_id) {
+        totals[allocation.product_id] = (totals[allocation.product_id] ?? 0) + toNumber(allocation.qty)
+      }
+      return totals
+    }, {})
+    return {
+      data: mock.products.map((product: any) => {
+      const category = mock.categories.find((row: any) =>
+        [row.code, row.name_vi, row.name_en].some(value =>
+          String(value).toLowerCase() === String(product.category).toLowerCase(),
+        ),
+      )
+      const reserved = reservedByProduct[product.id] ?? 0
+      return {
+        ...product,
+        category_id: category?.id ?? null,
+        average_cost: toNumber(product.cost),
+        reserved,
+        available: toNumber(product.qty) - reserved,
+      }
+      }),
+      error: null,
+    }
+  }
   const { data, error } = await safeSelect("products", "*", query => orgId ? query.eq("org_id", orgId) : query)
   const products = data as any[] ?? []
-  const ledgerResult = orgId
-    ? await safeSelect("inventory_ledger", "product_id, qty_in, qty_out", query => query.eq("org_id", orgId))
-    : { data: [], error: null }
+  const [ledgerResult, costLayerResult, reservationResult] = orgId
+    ? await Promise.all([
+        safeSelect("inventory_ledger", "product_id, qty_in, qty_out", query => query.eq("org_id", orgId)),
+        safeSelect("inventory_cost_layers", "product_id, remaining_qty, unit_cost", query => query.eq("org_id", orgId).gt("remaining_qty", 0)),
+        safeSelect("inventory_reservations", "product_id, qty", query => query.eq("org_id", orgId).eq("status", "ACTIVE")),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }]
   const ledgerQty = (ledgerResult.data as any[] ?? []).reduce<Record<string, number>>((totals, row) => {
     if (row.product_id) totals[row.product_id] = (totals[row.product_id] ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
+    return totals
+  }, {})
+  const costByProduct = (costLayerResult.data as any[] ?? []).reduce<Record<string, { qty: number; value: number }>>((totals, row) => {
+    if (!row.product_id) return totals
+    const current = totals[row.product_id] ?? { qty: 0, value: 0 }
+    const qty = toNumber(row.remaining_qty)
+    current.qty += qty
+    current.value += qty * toNumber(row.unit_cost)
+    totals[row.product_id] = current
+    return totals
+  }, {})
+  const reservedByProduct = (reservationResult.data as any[] ?? []).reduce<Record<string, number>>((totals, row) => {
+    if (row.product_id) totals[row.product_id] = (totals[row.product_id] ?? 0) + toNumber(row.qty)
     return totals
   }, {})
   return { data: products.map(product => ({
     ...product,
     qty: ledgerQty[product.id] ?? 0,
+    reserved: reservedByProduct[product.id] ?? 0,
+    available: (ledgerQty[product.id] ?? 0) - (reservedByProduct[product.id] ?? 0),
+    average_cost: costByProduct[product.id]?.qty
+      ? costByProduct[product.id].value / costByProduct[product.id].qty
+      : toNumber(product.cost),
     updated: product.updated_at,
     updatedBy: product.updated_by,
-  })), error: error ?? ledgerResult.error }
+  })), error: error ?? ledgerResult.error ?? costLayerResult.error ?? reservationResult.error }
 }
 
 export async function upsertProduct(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
@@ -266,20 +402,12 @@ export async function fetchWarehouses({ isDemo, orgId }: Ctx) {
     }
   }
   const { data, error } = await safeSelect("warehouses", "*", query => orgId ? query.eq("org_id", orgId) : query)
-  const ledgerResult = orgId
-    ? await safeSelect("inventory_ledger", "warehouse_id, product_id, qty_in, qty_out, unit_cost, created_at", query => query.eq("org_id", orgId).order("created_at"))
+  const costLayerResult = orgId
+    ? await safeSelect("inventory_cost_layers", "warehouse_id, remaining_qty, unit_cost", query => query.eq("org_id", orgId).gt("remaining_qty", 0))
     : { data: [], error: null }
-  const stockByKey = new Map<string, { qty: number; cost: number }>()
-  for (const movement of ledgerResult.data as any[] ?? []) {
-    const key = `${movement.warehouse_id ?? ""}:${movement.product_id ?? ""}`
-    const current = stockByKey.get(key) ?? { qty: 0, cost: 0 }
-    current.qty += toNumber(movement.qty_in) - toNumber(movement.qty_out)
-    if (movement.unit_cost != null) current.cost = toNumber(movement.unit_cost)
-    stockByKey.set(key, current)
-  }
-  const stockValueByWarehouse = Array.from(stockByKey.entries()).reduce<Record<string, number>>((totals, [key, stock]) => {
-    const warehouseId = key.split(":")[0]
-    totals[warehouseId] = (totals[warehouseId] ?? 0) + stock.qty * stock.cost
+  const stockValueByWarehouse = (costLayerResult.data as any[] ?? []).reduce<Record<string, number>>((totals, layer) => {
+    const warehouseId = String(layer.warehouse_id ?? "")
+    totals[warehouseId] = (totals[warehouseId] ?? 0) + toNumber(layer.remaining_qty) * toNumber(layer.unit_cost)
     return totals
   }, {})
   return {
@@ -290,7 +418,7 @@ export async function fetchWarehouses({ isDemo, orgId }: Ctx) {
       stock_value: stockValueByWarehouse[String(row.id)] ?? 0,
       stockValue: stockValueByWarehouse[String(row.id)] ?? 0,
     })),
-    error: error ?? ledgerResult.error,
+    error: error ?? costLayerResult.error,
   }
 }
 
@@ -575,7 +703,12 @@ export async function fetchInvoices({ isDemo, orgId }: Ctx) {
 // ─── Inventory Balance ───────────────────────────────────────
 export async function fetchInventoryBalance({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: mock.inventoryBalance, error: null }
-  const { data, error } = await safeSelect("inventory_ledger", "*", query => orgId ? query.eq("org_id", orgId).order("created_at") : query)
+  const [ledgerResult, costLayerResult, reservationResult] = await Promise.all([
+    safeSelect("inventory_ledger", "*", query => orgId ? query.eq("org_id", orgId).order("created_at") : query),
+    safeSelect("inventory_cost_layers", "product_id, warehouse_id, remaining_qty, unit_cost", query => orgId ? query.eq("org_id", orgId).gt("remaining_qty", 0) : query),
+    safeSelect("inventory_reservations", "product_id, warehouse_id, qty", query => orgId ? query.eq("org_id", orgId).eq("status", "ACTIVE") : query),
+  ])
+  const data = ledgerResult.data
   const groups = new Map<string, any>()
   for (const row of data as any[] ?? []) {
     const key = `${row.product_id ?? row.sku}:${row.warehouse_id ?? row.warehouse_name ?? ""}`
@@ -596,15 +729,35 @@ export async function fetchInventoryBalance({ isDemo, orgId }: Ctx) {
     current.updated_at = row.created_at
     groups.set(key, current)
   }
+  const layerCosts = new Map<string, { qty: number; value: number }>()
+  for (const layer of costLayerResult.data as any[] ?? []) {
+    const key = `${layer.product_id}:${layer.warehouse_id ?? ""}`
+    const current = layerCosts.get(key) ?? { qty: 0, value: 0 }
+    const qty = toNumber(layer.remaining_qty)
+    current.qty += qty
+    current.value += qty * toNumber(layer.unit_cost)
+    layerCosts.set(key, current)
+  }
+  const reservedByStock = new Map<string, number>()
+  for (const reservation of reservationResult.data as any[] ?? []) {
+    const key = `${reservation.product_id}:${reservation.warehouse_id ?? ""}`
+    reservedByStock.set(key, (reservedByStock.get(key) ?? 0) + toNumber(reservation.qty))
+  }
   return { data: Array.from(groups.values()).map(row => ({
     ...row,
-    available: row.qty,
-    reserved: 0,
+    available: row.qty - (reservedByStock.get(`${row.product_id}:${row.warehouse_id ?? ""}`) ?? 0),
+    reserved: reservedByStock.get(`${row.product_id}:${row.warehouse_id ?? ""}`) ?? 0,
     incoming: 0,
     outgoing: 0,
-    unit_cost: row.qty ? row.value / row.qty : 0,
-    avgCost: row.qty ? row.value / row.qty : 0,
-  })), error }
+    unit_cost: layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.qty
+      ? (layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.value ?? 0) /
+        (layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.qty ?? 1)
+      : row.qty ? row.value / row.qty : 0,
+    avgCost: layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.qty
+      ? (layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.value ?? 0) /
+        (layerCosts.get(`${row.product_id}:${row.warehouse_id ?? ""}`)?.qty ?? 1)
+      : row.qty ? row.value / row.qty : 0,
+  })), error: ledgerResult.error ?? costLayerResult.error ?? reservationResult.error }
 }
 
 export async function fetchInventoryLedger({ isDemo, orgId }: Ctx) {
@@ -1001,66 +1154,132 @@ export async function reversePurchaseReturn(ref: string, { isDemo }: Ctx) {
   return { error }
 }
 
-export async function fetchLatestImport(productId: string, { isDemo, orgId }: Ctx) {
+export async function fetchProductPricing(
+  {
+    productId,
+    supplierId,
+    customerId,
+    warehouseId,
+    qty = 1,
+  }: {
+    productId: string
+    supplierId?: string
+    customerId?: string
+    warehouseId?: string
+    qty?: number
+  },
+  { isDemo, orgId }: Ctx,
+) {
+  if (isDemo) {
+    const product = (mock.products as any[]).find(row => String(row.id) === String(productId))
+    const imports = (mock.importRecords as any[])
+      .filter(row => String(row.product_id) === String(productId))
+      .filter(row => !supplierId || String(row.supplier_id) === String(supplierId))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    const latest = imports[0]
+    const previous = imports[1]
+    const latestCustomerQuotation = (mock.quotations as any[])
+      .filter(row => !customerId || String(row.customer_id) === String(customerId))
+      .filter(row => (row.items ?? []).some((item: any) => String(item.product_id) === String(productId)))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+    const latestCustomerItem = latestCustomerQuotation?.items?.find((item: any) => String(item.product_id) === String(productId))
+    const referenceCost = toNumber(latest?.cost_price ?? product?.cost)
+    return {
+      data: {
+        product_id: productId,
+        product_name: product?.name ?? latest?.product_name ?? "",
+        sku: product?.sku ?? "",
+        unit: product?.unit ?? latest?.unit ?? null,
+        list_price: toNumber(product?.price),
+        costing_method: "FIFO",
+        available_qty: toNumber(product?.qty),
+        average_cost: referenceCost,
+        estimated_cost: referenceCost,
+        reference_cost: referenceCost,
+        suggested_price: toNumber(product?.price) || Math.round(referenceCost * 1.2),
+        latest_cost: latest ? toNumber(latest.cost_price) : null,
+        previous_cost: previous ? toNumber(previous.cost_price) : null,
+        cost_change_pct: previous && toNumber(previous.cost_price) > 0
+          ? (toNumber(latest.cost_price) - toNumber(previous.cost_price)) * 100 / toNumber(previous.cost_price)
+          : null,
+        receipt_ref: latest?.receipt_id ?? null,
+        receipt_date: latest?.date ?? null,
+        supplier_name: latest?.supplier_name ?? null,
+        receipt_qty: latest ? toNumber(latest.quantity) : null,
+        receipt_unit: latest?.unit ?? null,
+        batch_number: latest?.batch_number ?? null,
+        manufacture_date: latest?.manufacture_date ?? null,
+        expiry_date: latest?.expiry_date ?? null,
+        quotation_source_ref: latest?.quotation_id ?? null,
+        latest_customer_price: latestCustomerItem ? toNumber(latestCustomerItem.selling_price) : null,
+        latest_customer_quotation_id: latestCustomerQuotation?.id ?? null,
+        latest_customer_quotation_date: latestCustomerQuotation?.date ?? null,
+      } as ProductPricing,
+      error: null,
+    }
+  }
+  if (!orgId || !productId) return { data: null, error: null }
+  const { data, error } = await (supabase as any).rpc("get_product_pricing", {
+    p_product_id: productId,
+    p_supplier_id: supplierId || null,
+    p_customer_id: customerId || null,
+    p_warehouse_id: warehouseId || null,
+    p_qty: Math.max(toNumber(qty, 1), 0.01),
+  })
+  return { data: data as ProductPricing | null, error }
+}
+
+export async function fetchLatestImport(productId: string, { isDemo, orgId }: Ctx, supplierId?: string) {
   if (isDemo) {
     const rows = (mock.importRecords as any[])
       .filter(row => String(row.product_id) === String(productId))
+      .filter(row => !supplierId || String(row.supplier_id) === String(supplierId))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     return { data: rows[0] ?? null, error: null }
   }
   if (!orgId || !productId) return { data: null, error: null }
-
-  const itemResult = await safeSelect("goods_receipt_items", "*", query =>
-    query.eq("product_id", productId).order("created_at", { ascending: false }).limit(1),
-  )
-  const item = (itemResult.data as any[] ?? [])[0]
-  if (!item) return { data: null, error: itemResult.error }
-
-  const receiptResult = await safeSelect("goods_receipts", "*", query =>
-    query.eq("id", item.receipt_id).eq("org_id", orgId).maybeSingle(),
-  )
-  const receipt = (receiptResult.data as any[] ?? [])[0] ?? receiptResult.data as any
-  if (!receipt) return { data: null, error: receiptResult.error }
-  const quotationResult = receipt.po_ref
-    ? await safeSelect("quotations", "id, customer_id, customer_name", query => query.eq("id", receipt.po_ref).eq("org_id", orgId).maybeSingle())
-    : { data: null, error: null }
-  const quotation = (quotationResult.data as any[] ?? [])[0] ?? quotationResult.data as any
-
+  const pricingResult = await fetchProductPricing({ productId, supplierId }, { isDemo, orgId })
+  const pricing = pricingResult.data
+  if (!pricing?.receipt_ref) return { data: null, error: pricingResult.error }
   return {
     data: {
-      id: item.id,
-      receipt_id: receipt.ref ?? receipt.id,
-      product_id: item.product_id,
-      product_name: item.product_name,
-      supplier_name: receipt.supplier_name ?? "",
-      cost_price: toNumber(item.unit_cost),
-      unit: item.unit ?? "",
-      quantity: toNumber(item.qty),
-      date: receipt.created_at ?? item.created_at,
-      quotation_id: receipt.po_ref ?? "",
-      customer_id: quotation?.customer_id ?? "",
-      customer_name: quotation?.customer_name ?? "",
+      receipt_id: pricing.receipt_ref,
+      product_id: pricing.product_id,
+      product_name: pricing.product_name,
+      supplier_name: pricing.supplier_name ?? "",
+      cost_price: toNumber(pricing.latest_cost),
+      previous_cost: pricing.previous_cost,
+      cost_change_pct: pricing.cost_change_pct,
+      average_cost: pricing.average_cost,
+      estimated_cost: pricing.estimated_cost,
+      costing_method: pricing.costing_method,
+      available_qty: pricing.available_qty,
+      unit: pricing.receipt_unit ?? pricing.unit ?? "",
+      quantity: toNumber(pricing.receipt_qty),
+      date: pricing.receipt_date,
+      quotation_id: pricing.quotation_source_ref ?? "",
+      batch_number: pricing.batch_number,
+      manufacture_date: pricing.manufacture_date,
+      expiry_date: pricing.expiry_date,
     },
-    error: receiptResult.error,
+    error: pricingResult.error,
   }
 }
 
-export async function receiveQuotation(payload: { quotationId: string; receiptRef?: string; warehouseId?: string; warehouseName: string; items: any[] }, { isDemo, orgId }: Ctx) {
-  const receiptRef = payload.receiptRef ?? `GR-${payload.quotationId}`
+export async function receiveGoodsReceipt(payload: { sourceRef: string; receiptRef?: string; warehouseId?: string; warehouseName: string; items: any[] }, { isDemo, orgId }: Ctx) {
+  const receiptRef = payload.receiptRef ?? `GR-${payload.sourceRef}`
   if (!payload.warehouseId || !payload.warehouseName.trim()) return { error: new Error("Receiving warehouse is required") }
   if (isDemo) {
     if (demoGoodsReceipts.some((row: any) => row.ref === receiptRef)) return { error: new Error("Goods receipt already exists") }
-    const receipt = demoUpsert(demoGoodsReceipts, { ref: receiptRef, po_ref: payload.quotationId, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, supplier_name: payload.items[0]?.supplier_name ?? "", items: payload.items.length, status: "Completed" })
+    const receipt = demoUpsert(demoGoodsReceipts, { ref: receiptRef, po_ref: payload.sourceRef, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, supplier_name: payload.items[0]?.supplier_name ?? "", items: payload.items.length, status: "Completed" })
     for (const item of payload.items) {
       const product = mock.products.find((row: any) => row.id === item.product_id || row.sku === item.sku || row.id.replace(/^P0/, "P-") === item.product_id)
       if (product) {
         product.qty = Number(product.qty ?? 0) + Number(item.qty ?? 0)
-        demoUpsert(demoGoodsReceiptItems, { receipt_id: receipt.id, product_id: product.id, product_name: product.name, sku: product.sku, qty: Number(item.qty ?? 0), unit_cost: Number(item.cost_price ?? product.cost ?? 0), unit: item.sell_unit ?? product.unit })
-        demoUpsert(demoInventoryLedger, { ref: receiptRef, movement_type: "RECEIPT", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, qty_in: Number(item.qty ?? 0), qty_out: 0, unit_cost: Number(item.cost_price ?? product.cost ?? 0) })
+        demoUpsert(demoGoodsReceiptItems, { receipt_id: receipt.id, product_id: product.id, product_name: product.name, sku: product.sku, qty: Number(item.qty ?? 0), unit_cost: Number(item.cost_price ?? item.unit_cost ?? product.cost ?? 0), unit: item.sell_unit ?? item.unit ?? product.unit, supplier_id: item.supplier_id ?? null, supplier_name: item.supplier_name ?? null, batch_number: item.batch_number ?? null, manufacture_date: item.manufacture_date ?? null, expiry_date: item.expiry_date ?? null })
+        demoUpsert(demoInventoryLedger, { ref: receiptRef, movement_type: "RECEIPT", product_id: product.id, product_name: product.name, sku: product.sku, warehouse_id: payload.warehouseId, warehouse_name: payload.warehouseName, qty_in: Number(item.qty ?? 0), qty_out: 0, unit_cost: Number(item.cost_price ?? item.unit_cost ?? product.cost ?? 0), batch_number: item.batch_number ?? null, manufacture_date: item.manufacture_date ?? null, expiry_date: item.expiry_date ?? null })
       }
     }
-    const quotation = mock.quotations.find((row: any) => String(row.id) === String(payload.quotationId)) as any
-    if (quotation) quotation.status = "Converted"
     return { error: null }
   }
   const rpcItems = payload.items.map(item => ({
@@ -1070,10 +1289,15 @@ export async function receiveQuotation(payload: { quotationId: string; receiptRe
     qty: Number(item.qty ?? 0),
     unit_cost: Number(item.cost_price ?? item.unit_cost ?? 0),
     unit: item.sell_unit ?? item.unit ?? null,
+    supplier_id: item.supplier_id ?? null,
+    supplier_name: item.supplier_name ?? null,
+    batch_number: item.batch_number ?? null,
+    manufacture_date: item.manufacture_date || null,
+    expiry_date: item.expiry_date || null,
   }))
   const { error } = await (supabase as any).rpc("receive_goods_receipt", {
     p_ref: receiptRef,
-    p_po_ref: payload.quotationId,
+    p_po_ref: payload.sourceRef,
     p_warehouse_id: payload.warehouseId ?? null,
     p_warehouse_name: payload.warehouseName,
     p_supplier_name: payload.items[0]?.supplier_name ?? "Unknown Supplier",
@@ -1125,21 +1349,75 @@ export async function recordFinanceTransaction(payload: Record<string, any>, { i
 
 // --- Quotations ---
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
-  if (isDemo) return { data: mock.quotations, error: null }
+  if (isDemo) return {
+    data: (mock.quotations as any[]).map(quotation => ({
+      ...quotation,
+      customer_id: quotation.customer_id ?? "",
+      customer_name: quotation.customer_name ?? quotation.customer ?? "",
+      warehouse_id: quotation.warehouse_id ?? mock.warehouses[0]?.code ?? "",
+      warehouse_name: quotation.warehouse_name ?? mock.warehouses[0]?.name ?? "",
+      discount_val: quotation.discount_val ?? quotation.discount_pct ?? 0,
+      discount_type: quotation.discount_type ?? "pct",
+      status: quotation.status ?? "Draft",
+      items: (quotation.items ?? []).map((item: any, index: number) => {
+        const product = findDemoProduct(item.product_id ?? item.sku)
+        const category = mock.categories.find((row: any) => row.id === item.category_id)
+          ?? mock.categories.find((row: any) => [row.code, row.name_vi, row.name_en]
+            .some(value => String(value).toLowerCase() === String(product?.category ?? item.category_name ?? "").toLowerCase()))
+        const qty = toNumber(item.qty ?? item.quantity, 1)
+        const sellingPrice = toNumber(item.selling_price ?? item.unit_price)
+        return {
+          ...item,
+          id: item.id ?? `${quotation.id}-ITEM-${index + 1}`,
+          category_id: item.category_id ?? category?.id ?? "",
+          category_name: item.category_name ?? category?.name_vi ?? category?.name_en ?? product?.category ?? item.name ?? "",
+          product_id: item.category_id ? null : product?.id ?? item.product_id ?? null,
+          product_name: item.product_name ?? product?.name ?? item.name ?? "",
+          sell_unit: item.sell_unit ?? product?.unit ?? "Piece",
+          qty,
+          cost_price: toNumber(item.cost_price ?? product?.cost),
+          selling_price: sellingPrice,
+          vat_pct: toNumber(item.vat_pct ?? quotation.tax_pct),
+          total: toNumber(item.total, qty * sellingPrice),
+        }
+      }),
+      allocations: quotation.allocations ?? [],
+    })),
+    error: null,
+  }
   const { data, error } = await safeSelect("quotations", "*", query => orgId ? query.eq("org_id", orgId).order("date", { ascending: false }) : query)
   const quotationRows = data as any[] ?? []
   const quotationIds = quotationRows.map(row => row.id).filter(Boolean)
-  const itemsResult = quotationIds.length
-    ? await safeSelect("quotation_items", "*", query => query.in("quotation_id", quotationIds))
-    : { data: [], error: null }
+  const [itemsResult, allocationResult, reservationResult] = quotationIds.length
+    ? await Promise.all([
+        safeSelect("quotation_items", "*", query => query.in("quotation_id", quotationIds)),
+        safeSelect("quotation_allocations", "*", query => query.in("quotation_id", quotationIds)),
+        safeSelect("inventory_reservations", "quotation_id, quotation_allocation_id, status, qty", query => query.in("quotation_id", quotationIds)),
+      ])
+    : [
+        { data: [], error: null },
+        { data: [], error: null },
+        { data: [], error: null },
+      ]
   const itemsByQuotation = (itemsResult.data as any[] ?? []).reduce((groups, item) => {
     ;(groups[item.quotation_id] ??= []).push(item)
+    return groups
+  }, {} as Record<string, any[]>)
+  const reservationByAllocation = new Map(
+    (reservationResult.data as any[] ?? []).map(reservation => [reservation.quotation_allocation_id, reservation]),
+  )
+  const allocationsByQuotation = (allocationResult.data as any[] ?? []).reduce((groups, allocation) => {
+    ;(groups[allocation.quotation_id] ??= []).push({
+      ...allocation,
+      reservation_status: reservationByAllocation.get(allocation.id)?.status ?? null,
+    })
     return groups
   }, {} as Record<string, any[]>)
   return {
     data: quotationRows.map((row: any) => ({
       ...row,
       items: itemsByQuotation[row.id] ?? [],
+      allocations: allocationsByQuotation[row.id] ?? [],
       customer_name: row.customer_name ?? row.customer ?? "",
       customer_id: row.customer_id ?? row.customerId ?? "",
       valid_until: row.valid_until ?? row.validUntil ?? "",
@@ -1147,21 +1425,22 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
       total: toNumber(row.total ?? 0),
       status: row.status ?? "Draft",
     })),
-    error: error ?? itemsResult.error,
+    error: error ?? itemsResult.error ?? allocationResult.error ?? reservationResult.error,
   }
 }
 
 export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   if (isDemo) return { data: null, error: null }
-  const [productsResult, salesResult, purchaseResult, receiptResult, ledgerResult, invoiceResult] = await Promise.all([
+  const [productsResult, salesResult, purchaseResult, receiptResult, ledgerResult, invoiceResult, costLayerResult] = await Promise.all([
     safeSelect("products", "*", query => orgId ? query.eq("org_id", orgId) : query),
     safeSelect("sales_orders", "*", query => orgId ? query.eq("org_id", orgId) : query),
     safeSelect("purchase_orders", "*", query => orgId ? query.eq("org_id", orgId) : query),
     safeSelect("goods_receipts", "*", query => orgId ? query.eq("org_id", orgId) : query),
     safeSelect("inventory_ledger", "*", query => orgId ? query.eq("org_id", orgId) : query),
     safeSelect("invoices", "*", query => orgId ? query.eq("org_id", orgId) : query),
+    safeSelect("inventory_cost_layers", "product_id, remaining_qty, unit_cost", query => orgId ? query.eq("org_id", orgId).gt("remaining_qty", 0) : query),
   ])
-  const sourceError = [productsResult, salesResult, purchaseResult, receiptResult, ledgerResult, invoiceResult].find(result => result.error)?.error
+  const sourceError = [productsResult, salesResult, purchaseResult, receiptResult, ledgerResult, invoiceResult, costLayerResult].find(result => result.error)?.error
   if (sourceError) return { data: null, error: sourceError }
   const products = productsResult.data as any[]
   const sales = salesResult.data as any[]
@@ -1169,6 +1448,7 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const receipts = receiptResult.data as any[]
   const ledger = ledgerResult.data as any[]
   const invoices = invoiceResult.data as any[]
+  const costLayers = costLayerResult.data as any[]
   const ledgerQtyByProduct = ledger.reduce<Record<string, number>>((totals, row) => {
     if (row.product_id) totals[row.product_id] = (totals[row.product_id] ?? 0) + toNumber(row.qty_in) - toNumber(row.qty_out)
     return totals
@@ -1189,9 +1469,10 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const todayPurchases = activePurchases.filter(row => formatDateKeyUtc7(row.date ?? row.created_at) === today)
   const receivable = invoices.reduce((sum, row) => sum + toNumber(row.outstanding_amount ?? Math.max(0, toNumber(row.total) - toNumber(row.paid_amount))), 0)
   const payable = activePurchases.reduce((sum, row) => sum + toNumber(row.outstanding_amount ?? Math.max(0, toNumber(row.total) - toNumber(row.paid_amount))), 0)
-  const categoryTotals = products.reduce<Record<string, number>>((groups, product) => {
-    const name = product.category || "Other"
-    groups[name] = (groups[name] || 0) + toNumber(ledgerQtyByProduct[product.id] ?? product.qty) * toNumber(product.cost)
+  const productCategory = new Map(products.map(product => [String(product.id), product.category || "Other"]))
+  const categoryTotals = costLayers.reduce<Record<string, number>>((groups, layer) => {
+    const name = productCategory.get(String(layer.product_id)) || "Other"
+    groups[name] = (groups[name] || 0) + toNumber(layer.remaining_qty) * toNumber(layer.unit_cost)
     return groups
   }, {})
   const inventoryValue = Object.values(categoryTotals).reduce<number>((sum, value) => sum + value, 0)
@@ -1266,6 +1547,8 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     return { error }
   }
   const items = (Array.isArray(source.items) ? source.items : []).map((item: Record<string, any>) => ({
+      category_id: item.category_id ?? null,
+      category_name: item.category_name ?? item.categoryName ?? "",
       product_id: item.product_id ?? null,
       product_name: item.product_name ?? item.productName ?? "",
       supplier_id: item.supplier_id ?? null,
@@ -1292,6 +1575,176 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     p_notes: source.notes ?? null,
     p_items: items,
     p_created_by: source.created_by ?? null,
+  })
+  return { error }
+}
+
+export async function fetchQuotationAllocationContext(
+  quotationId: string,
+  { isDemo, orgId }: Ctx,
+) {
+  if (isDemo) {
+    const quotation = (mock.quotations as any[]).find(row => String(row.id) === String(quotationId))
+    if (!quotation) return { data: null, error: new Error("Quotation was not found") }
+    const products = (await fetchProducts({ isDemo, orgId })).data as any[]
+    const items = (quotation.items ?? []).map((item: any, index: number) => {
+      const product = products.find(row => normalizeDemoId(row.id) === normalizeDemoId(item.product_id))
+      const category = mock.categories.find((row: any) => row.id === item.category_id)
+        ?? mock.categories.find((row: any) => [row.code, row.name_vi, row.name_en]
+          .some(value => String(value).toLowerCase() === String(product?.category ?? item.category_name ?? "").toLowerCase()))
+      return {
+        id: item.id ?? `${quotation.id}-ITEM-${index + 1}`,
+        category_id: item.category_id ?? category?.id ?? "",
+        category_name: item.category_name ?? category?.name_vi ?? category?.name_en ?? product?.category ?? "",
+        qty: toNumber(item.qty ?? item.quantity, 1),
+        sell_unit: item.sell_unit ?? product?.unit ?? "Piece",
+        selling_price: toNumber(item.selling_price ?? item.unit_price),
+        vat_pct: toNumber(item.vat_pct),
+      }
+    })
+    return {
+      data: {
+        quotation: {
+          id: quotation.id,
+          status: quotation.status,
+          customer_id: quotation.customer_id,
+          customer_name: quotation.customer_name,
+          warehouse_id: quotation.warehouse_id ?? "DEMO-WAREHOUSE",
+          warehouse_name: quotation.warehouse_name ?? "Demo Warehouse",
+          total: toNumber(quotation.total),
+        },
+        items,
+        products: products.map(product => ({
+          id: product.id,
+          category_id: product.category_id,
+          sku: product.sku,
+          name: product.name,
+          unit: product.unit,
+          price: toNumber(product.price),
+          reference_cost: toNumber(product.cost),
+          track_batch: Boolean(product.track_batch),
+          on_hand: toNumber(product.qty),
+          reserved: toNumber(product.reserved),
+          available: toNumber(product.available ?? product.qty),
+          average_cost: toNumber(product.average_cost ?? product.cost),
+        })),
+        allocations: quotation.allocations ?? [],
+      } as QuotationAllocationContext,
+      error: null,
+    }
+  }
+  if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
+  const { data, error } = await (supabase as any).rpc("get_quotation_allocation_context", {
+    p_quotation_id: quotationId,
+  })
+  return { data: data as QuotationAllocationContext | null, error }
+}
+
+export async function convertQuotationAllocations(
+  quotationId: string,
+  allocations: Array<Record<string, any>>,
+  { isDemo }: Ctx,
+) {
+  if (isDemo) {
+    const quotation = (mock.quotations as any[]).find(row => String(row.id) === String(quotationId))
+    if (quotation) {
+      const normalizedAllocations = allocations.map((allocation, index) => {
+        let product = findDemoProduct(allocation.product_id)
+        if (!product && allocation.new_product) {
+          const category = mock.categories.find((row: any) => row.id === allocation.category_id)
+          product = {
+            id: `P-DEMO-${Date.now()}-${index}`,
+            sku: allocation.new_product.sku,
+            barcode: allocation.new_product.barcode ?? "",
+            name: allocation.new_product.name,
+            category: category?.name_en ?? category?.code ?? "",
+            brand: allocation.new_product.brand ?? "",
+            unit: allocation.new_product.unit,
+            cost: toNumber(allocation.unit_cost),
+            price: toNumber(allocation.new_product.price),
+            qty: 0,
+            status: "Active",
+            track_batch: Boolean(allocation.new_product.track_batch),
+          }
+          ;(mock.products as any[]).push(product)
+        }
+        if (product && allocation.source_type === "NEW_STOCK") {
+          product.qty = toNumber(product.qty) + toNumber(allocation.qty)
+          ;(mock.importRecords as any[]).push({
+            id: `IMP-DEMO-${Date.now()}-${index}`,
+            receipt_id: `ALLOC-IN-${quotationId}`,
+            product_id: product.id,
+            product_name: product.name,
+            supplier_id: allocation.supplier_id,
+            supplier_name: "Allocation supplier",
+            cost_price: toNumber(allocation.unit_cost),
+            unit: product.unit,
+            quantity: toNumber(allocation.qty),
+            date: formatDateKeyUtc7(),
+            quotation_id: quotationId,
+            batch_number: allocation.batch_number ?? null,
+            manufacture_date: allocation.manufacture_date ?? null,
+            expiry_date: allocation.expiry_date ?? null,
+          })
+        }
+        return {
+          ...allocation,
+          id: `ALLOC-DEMO-${Date.now()}-${index}`,
+          product_id: product?.id ?? allocation.product_id,
+          reservation_status: "ACTIVE",
+        }
+      })
+      quotation.status = "Awaiting Delivery"
+      quotation.allocations = normalizedAllocations
+    }
+    return { error: null }
+  }
+  const { error } = await (supabase as any).rpc("convert_quotation_allocations", {
+    p_quotation_id: quotationId,
+    p_allocations: allocations,
+  })
+  return { error }
+}
+
+export async function deliverQuotationAllocation(
+  quotationId: string,
+  ref: string,
+  { isDemo }: Ctx,
+) {
+  if (isDemo) {
+    const quotation = (mock.quotations as any[]).find(row => String(row.id) === String(quotationId))
+    if (quotation) {
+      for (const allocation of quotation.allocations ?? []) {
+        const product = findDemoProduct(allocation.product_id)
+        if (product) product.qty = toNumber(product.qty) - toNumber(allocation.qty)
+        allocation.reservation_status = "CONSUMED"
+      }
+      quotation.status = "Delivered"
+    }
+    return { error: null }
+  }
+  const { error } = await (supabase as any).rpc("deliver_quotation", {
+    p_quotation_id: quotationId,
+    p_ref: ref,
+  })
+  return { error }
+}
+
+export async function cancelQuotationAllocation(quotationId: string, { isDemo }: Ctx) {
+  if (isDemo) {
+    const quotation = (mock.quotations as any[]).find(row => String(row.id) === String(quotationId))
+    if (quotation) {
+      for (const allocation of quotation.allocations ?? []) {
+        if (String(allocation.reservation_status).toUpperCase() === "ACTIVE") {
+          allocation.reservation_status = "RELEASED"
+        }
+      }
+      quotation.status = "Cancelled"
+    }
+    return { error: null }
+  }
+  const { error } = await (supabase as any).rpc("cancel_quotation_conversion", {
+    p_quotation_id: quotationId,
   })
   return { error }
 }

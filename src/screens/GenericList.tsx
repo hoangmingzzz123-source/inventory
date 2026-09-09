@@ -2619,6 +2619,23 @@ export function Settings() {
             <SettingField label={vi ? "Email liên hệ" : "Contact Email"} value={company.email} onChange={value => updateCompany("email", value)} type="email" />
           </div>
           <SettingField label="Website" value={company.website} onChange={value => updateCompany("website", value)} />
+          <label className="block text-[11px] font-medium text-slate-600">
+            {vi ? "Phương pháp tính giá vốn" : "Inventory costing method"}
+            <select
+              value={company.costingMethod}
+              onChange={event => updateCompany("costingMethod", event.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border bg-white px-3 text-xs outline-none"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <option value="FIFO">FIFO — {vi ? "nhập trước, xuất trước" : "first in, first out"}</option>
+              <option value="MOVING_AVERAGE">{vi ? "Bình quân di động" : "Moving average"}</option>
+            </select>
+            <span className="mt-1 block text-[10px] font-normal text-slate-400">
+              {vi
+                ? "Giá vốn thực tế được khóa khi giao hàng; thay đổi này không sửa giá bán trên báo giá hoặc hóa đơn."
+                : "Actual COGS is locked at delivery; this does not change quotation or invoice selling prices."}
+            </span>
+          </label>
           <div className="rounded-xl border bg-slate-50 p-3 text-[11px] text-slate-500" style={{ borderColor: "var(--border)" }}>
             {vi ? "Logo, SMTP, lưu trữ và sao lưu là cấu hình triển khai phía máy chủ, nên không hiển thị nút thao tác khi chưa có backend an toàn." : "Logo, SMTP, storage, and backups are server deployment settings and are not exposed without a secure backend."}
           </div>
@@ -2663,14 +2680,28 @@ export function GoodsReceipt() {
   const { isDemo } = useDemo();
   const { profile } = useAuth();
   useEffect(() => {
-    fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => ({ ...item, date: item.created_at ? formatDateTimeUtc7(item.created_at) : "", doc_no: item.ref, po_no: item.po_ref, warehouse: item.warehouse_name, supplier: item.supplier_name, status: item.status }))) })
+    fetchGoodsReceipts({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data.map((item:any) => {
+      const receiptItems = item.items_detail ?? []
+      const batches = Array.from(new Set(receiptItems.map((line: any) => line.batch_number).filter(Boolean)))
+      return {
+        ...item,
+        date: item.created_at ? formatDateTimeUtc7(item.created_at) : "",
+        doc_no: item.ref,
+        po_no: item.po_ref,
+        warehouse: item.warehouse_name,
+        supplier: item.supplier_name,
+        batch_summary: batches.length ? batches.join(", ") : "—",
+        receipt_value: receiptItems.reduce((sum: number, line: any) => sum + Number(line.qty ?? 0) * Number(line.unit_cost ?? 0), 0),
+        status: item.status,
+      }
+    })) })
   }, [isDemo, profile]);
   const columns = lang === "vi" ? [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "batch_summary", label: "LÔ", isStatus: false }, { key: "receipt_value", label: "GIÁ TRỊ THỰC NHẬP", isStatus: false, format: fmt }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
-    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "date", label: "DATE", isStatus: false }, { key: "doc_no", label: "DOC_NO", isStatus: false }, { key: "po_no", label: "PO_NO", isStatus: false }, { key: "supplier", label: "SUPPLIER", isStatus: false }, { key: "warehouse", label: "WAREHOUSE", isStatus: false }, { key: "batch_summary", label: "BATCH", isStatus: false }, { key: "receipt_value", label: "ACTUAL RECEIPT VALUE", isStatus: false, format: fmt }, { key: "status", label: "STATUS", isStatus: true }
   ];
-  return <GenericCrudList readOnly moduleName="Purchase" title={lang === "vi" ? "nhập kho" : "goods receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","po_no","warehouse","status"]} templateFile="goodsreceipt" />;
+  return <GenericCrudList readOnly moduleName="Purchase" title={lang === "vi" ? "nhập kho" : "goods receipt"} data={data} setData={setData} columns={columns} templateCols={["date","doc_no","po_no","supplier","warehouse","batch_summary","receipt_value","status"]} templateFile="goodsreceipt" />;
 }
 
 // --- NEXT ---

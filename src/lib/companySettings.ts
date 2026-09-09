@@ -7,6 +7,7 @@ export const defaultCompanySettings = {
   website: "https://warehouseos.vn",
   email: "contact@warehouseos.vn",
   logoUrl: "",
+  costingMethod: "FIFO",
 }
 
 export type CompanySettings = typeof defaultCompanySettings

@@ -348,6 +348,7 @@ interface ProductDetailProps { product: Product; onEdit: (p: Product) => void; o
 
 function ProductDetailModal({ product, onEdit, onDelete, onClose, canEdit, canDelete }: ProductDetailProps) {
   const { t, lang } = useLang()
+  const averageCost = Number((product as any).average_cost ?? product.cost ?? 0)
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex" onClick={e => e.stopPropagation()}>
@@ -369,10 +370,11 @@ function ProductDetailModal({ product, onEdit, onDelete, onClose, canEdit, canDe
               {[
                 [lang === "vi" ? "Mã vạch" : "Barcode", product.barcode || "—", true],
                 [lang === "vi" ? "Đơn vị tính" : "Unit", product.unit, false],
-                [lang === "vi" ? "Giá nhập" : "Cost Price", fmt(product.cost) + " ₫", true],
+                [lang === "vi" ? "Giá nhập tham chiếu" : "Reference Cost", fmt(product.cost) + " ₫", true],
+                [lang === "vi" ? "Giá vốn bình quân tồn" : "Average Inventory Cost", fmt(averageCost) + " ₫", true],
                 [lang === "vi" ? "Giá bán" : "Sell Price", fmt(product.price) + " ₫", false],
                 [lang === "vi" ? "Lợi nhuận" : "Margin",
-                  product.price > 0 ? `${Math.round((product.price - product.cost) / product.price * 100)}%` : "—", true],
+                  product.price > 0 ? `${Math.round((product.price - averageCost) / product.price * 100)}%` : "—", true],
                 [lang === "vi" ? "Tồn kho" : "Stock Qty", String(product.qty), false],
               ].map(([l, v, mono]) => (
                 <div key={String(l)} className="bg-slate-50 rounded-xl p-3">
@@ -607,8 +609,8 @@ export default function Products() {
   ]
 
   const colHeaders = lang === "vi"
-    ? ["SKU", "Mã vạch", "Tên sản phẩm", "Danh mục", "Thương hiệu", "ĐVT", "Giá nhập", "Giá bán", "Tồn", "Trạng thái", "Cập nhật", ""]
-    : ["SKU", "Barcode", "Product Name", "Category", "Brand", "Unit", "Cost", "Sell Price", "Qty", "Status", "Updated", ""]
+    ? ["SKU", "Mã vạch", "Tên sản phẩm", "Danh mục", "Thương hiệu", "ĐVT", "Giá vốn BQ", "Giá bán", "Tồn", "Trạng thái", "Cập nhật", ""]
+    : ["SKU", "Barcode", "Product Name", "Category", "Brand", "Unit", "Avg Cost", "Sell Price", "Qty", "Status", "Updated", ""]
 
   const makeActionMenu = (p: Product) => (
     <div className="absolute right-0 top-8 z-30 bg-white border rounded-xl shadow-xl py-1 min-w-[150px]" style={{ borderColor: "var(--border)" }}>
@@ -652,14 +654,14 @@ export default function Products() {
             <Download size={13} /> {t("export")}
           </button>
           <div className="absolute top-full left-0 mt-0 hidden group-hover:flex flex-col bg-white border rounded-lg shadow-lg w-32 z-50 overflow-hidden" style={{ borderColor: "var(--border)" }}>
-            <button onClick={() => exportCsv("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
-            <button onClick={() => exportXlsx("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
+            <button onClick={() => exportCsv("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Avg Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, (p as any).average_cost ?? p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">CSV</button>
+            <button onClick={() => exportXlsx("products", ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Avg Cost", "Price", "Available", t("status")], filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, (p as any).average_cost ?? p.cost, p.price, p.available, p.status]))} className="px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">Excel</button>
           </div>
         </div>}
         {can("Master Data", "export") && <button onClick={() => printTable(
           "products",
-          ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Cost", "Price", "Available", t("status")],
-          filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, p.cost, p.price, p.available, p.status]),
+          ["SKU", "Barcode", t("productName"), t("category"), "Brand", "Unit", "Avg Cost", "Price", "Available", t("status")],
+          filtered.map(p => [p.sku, p.barcode, p.name, p.category, p.brand, p.unit, (p as any).average_cost ?? p.cost, p.price, p.available, p.status]),
         )} className="flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs text-slate-600 hover:bg-slate-50" style={{ borderColor: "var(--border)" }}>
           <Printer size={13} /> {t("print")}
         </button>}
@@ -762,7 +764,7 @@ export default function Products() {
                   <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.category}</td>
                   <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.brand}</td>
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.unit}</td>
-                  <td className="px-3 py-2 mono text-slate-700 text-right whitespace-nowrap">{fmt(p.cost)}</td>
+                  <td className="px-3 py-2 mono text-slate-700 text-right whitespace-nowrap">{fmt(Number((p as any).average_cost ?? p.cost))}</td>
                   <td className="px-3 py-2 mono text-slate-900 font-semibold text-right whitespace-nowrap">{fmt(p.price)}</td>
                   <td className="px-3 py-2 mono text-center">
                     <span className={`font-bold ${p.qty === 0 ? "text-red-500" : p.qty < 10 ? "text-amber-600" : "text-slate-800"}`}>{p.qty}</span>

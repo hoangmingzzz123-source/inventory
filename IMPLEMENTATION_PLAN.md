@@ -12,6 +12,8 @@
 - [x] Phase 6: finance basics. Atomic customer receipts, supplier payments, cash-book posting, invoice/PO settlement, finance permissions, and reconciliation support are implemented.
 - [~] Phase 7: permissions, audit, and quality hardening. UI and database action guards, audit events, secure email-bound organization invitations, an application error boundary, schema contract tests, and nonnegative-inventory concurrency guards are implemented; validation against the deployed Supabase project remains an operational release step.
 - [x] Production dependency hardening: vulnerable SheetJS packages were removed, Excel/CSV import-export now uses ExcelJS with spreadsheet-formula escaping, and the production dependency audit has no known vulnerabilities.
+- [x] Lot costing: every receipt can record its actual unit cost, batch, manufacture date, and expiry date; FIFO or moving-average layers now drive inventory value, transfer cost, sales COGS, and pricing guidance. Existing stock is introduced as an auditable baseline layer by `20260917000000_inventory_lot_costing.sql`.
+- [x] Category quotation allocation: quotation lines snapshot categories, accepted quotes allocate one or more existing/new SKUs atomically, stock reservations protect availability, and only delivery issues inventory. This is added by `20260918000000_quotation_category_allocation.sql`.
 
 ## 1. Context
 
@@ -24,16 +26,18 @@ Current implementation status:
 - `inventory_ledger`, `goods_receipts`, `goods_receipt_items`, and `inventory_balance` are available as the inventory foundation.
 - Product quantity is ledger-derived instead of user-editable.
 - Creating or importing a product with a positive initial quantity creates an opening goods receipt and an `OPENING_BALANCE` ledger movement.
-- Quotation-to-goods-receipt conversion creates receipt details, updates inventory, and writes ledger movements.
+- Accepted quotations are converted into exact SKU allocations. Existing stock is reserved; NEW_STOCK is received with its actual supplier cost and then reserved. Delivery performs the outbound ledger movement.
 - Dashboard, stock ledger, inventory, sales, purchase, finance, and aging reports use persisted live data; mock fixtures are restricted to demo mode.
 - Production hardening, an explicit legacy-opening-stock backfill RPC, ledger-to-balance cache synchronization, and reconciliation helpers are consolidated in `supabase/migrations/20260916000000_production_readiness.sql`.
+- Per-receipt cost layers, batch metadata, supplier-specific latest purchase costs, estimated sales cost, and server-computed delivery COGS are added by `supabase/migrations/20260917000000_inventory_lot_costing.sql`.
+- Category snapshots, SKU allocations, stock reservations, and quotation delivery/cancellation commands are added by `supabase/migrations/20260918000000_quotation_category_allocation.sql`.
 - The application requires Node.js 22 and pnpm 10.34.3 for the current Vite toolchain.
 
 Important existing files:
 
 - `src/lib/dataService.ts`: live/demo data access and inventory movement logic.
 - `src/screens/Products.tsx`: product CRUD and product import flow.
-- `src/screens/Quotations.tsx`: quotation creation and quotation-to-receipt conversion.
+- `src/screens/Quotations.tsx`: category quotation creation, SKU allocation, reservation, and delivery.
 - `src/screens/GenericList.tsx`: shared CRUD screens, stock ledger, reports, and Excel export.
 - `src/screens/Dashboard.tsx`: dashboard KPIs, charts, and recent activities.
 - `supabase/migrations/20260804000000_initial_schema.sql`: base schema.
@@ -110,7 +114,9 @@ The shared formatter is `src/lib/dateUtils.ts`.
 - Support purchase orders with real line items.
 - Support full and partial goods receipts.
 - Validate warehouse, supplier, quantities, and duplicate receipts.
-- Show the latest real import history in quotations and product details.
+- Show actual import history in purchasing/product details and use warehouse cost layers as the internal quotation reference cost.
+- Preserve the actual cost and batch metadata of every partial receipt.
+- Suggest supplier-specific latest cost while keeping customer-facing selling prices independent.
 
 ### Goal C: Complete outbound inventory workflows
 
@@ -118,6 +124,7 @@ The shared formatter is `src/lib/dateUtils.ts`.
 - Validate available stock before delivery.
 - Write outbound ledger movements.
 - Support returns and reversals.
+- Allocate actual delivery cost from FIFO or moving-average inventory layers on the server.
 
 ### Goal D: Replace mock reports with real reports
 
@@ -206,7 +213,7 @@ The shared formatter is `src/lib/dateUtils.ts`.
 6. Prevent duplicate completion of the same receipt reference.
 7. Create receipt header, receipt items, inventory balance, and ledger movement consistently.
 8. Store the current user in `created_by`.
-9. Display receipt history on quotation and product detail screens.
+9. Display receipt history on product/purchasing screens and keep customer quotation exports free of purchase-cost data.
 10. Add receipt filters by supplier, warehouse, date, and status.
 
 ### Acceptance criteria

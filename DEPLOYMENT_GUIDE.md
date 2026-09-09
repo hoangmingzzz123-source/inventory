@@ -6,16 +6,28 @@ This guide assumes the existing Supabase project has already applied migrations 
 ## 1. Back up and apply the new migration
 
 1. Create a database backup or restore point in Supabase.
-2. Apply only `supabase/migrations/20260916000000_production_readiness.sql` to staging first.
+2. Apply `supabase/migrations/20260916000000_production_readiness.sql`,
+   `supabase/migrations/20260917000000_inventory_lot_costing.sql`, then
+   `supabase/migrations/20260918000000_quotation_category_allocation.sql` to staging first.
 3. Do not edit or re-run the older migration files for this release.
 4. Confirm the migration completed without an error before deploying the frontend.
 5. Regenerate `src/lib/database.types.ts` from the staging schema with the team's normal
    Supabase type-generation workflow; this removes the remaining temporary `any` casts after the
    deployed schema becomes available.
 
-The new migration adds the missing columns, atomic workflow RPCs, corrected RLS policies,
+The production-readiness migration adds the missing columns, atomic workflow RPCs, corrected RLS policies,
 organization invitations, audit and permission guards, ledger reconciliation, balance cache
 synchronization, indexes, and realtime publication entries.
+
+The lot-costing migration adds receipt batch metadata, FIFO/moving-average cost layers,
+server-computed COGS allocations, supplier-specific pricing history, and layer reconciliation. It
+creates one `LEGACY_BASELINE` cost layer for each positive existing product/warehouse balance because
+historical data cannot safely reconstruct exact old FIFO consumption.
+
+The category-allocation migration changes new quotations from product lines to category promises.
+Accepted quotations allocate existing or newly received SKUs, create active inventory reservations,
+and move to `Awaiting Delivery`. Only delivery creates the outbound ledger movement and invoice;
+cancellation releases reservations without removing stock that was physically received.
 
 ## 2. Configure the frontend
 
@@ -59,15 +71,15 @@ SUPABASE_TEST_ACCESS_TOKEN=your-admin-access-token \
 pnpm run test:live
 ```
 
-The live test verifies authenticated organization context, atomic quotation receipt, actor
-anti-spoofing, duplicate-conversion rejection, direct-ledger-write rejection, balance cache
-synchronization, and the reconciliation summary.
+The live test verifies authenticated organization context, category allocation, receipt costing,
+reservation lifecycle, delivery-only stock issue, actor anti-spoofing, legacy conversion rejection,
+direct-ledger-write rejection, balance cache synchronization, and reconciliation.
 
 Never run the seed file against production and never commit access tokens.
 
 ## 5. Reconcile existing data
 
-Call `reconciliation_summary` as an authenticated administrator for each organization. All five
+Call `reconciliation_summary` as an authenticated administrator for each organization. All ten
 values should be zero:
 
 - `negative_stock_rows`
@@ -75,11 +87,24 @@ values should be zero:
 - `invoice_payment_mismatches`
 - `purchase_payment_mismatches`
 - `inventory_balance_mismatches`
+- `cost_layer_quantity_mismatches`
+- `unlinked_product_categories`
+- `unlinked_quotation_categories`
+- `allocation_quantity_mismatches`
+- `over_reserved_stock_rows`
 
 For a legacy product reported without ledger history, first identify its real opening warehouse,
 then call `backfill_legacy_product_opening_stock(product_id, warehouse_id)` once as an authorized
 administrator. Do not guess the warehouse and do not backfill a product that already has ledger
 history.
+
+Review the generated `LEGACY_BASELINE` layer values before production cutover. The baseline cost uses
+the available historical ledger value and falls back to the product reference cost when that value is
+not usable. New receipts preserve their own actual unit cost and batch metadata exactly.
+
+If either category-link count is nonzero, review the legacy product/quotation labels and map them to
+the correct organization category before allowing conversion. Do not guess ambiguous categories;
+quotation category snapshots are part of the commercial history.
 
 ## 6. Manual release matrix
 
@@ -90,6 +115,10 @@ Before production, test these flows with real staging accounts:
 - New organization signup and a seven-day, email-bound, single-use invitation.
 - Product opening stock with an explicit warehouse.
 - Draft/approval, partial PO receipt, and over-receipt rejection.
+- Receipt unit cost changes, batch-number enforcement, manufacture/expiry dates, FIFO allocation, and
+  moving-average allocation after changing the Company Settings option.
+- Category quotation with mixed existing/new stock, exact allocation validation, reservation release,
+  and delivery-only inventory issue.
 - Adjustment, warehouse transfer, delivery, purchase return, sales return, and every reversal.
 - Customer receipt, supplier payment, invoice/PO outstanding amount, and cash-book balance.
 - Concurrent stock-out attempts for the same product and warehouse.
@@ -101,7 +130,7 @@ delivery requires a separately configured server-side email/Edge Function integr
 
 ## 7. Production cutover
 
-1. Apply the same new migration to production during a maintenance window.
+1. Apply all three new migrations to production in timestamp order during a maintenance window.
 2. Run reconciliation for every organization.
 3. Deploy the frontend only after database and permission checks pass.
 4. Monitor Supabase database logs, authentication failures, RPC errors, and reconciliation counts

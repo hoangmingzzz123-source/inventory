@@ -11,6 +11,7 @@ const ids = {
   customer: "66666666-6666-4666-8666-666666666666",
   supplier: "77777777-7777-4777-8777-777777777777",
   product: "88888888-8888-4888-8888-888888888888",
+  category: "33333333-3333-4333-8333-333333333333",
 }
 
 async function request(path, options = {}) {
@@ -85,9 +86,8 @@ test(
         p_notes: `Live workflow ${stamp}`,
         p_items: [
           {
-            product_id: ids.product,
-            supplier_id: ids.supplier,
-            import_unit: "Piece",
+            category_id: ids.category,
+            category_name: "Danh mục kiểm thử",
             sell_unit: "Piece",
             qty: 3,
             cost_price: 100000,
@@ -100,35 +100,39 @@ test(
       },
     })
 
-    const receiptRef = `TEST-GRN-${stamp}`
-    const receiptId = await api("rpc/receive_goods_receipt", {
+    await api("rpc/convert_quotation_allocations", {
       method: "POST",
       body: {
-        p_ref: receiptRef,
-        p_po_ref: quotationId,
-        p_warehouse_id: ids.warehouse,
-        p_warehouse_name: "Workflow Test Warehouse",
-        p_supplier_name: "Nhà cung cấp kiểm thử",
-        p_items: [
+        p_quotation_id: quotationId,
+        p_allocations: [
           {
+            quotation_item_id: (
+              await api(`quotation_items?quotation_id=eq.${quotationId}&select=id`)
+            )[0].id,
+            source_type: "NEW_STOCK",
             product_id: ids.product,
-            sku: "TEST-SKU-001",
             qty: 3,
+            supplier_id: ids.supplier,
             unit_cost: 100000,
-            unit: "Piece",
+            batch_number: `BATCH-${stamp}`,
           },
         ],
       },
     })
 
+    const savedReceipts = await api(
+      `goods_receipts?po_ref=eq.${quotationId}&select=id,ref,created_by`,
+    )
+    assert.equal(savedReceipts.length, 1)
+    const receiptId = savedReceipts[0].id
+    const receiptRef = savedReceipts[0].ref
+
     const savedQuotation = (
       await api(`quotations?id=eq.${quotationId}&select=id,status,created_by`)
     )[0]
-    const savedReceipt = (
-      await api(`goods_receipts?id=eq.${receiptId}&select=id,created_by`)
-    )[0]
+    const savedReceipt = savedReceipts[0]
     const savedReceiptItems = await api(
-      `goods_receipt_items?receipt_id=eq.${receiptId}&select=product_id,qty`,
+      `goods_receipt_items?receipt_id=eq.${receiptId}&select=product_id,qty,unit_cost,batch_number`,
     )
     const savedLedger = await api(
       `inventory_ledger?ref=eq.${receiptRef}&select=product_id,qty_in,qty_out`,
@@ -138,7 +142,7 @@ test(
         `inventory_balance?product_id=eq.${ids.product}&warehouse_id=eq.${ids.warehouse}&select=qty`,
       )
     )[0]
-    assert.equal(savedQuotation.status, "Converted")
+    assert.equal(savedQuotation.status, "Awaiting Delivery")
     assert.notEqual(
       savedQuotation.created_by,
       "Live workflow test",
@@ -151,6 +155,8 @@ test(
     )
     assert.equal(savedReceiptItems.length, 1)
     assert.equal(Number(savedReceiptItems[0].qty), 3)
+    assert.equal(Number(savedReceiptItems[0].unit_cost), 100000)
+    assert.equal(savedReceiptItems[0].batch_number, `BATCH-${stamp}`)
     assert.equal(Number(savedLedger[0].qty_in), 3)
     assert.equal(Number(savedLedger[0].qty_out), 0)
     assert.equal(
@@ -158,6 +164,33 @@ test(
       3,
       "Inventory balance cache must match the ledger movement",
     )
+    const costLayers = await api(
+      `inventory_cost_layers?source_ref=eq.${receiptRef}&select=product_id,remaining_qty,unit_cost,batch_number`,
+    )
+    assert.equal(costLayers.length, 1)
+    assert.equal(Number(costLayers[0].remaining_qty), 3)
+    assert.equal(Number(costLayers[0].unit_cost), 100000)
+    assert.equal(costLayers[0].batch_number, `BATCH-${stamp}`)
+    const activeReservations = await api(
+      `inventory_reservations?quotation_id=eq.${quotationId}&select=product_id,qty,status`,
+    )
+    assert.equal(activeReservations.length, 1)
+    assert.equal(activeReservations[0].status, "ACTIVE")
+    assert.equal(Number(activeReservations[0].qty), 3)
+
+    const pricing = await api("rpc/get_product_pricing", {
+      method: "POST",
+      body: {
+        p_product_id: ids.product,
+        p_supplier_id: ids.supplier,
+        p_customer_id: ids.customer,
+        p_warehouse_id: ids.warehouse,
+        p_qty: 2,
+      },
+    })
+    assert.equal(Number(pricing.latest_cost), 100000)
+    assert.equal(Number(pricing.estimated_cost), 100000)
+    assert.equal(pricing.batch_number, `BATCH-${stamp}`)
 
     const duplicate = await request("rpc/receive_goods_receipt", {
       method: "POST",
@@ -181,7 +214,7 @@ test(
     assert.equal(
       duplicate.response.ok,
       false,
-      "Duplicate quotation conversion must be rejected",
+      "Legacy direct quotation receipt conversion must be rejected",
     )
 
     const directLedgerWrite = await request("inventory_ledger", {
@@ -207,6 +240,30 @@ test(
       "Authenticated clients must not write directly to the inventory ledger",
     )
 
+    const deliveryRef = `TEST-DN-${stamp}`
+    const deliveryId = await api("rpc/deliver_quotation", {
+      method: "POST",
+      body: { p_quotation_id: quotationId, p_ref: deliveryRef },
+    })
+    const deliveredQuotation = (
+      await api(`quotations?id=eq.${quotationId}&select=id,status`)
+    )[0]
+    assert.equal(deliveredQuotation.status, "Delivered")
+    const consumedReservations = await api(
+      `inventory_reservations?quotation_id=eq.${quotationId}&select=status,qty`,
+    )
+    assert.equal(consumedReservations[0].status, "CONSUMED")
+    const deliveryLedger = await api(
+      `inventory_ledger?ref=eq.${deliveryRef}&select=qty_in,qty_out,unit_cost`,
+    )
+    assert.equal(Number(deliveryLedger[0].qty_out), 3)
+    assert.equal(Number(deliveryLedger[0].unit_cost), 100000)
+    const deliveryInvoice = await api(
+      `invoices?delivery_id=eq.${deliveryId}&select=status,total,outstanding_amount`,
+    )
+    assert.equal(deliveryInvoice.length, 1)
+    assert.equal(deliveryInvoice[0].status, "Unpaid")
+
     const reconciliation = await api("rpc/reconciliation_summary", {
       method: "POST",
       body: {},
@@ -217,6 +274,11 @@ test(
       "invoice_payment_mismatches",
       "purchase_payment_mismatches",
       "inventory_balance_mismatches",
+      "cost_layer_quantity_mismatches",
+      "unlinked_product_categories",
+      "unlinked_quotation_categories",
+      "allocation_quantity_mismatches",
+      "over_reserved_stock_rows",
     ]) {
       assert.equal(
         Number(reconciliation?.[key]),

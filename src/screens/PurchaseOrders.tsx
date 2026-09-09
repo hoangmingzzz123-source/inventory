@@ -6,7 +6,7 @@ import { formatDateTimeUtc7 } from "../lib/dateUtils"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { deletePurchaseOrder, fetchProducts, fetchPurchaseOrders, fetchSuppliers, fetchWarehouses, receiveQuotation, upsertPurchaseOrder } from "../lib/dataService"
+import { deletePurchaseOrder, fetchProducts, fetchPurchaseOrders, fetchSuppliers, fetchWarehouses, receiveGoodsReceipt, upsertPurchaseOrder } from "../lib/dataService"
 import { confirmAppAction } from "../lib/appEvents"
 
 function fmt(value: number) {
@@ -15,6 +15,14 @@ function fmt(value: number) {
 
 function newLine() {
   return { product_id: "", product_name: "", sku: "", qty: 1, unit_cost: 0 }
+}
+
+type ReceiveLot = {
+  qty: number
+  unitCost: number
+  batchNumber: string
+  manufactureDate: string
+  expiryDate: string
 }
 
 export default function PurchaseOrders() {
@@ -31,7 +39,7 @@ export default function PurchaseOrders() {
   const [showCreate, setShowCreate] = useState(false)
   const [showDetail, setShowDetail] = useState<any | null>(null)
   const [showReceive, setShowReceive] = useState<any | null>(null)
-  const [receiveQuantities, setReceiveQuantities] = useState<Record<string, number>>({})
+  const [receiveLots, setReceiveLots] = useState<Record<string, ReceiveLot>>({})
   const [items, setItems] = useState<any[]>([newLine()])
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -82,12 +90,28 @@ export default function PurchaseOrders() {
   }
 
   const openReceive = (order: any) => {
-    const quantities: Record<string, number> = {}
+    const lots: Record<string, ReceiveLot> = {}
     for (const item of order.items ?? []) {
-      quantities[String(item.product_id ?? item.sku)] = Number(item.remaining_qty ?? 0)
+      lots[String(item.product_id ?? item.sku)] = {
+        qty: Number(item.remaining_qty ?? 0),
+        unitCost: Number(item.unit_cost ?? 0),
+        batchNumber: "",
+        manufactureDate: "",
+        expiryDate: "",
+      }
     }
-    setReceiveQuantities(quantities)
+    setReceiveLots(lots)
     setShowReceive(order)
+  }
+
+  const updateReceiveLot = (key: string, field: keyof ReceiveLot, value: string | number) => {
+    setReceiveLots(previous => ({
+      ...previous,
+      [key]: {
+        ...(previous[key] ?? { qty: 0, unitCost: 0, batchNumber: "", manufactureDate: "", expiryDate: "" }),
+        [field]: value,
+      },
+    }))
   }
 
   const receive = async () => {
@@ -96,14 +120,24 @@ export default function PurchaseOrders() {
       product_id: item.product_id,
       product_name: item.product_name,
       sku: item.sku,
-      qty: Math.min(Number(item.remaining_qty ?? 0), Math.max(0, Number(receiveQuantities[String(item.product_id ?? item.sku)] ?? 0))),
-      unit_cost: Number(item.unit_cost ?? 0),
+      qty: Math.min(Number(item.remaining_qty ?? 0), Math.max(0, Number(receiveLots[String(item.product_id ?? item.sku)]?.qty ?? 0))),
+      unit_cost: Math.max(0, Number(receiveLots[String(item.product_id ?? item.sku)]?.unitCost ?? item.unit_cost ?? 0)),
       unit: item.unit,
+      batch_number: receiveLots[String(item.product_id ?? item.sku)]?.batchNumber?.trim() || null,
+      manufacture_date: receiveLots[String(item.product_id ?? item.sku)]?.manufactureDate || null,
+      expiry_date: receiveLots[String(item.product_id ?? item.sku)]?.expiryDate || null,
     })).filter((item: any) => item.qty > 0)
     if (!receiptItems.length) return showToast(lang === "vi" ? "Vui lòng nhập số lượng nhận" : "Enter a receiving quantity", false)
+    const missingBatch = receiptItems.find((item: any) => {
+      const product = products.find(row => String(row.id) === String(item.product_id))
+      return product?.track_batch && !item.batch_number
+    })
+    if (missingBatch) return showToast(lang === "vi" ? `Sản phẩm ${missingBatch.product_name} yêu cầu số lô` : `${missingBatch.product_name} requires a batch number`, false)
+    const invalidDates = receiptItems.find((item: any) => item.manufacture_date && item.expiry_date && item.expiry_date < item.manufacture_date)
+    if (invalidDates) return showToast(lang === "vi" ? "Hạn sử dụng không được trước ngày sản xuất" : "Expiry date cannot be before manufacture date", false)
     setSaving(true)
-    const result = await receiveQuotation({
-      quotationId: showReceive.ref,
+    const result = await receiveGoodsReceipt({
+      sourceRef: showReceive.ref,
       receiptRef: `GR-${showReceive.ref}-${Date.now()}`,
       warehouseId: showReceive.warehouse_id,
       warehouseName: showReceive.warehouse_name,
@@ -251,7 +285,63 @@ export default function PurchaseOrders() {
         </div>
       </div>}
 
-      {showReceive && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowReceive(null)}><div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-center justify-between border-b px-5 py-3.5"><div><h2 className="text-sm font-semibold">{lang === "vi" ? "Nhận hàng theo PO" : "Receive against PO"}</h2><p className="mt-0.5 text-[10px] text-slate-400 mono">{showReceive.ref} · {showReceive.warehouse_name}</p></div><button onClick={() => setShowReceive(null)}><X size={14} /></button></div><div className="p-5"><table className="w-full text-xs"><thead><tr className="border-b">{[t("product"), lang === "vi" ? "Đặt" : "Ordered", lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Lần này" : "Now"].map(header => <th key={header} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{(showReceive.items ?? []).map((item: any) => { const key = String(item.product_id ?? item.sku); const remaining = Number(item.remaining_qty ?? 0); return <tr key={key} className="border-b"><td className="px-2 py-2 font-medium">{item.product_name}</td><td className="px-2 py-2 mono">{item.qty}</td><td className="px-2 py-2 text-emerald-600 mono">{item.received_qty}</td><td className="px-2 py-2"><input min={0} max={remaining} step={1} type="number" value={receiveQuantities[key] ?? 0} onChange={event => setReceiveQuantities(previous => ({ ...previous, [key]: Math.min(remaining, Math.max(0, Number(event.target.value))) }))} className="h-7 w-24 rounded border px-2 text-right mono" /></td></tr> })}</tbody></table></div><div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5"><button onClick={() => setShowReceive(null)} className="h-8 rounded-lg border px-4 text-xs">{t("cancel")}</button><button disabled={saving} onClick={() => void receive()} className="h-8 rounded-lg bg-emerald-600 px-4 text-xs font-medium text-white">{lang === "vi" ? "Xác nhận nhập" : "Confirm receipt"}</button></div></div></div>}
+      {showReceive && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowReceive(null)}>
+          <div className="w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b px-5 py-3.5">
+              <div>
+                <h2 className="text-sm font-semibold">{lang === "vi" ? "Nhận hàng theo lô" : "Receive inventory lot"}</h2>
+                <p className="mt-0.5 text-[10px] text-slate-400 mono">{showReceive.ref} · {showReceive.warehouse_name}</p>
+              </div>
+              <button onClick={() => setShowReceive(null)}><X size={14} /></button>
+            </div>
+            <div className="max-h-[65vh] overflow-auto p-5">
+              <p className="mb-3 text-[11px] text-slate-500">
+                {lang === "vi"
+                  ? "Mỗi lần nhận hàng tạo một lớp giá vốn riêng. Có thể thay đổi đơn giá thực nhận so với PO."
+                  : "Each receipt creates a separate cost layer. The actual receipt cost may differ from the PO cost."}
+              </p>
+              <table className="w-full min-w-[900px] text-xs">
+                <thead>
+                  <tr className="border-b">
+                    {[t("product"), lang === "vi" ? "Còn lại" : "Remaining", lang === "vi" ? "Lần này" : "Now", lang === "vi" ? "Đơn giá thực nhập" : "Actual unit cost", lang === "vi" ? "Số lô" : "Batch", lang === "vi" ? "Ngày sản xuất" : "Manufactured", lang === "vi" ? "Hạn sử dụng" : "Expiry"].map(header => (
+                      <th key={header} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(showReceive.items ?? []).map((item: any) => {
+                    const key = String(item.product_id ?? item.sku)
+                    const remaining = Number(item.remaining_qty ?? 0)
+                    const lot = receiveLots[key] ?? { qty: 0, unitCost: Number(item.unit_cost ?? 0), batchNumber: "", manufactureDate: "", expiryDate: "" }
+                    const product = products.find(row => String(row.id) === String(item.product_id))
+                    return (
+                      <tr key={key} className="border-b align-top">
+                        <td className="px-2 py-2 font-medium">
+                          {item.product_name}
+                          <span className="mt-0.5 block text-[10px] text-slate-400 mono">{item.sku}</span>
+                        </td>
+                        <td className="px-2 py-2 mono">{remaining}</td>
+                        <td className="px-2 py-2"><input min={0} max={remaining} step="0.01" type="number" value={lot.qty} onChange={event => updateReceiveLot(key, "qty", Math.min(remaining, Math.max(0, Number(event.target.value))))} className="h-8 w-24 rounded border px-2 text-right mono" /></td>
+                        <td className="px-2 py-2"><input min={0} step="1" type="number" value={lot.unitCost} onChange={event => updateReceiveLot(key, "unitCost", Math.max(0, Number(event.target.value)))} className="h-8 w-32 rounded border px-2 text-right mono" /></td>
+                        <td className="px-2 py-2">
+                          <input required={Boolean(product?.track_batch && lot.qty > 0)} value={lot.batchNumber} onChange={event => updateReceiveLot(key, "batchNumber", event.target.value)} placeholder={product?.track_batch ? (lang === "vi" ? "Bắt buộc" : "Required") : (lang === "vi" ? "Tùy chọn" : "Optional")} className="h-8 w-28 rounded border px-2 text-xs" />
+                        </td>
+                        <td className="px-2 py-2"><input type="date" value={lot.manufactureDate} onChange={event => updateReceiveLot(key, "manufactureDate", event.target.value)} className="h-8 rounded border px-2 text-xs" /></td>
+                        <td className="px-2 py-2"><input type="date" min={lot.manufactureDate || undefined} value={lot.expiryDate} onChange={event => updateReceiveLot(key, "expiryDate", event.target.value)} className="h-8 rounded border px-2 text-xs" /></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5">
+              <button onClick={() => setShowReceive(null)} className="h-8 rounded-lg border px-4 text-xs">{t("cancel")}</button>
+              <button disabled={saving} onClick={() => void receive()} className="h-8 rounded-lg bg-emerald-600 px-4 text-xs font-medium text-white">{lang === "vi" ? "Xác nhận nhập" : "Confirm receipt"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDetail && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowDetail(null)}><div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-center justify-between border-b px-5 py-3.5"><div className="flex items-center gap-3"><h2 className="text-sm font-semibold mono">{showDetail.ref}</h2><StatusBadge status={showDetail.status} /></div><div className="flex items-center gap-2">{can("Purchase", "create") && ["Approved", "Receiving"].includes(showDetail.status) && <button onClick={() => openReceive(showDetail)} className="h-7 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white">{lang === "vi" ? "Nhận hàng" : "Receive"}</button>}{can("Purchase", "approve") && showDetail.status === "Pending Approval" && <><button disabled={saving} onClick={() => void updateStatus(showDetail, "Approved")} className="flex h-7 items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white"><CheckCircle size={12} />{t("approve")}</button><button disabled={saving} onClick={() => void updateStatus(showDetail, "Cancelled")} className="flex h-7 items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 text-xs text-red-600"><XCircle size={12} />{t("reject")}</button></>}<button onClick={() => setShowDetail(null)}><X size={14} /></button></div></div><div className="max-h-[75vh] space-y-4 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{[[t("supplier"), showDetail.supplier_name], [t("warehouse"), showDetail.warehouse_name], [lang === "vi" ? "Dự kiến" : "Expected", showDetail.expected_date || "—"], [t("grandTotal"), `${fmt(showDetail.total)} VND`], [lang === "vi" ? "Đã trả" : "Paid", `${fmt(showDetail.paid_amount)} VND`], [lang === "vi" ? "Còn phải trả" : "Outstanding", `${fmt(showDetail.outstanding_amount)} VND`], [t("createdBy"), showDetail.created_by], [lang === "vi" ? "Ngày tạo" : "Created", formatDateTimeUtc7(showDetail.created_at)]].map(([label, value]) => <div key={label}><span className="block text-[10px] font-semibold uppercase text-slate-400">{label}</span><span className="text-xs font-medium text-slate-800">{value || "—"}</span></div>)}</div><div className="overflow-hidden rounded-xl border"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[t("product"), "SKU", t("qty"), lang === "vi" ? "Đã nhập" : "Received", lang === "vi" ? "Còn lại" : "Remaining", t("unitPrice"), t("lineTotal")].map(header => <th key={header} className="px-3 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>{(showDetail.items ?? []).map((item: any) => <tr key={item.id} className="border-b last:border-0"><td className="px-3 py-2 font-medium">{item.product_name}</td><td className="px-3 py-2 text-slate-500 mono">{item.sku}</td><td className="px-3 py-2 text-center mono">{item.qty}</td><td className="px-3 py-2 text-center text-emerald-600 mono">{item.received_qty}</td><td className="px-3 py-2 text-center text-amber-600 mono">{item.remaining_qty}</td><td className="px-3 py-2 text-right mono">{fmt(item.unit_cost)}</td><td className="px-3 py-2 text-right font-semibold mono">{fmt(Number(item.qty) * Number(item.unit_cost))}</td></tr>)}</tbody></table></div></div></div></div>}
     </div>
