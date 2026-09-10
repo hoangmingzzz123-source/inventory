@@ -8,10 +8,6 @@ import { useAuth } from "../contexts/AuthContext"
 import { fetchDashboardData, fetchQuotations } from "../lib/dataService"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("vi-VN").format(n)
-}
-
 const activityIcon: Record<string, React.ReactNode> = {
   purchase: <ShoppingCart size={13} className="text-blue-500" />,
   sales: <TrendingUp size={13} className="text-emerald-500" />,

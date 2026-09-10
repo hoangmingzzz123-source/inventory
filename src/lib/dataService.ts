@@ -6,6 +6,7 @@ import { supabase } from "./supabase"
 import * as mock from "../data/mockData"
 import { defaultCompanySettings, type CompanySettings } from "./companySettings"
 import { formatDateKeyUtc7 } from "./dateUtils"
+import { formatVnd } from "./numberFormat"
 
 type Ctx = { isDemo: boolean; orgId?: string }
 
@@ -112,10 +113,6 @@ export async function upsertCompanySettings(settings: CompanySettings, { isDemo,
 function toNumber(value: unknown, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
-}
-
-function formatVnd(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value)
 }
 
 function normalizeNameField(row: Record<string, any>) {

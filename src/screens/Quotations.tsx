@@ -9,8 +9,10 @@ import { defaultCompanySettings, loadCompanySettings } from "../lib/companySetti
 import logoUrl from "../data/logo.png"
 import { formatDateKeyUtc7 } from "../lib/dateUtils"
 import { confirmAppAction, showAppToast } from "../lib/appEvents"
+import { formatQuantity, formatVnd } from "../lib/numberFormat"
 
-function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
+const fmt = formatQuantity
+const money = formatVnd
 
 type ProductOption = {
   value: string
@@ -148,7 +150,7 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
   const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")])
   const labels = vi ? { title: "BÁO GIÁ", id: "Mã báo giá", customer: "Khách hàng", date: "Ngày lập", valid: "Hiệu lực đến", product: "Danh mục", unit: "Đơn vị", qty: "Số lượng", price: "Đơn giá", vat: "VAT %", amount: "Thành tiền", subtotal: "Cộng tiền hàng", discount: "Chiết khấu", beforeVat: "Tiền trước VAT", totalVat: "Tổng VAT", total: "Tổng thanh toán" } : { title: "QUOTATION", id: "Quotation ID", customer: "Customer", date: "Date", valid: "Valid until", product: "Category", unit: "Unit", qty: "Quantity", price: "Unit price", vat: "VAT %", amount: "Amount", subtotal: "Subtotal", discount: "Discount", beforeVat: "Before VAT", totalVat: "Total VAT", total: "Grand total" }
   const escape = (value: unknown) => String(value ?? "").replace(/[&<>\"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character] || character))
-  const itemRows = data.items.map(item => `<tr><td>${escape(item.productName || item.category_name)}</td><td>${escape(item.sell_unit)}</td><td class="number">${item.qty}</td><td class="number">${fmt(item.selling_price)}</td><td class="number">${item.vat_pct}%</td><td class="number">${fmt(item.total)}</td></tr>`).join("")
+  const itemRows = data.items.map(item => `<tr><td>${escape(item.productName || item.category_name)}</td><td>${escape(item.sell_unit)}</td><td class="number">${item.qty}</td><td class="number">${money(item.selling_price)}</td><td class="number">${item.vat_pct}%</td><td class="number">${money(item.total)}</td></tr>`).join("")
   const html = `<div style="width:794px; padding:42px; background:#fff; color:#0f172a; font-family:Arial,sans-serif; font-size:14px; line-height:1.45;">
     <h1 style="margin:0 0 24px; text-align:center; color:#1d4ed8; font-size:28px;">${labels.title}</h1>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:28px; margin-bottom:22px;">
@@ -157,7 +159,7 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
     </div>
     <div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span><strong>${labels.id}:</strong> ${escape(data.id)}</span><span><strong>${labels.date}:</strong> ${escape(data.date)}</span><span><strong>${labels.valid}:</strong> ${escape(data.validUntil)}</span></div>
     <table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2563eb; color:#fff;">${[labels.product, labels.unit, labels.qty, labels.price, labels.vat, labels.amount].map(label => `<th style="padding:10px 8px; border:1px solid #d1d5db; text-align:left;">${label}</th>`).join("")}</tr></thead><tbody>${itemRows}</tbody></table>
-    <div style="margin:22px 0 0 auto; width:330px;">${[[labels.subtotal, data.subtotal], [labels.discount, data.discountAmount], [labels.beforeVat, data.totalBeforeVat], [labels.totalVat, data.totalVat]].map(row => `<div style="display:flex; justify-content:space-between; padding:5px 0;"><span>${row[0]}</span><strong>${fmt(Number(row[1]))}</strong></div>`).join("")}<div style="display:flex; justify-content:space-between; border-top:2px solid #1d4ed8; padding-top:9px; color:#1d4ed8; font-size:17px;"><strong>${labels.total}</strong><strong>${fmt(data.finalTotal)}</strong></div></div>
+    <div style="margin:22px 0 0 auto; width:330px;">${[[labels.subtotal, data.subtotal], [labels.discount, data.discountAmount], [labels.beforeVat, data.totalBeforeVat], [labels.totalVat, data.totalVat]].map(row => `<div style="display:flex; justify-content:space-between; padding:5px 0;"><span>${row[0]}</span><strong>${money(row[1])}</strong></div>`).join("")}<div style="display:flex; justify-content:space-between; border-top:2px solid #1d4ed8; padding-top:9px; color:#1d4ed8; font-size:17px;"><strong>${labels.total}</strong><strong>${money(data.finalTotal)}</strong></div></div>
     ${data.notes ? `<div style="margin-top:24px;"><strong>${vi ? "Ghi chú" : "Notes"}:</strong> ${escape(data.notes)}</div>` : ""}
   </div>`
   const container = window.document.createElement("div")
@@ -237,8 +239,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
       : 0
     // A quotation promises the category, not one arbitrary SKU. Use the
     // weighted category pool only as an editable internal pricing reference.
-    const cost = weightedValue("averageCost")
-    const sell = weightedValue("price") || cost * 1.2
+    const cost = Math.round(weightedValue("averageCost"))
+    const sell = Math.round(weightedValue("price") || cost * 1.2)
     const profit = cost > 0 ? (sell / cost - 1) * 100 : 20
     const unit = referenceProducts[0]?.unit || "Piece"
     setItems(prev => prev.map(i => {
@@ -267,7 +269,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
         const updated = { ...i, [field]: val }
         
         if (field === 'cost_price' || field === 'profit_pct') {
-          updated.selling_price = Number(updated.cost_price) * (1 + Number(updated.profit_pct)/100)
+          updated.selling_price = Math.round(Number(updated.cost_price) * (1 + Number(updated.profit_pct)/100))
         } else if (field === 'selling_price') {
           updated.profit_pct = Number(updated.cost_price) > 0 ? ((Number(updated.selling_price) / Number(updated.cost_price)) - 1) * 100 : 100
         }
@@ -431,7 +433,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                           <option value={10}>10%</option>
                         </select>
                       </td>
-                      <td className="py-2 px-3 text-right text-slate-900 font-medium">{fmt(it.total)}</td>
+                      <td className="py-2 px-3 text-right text-slate-900 font-medium">{money(it.total)}</td>
                       {!isView && (
                         <td className="py-2 px-3 text-center">
                            <button onClick={(e) => { e.stopPropagation(); setItems(items.filter(x => x.id !== it.id))}} className="text-slate-400 hover:text-red-500"><Trash2 size={14} /></button>
@@ -454,7 +456,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               <div className="w-72 space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">{vi ? "Cộng tiền hàng:" : "Subtotal:"}</span>
-                  <span className="font-medium text-slate-900">{fmt(subtotal)}</span>
+                  <span className="font-medium text-slate-900">{money(subtotal)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <div className="flex items-center gap-2">
@@ -468,15 +470,15 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">{vi ? "Tiền trước VAT:" : "Before VAT:"}</span>
-                  <span className="font-medium text-slate-900">{fmt(totalBeforeVat)}</span>
+                  <span className="font-medium text-slate-900">{money(totalBeforeVat)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-500">{vi ? "Tổng tiền VAT:" : "Total VAT:"}</span>
-                  <span className="font-medium text-slate-900">{fmt(totalVat)}</span>
+                  <span className="font-medium text-slate-900">{money(totalVat)}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold pt-3 border-t" style={{ borderColor: "var(--border)" }}>
                   <span className="text-slate-900">{vi ? "Tổng thanh toán:" : "Total Amount:"}</span>
-                  <span className="text-blue-600">{fmt(finalTotal)}</span>
+                  <span className="text-blue-600">{money(finalTotal)}</span>
                 </div>
               </div>
             </div>
@@ -548,7 +550,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                       <div><div className="text-[9px] text-slate-400">{vi ? "Giữ chỗ" : "Reserved"}</div><b>{fmt(product.reserved)}</b></div>
                       <div><div className="text-[9px] text-slate-400">{vi ? "Khả dụng" : "Available"}</div><b className="text-emerald-700">{fmt(product.available)}</b></div>
                     </div>
-                    <div className="mt-2 flex justify-between border-t pt-2 text-[10px]"><span className="text-slate-500">{vi ? "Giá vốn bình quân" : "Average cost"}</span><b>{fmt(product.averageCost)}</b></div>
+                    <div className="mt-2 flex justify-between border-t pt-2 text-[10px]"><span className="text-slate-500">{vi ? "Giá vốn bình quân" : "Average cost"}</span><b>{money(product.averageCost)}</b></div>
                   </div>
                 ))}
                 {categoryProducts.length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{vi ? "Chưa có SKU trong danh mục; có thể tạo SKU mới lúc Convert." : "No SKU yet; a new one can be created during conversion."}</div>}
@@ -620,7 +622,7 @@ function QuotationAllocationModal({ quotationId, supplierOptions, vi, isDemo, or
       product_id: asNewProduct ? "" : productId,
       qty,
       supplier_id: "",
-      unit_cost: Number(product?.average_cost ?? product?.reference_cost ?? 0),
+      unit_cost: Math.round(Number(product?.average_cost ?? product?.reference_cost ?? 0)),
       batch_number: "",
       manufacture_date: "",
       expiry_date: "",
@@ -973,7 +975,7 @@ export default function Quotations() {
                 <td className="py-3 text-sm text-slate-700">{q.customer_name}</td>
                 <td className="py-3 text-sm text-slate-500">{q.date}</td>
                 <td className="py-3 text-sm text-slate-500">{q.valid_until}</td>
-                <td className="py-3 text-sm text-slate-900 font-mono font-medium">{fmt(q.total)}</td>
+                <td className="py-3 text-sm text-slate-900 font-mono font-medium">{money(q.total)}</td>
                 <td className="py-3">
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${getStatusColor(q.status)}`}>
                     {translateStatus(q.status)}

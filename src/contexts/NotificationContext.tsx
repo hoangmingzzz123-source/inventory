@@ -3,6 +3,7 @@ import { useAuth } from "./AuthContext"
 import { useDemo } from "./DemoContext"
 import { fetchInvoices, fetchProducts, fetchPurchaseOrders } from "../lib/dataService"
 import { formatDateKeyUtc7 } from "../lib/dateUtils"
+import { formatVnd } from "../lib/numberFormat"
 import { supabase } from "../lib/supabase"
 
 export type NotifType = "warning" | "success" | "info" | "pending" | "error"
@@ -76,11 +77,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         next.push({ id: timestamp + next.length, type: "warning", category: "inventory", titleVi: "Tồn kho thấp", titleEn: "Low Stock Alert", bodyVi: `${product.name} còn ${Number(product.qty ?? 0)} (tối thiểu: ${Number(product.min_qty ?? 0)}).`, bodyEn: `${product.name} has ${Number(product.qty ?? 0)} remaining (minimum: ${Number(product.min_qty ?? 0)}).`, timeVi: "Hiện tại", timeEn: "Now", unread: true, actionVi: "Xem tồn kho", actionEn: "View stock", navigateTo: "stock-balance", timestamp: new Date(product.updated_at ?? timestamp).getTime() || timestamp })
       }
       for (const order of (purchaseResult.data ?? []).filter((row: any) => String(row.status).toLowerCase() === "pending approval").slice(0, 10)) {
-        const amount = new Intl.NumberFormat("vi-VN").format(Number(order.total ?? 0))
+        const amount = formatVnd(order.total)
         next.push({ id: timestamp + next.length, type: "pending", category: "purchase", titleVi: "PO chờ duyệt", titleEn: "PO Pending Approval", bodyVi: `${order.ref} (${order.supplier_name ?? ""} — ${amount} ₫) cần được phê duyệt.`, bodyEn: `${order.ref} (${order.supplier_name ?? ""} — ${amount} VND) needs approval.`, timeVi: "Đang chờ", timeEn: "Pending", unread: true, actionVi: "Xem đơn mua", actionEn: "View purchase order", navigateTo: "purchase-orders", timestamp: new Date(order.created_at ?? timestamp).getTime() || timestamp })
       }
       for (const invoice of (invoiceResult.data ?? []).filter((row: any) => Number(row.outstanding_amount ?? 0) > 0 && row.due_date && String(row.due_date) < today && String(row.status).toLowerCase() !== "cancelled").slice(0, 10)) {
-        const amount = new Intl.NumberFormat("vi-VN").format(Number(invoice.outstanding_amount ?? 0))
+        const amount = formatVnd(invoice.outstanding_amount)
         next.push({ id: timestamp + next.length, type: "warning", category: "finance", titleVi: "Hóa đơn quá hạn", titleEn: "Invoice Overdue", bodyVi: `${invoice.ref} (${invoice.customer_name ?? ""}) còn phải thu ${amount} ₫.`, bodyEn: `${invoice.ref} (${invoice.customer_name ?? ""}) has ${amount} VND overdue.`, timeVi: "Quá hạn", timeEn: "Overdue", unread: true, actionVi: "Xem hóa đơn", actionEn: "View invoice", navigateTo: "invoices", timestamp: new Date(invoice.created_at ?? timestamp).getTime() || timestamp })
       }
       const sourceError = productResult.error ?? purchaseResult.error ?? invoiceResult.error

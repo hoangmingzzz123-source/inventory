@@ -15,8 +15,9 @@ import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import { exportRowsToExcel, importFromExcel } from "../lib/excelUtils"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
 import { confirmAppAction } from "../lib/appEvents"
+import { formatVnd } from "../lib/numberFormat"
 
-function fmt(n: number) { return new Intl.NumberFormat("vi-VN").format(n) }
+const fmt = formatVnd
 
 function downloadCsvTemplate(filename: string, cols: string[]) {
   const csv = cols.join(",") + "\n" + cols.map(() => "").join(",")

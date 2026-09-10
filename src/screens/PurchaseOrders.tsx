@@ -8,10 +8,9 @@ import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
 import { deletePurchaseOrder, fetchProducts, fetchPurchaseOrders, fetchSuppliers, fetchWarehouses, receiveGoodsReceipt, upsertPurchaseOrder } from "../lib/dataService"
 import { confirmAppAction } from "../lib/appEvents"
+import { formatVnd } from "../lib/numberFormat"
 
-function fmt(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(Number(value) || 0)
-}
+const fmt = formatVnd
 
 function newLine() {
   return { product_id: "", product_name: "", sku: "", qty: 1, unit_cost: 0 }
