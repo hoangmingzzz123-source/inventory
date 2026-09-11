@@ -23,6 +23,10 @@ const demoMigration = fs.readFileSync(
   "supabase/migrations/20260919000000_demo_scenarios_lookups.sql",
   "utf8",
 )
+const quotationReferenceMigration = fs.readFileSync(
+  "supabase/migrations/20260921000000_quotation_reference_center.sql",
+  "utf8",
+)
 const dataService = fs.readFileSync("src/lib/dataService.ts", "utf8")
 const authContext = fs.readFileSync("src/contexts/AuthContext.tsx", "utf8")
 const genericScreens = fs.readFileSync("src/screens/GenericList.tsx", "utf8")
@@ -402,6 +406,35 @@ test("category quotations allocate SKUs, reserve stock, and issue only on delive
   assert.match(quotationScreen, /awaiting delivery/i)
 })
 
+test("category quotation references are ranked, selectable, and snapshotted", () => {
+  assert.match(
+    quotationReferenceMigration,
+    /create table if not exists quotation_item_references/,
+  )
+  assert.match(
+    quotationReferenceMigration,
+    /create or replace function get_quotation_reference/,
+  )
+  assert.match(
+    quotationReferenceMigration,
+    /CUSTOMER_AND_CATEGORY/,
+  )
+  assert.match(
+    quotationReferenceMigration,
+    /reference_date desc/,
+  )
+  assert.match(
+    quotationReferenceMigration,
+    /create or replace function persist_quotation_item_reference/,
+  )
+  assert.match(quotationReferenceMigration, /item->'reference'/)
+  assert.match(dataService, /rpc\("get_quotation_reference"/)
+  assert.match(dataService, /reference: item\.reference \?\? null/)
+  for (const label of ["Cùng khách", "Gần đây", "Giá nhập", "Dùng làm tham chiếu", "Áp dụng giá"]) {
+    assert.match(quotationScreen, new RegExp(label))
+  }
+})
+
 test("production migration protects ledger, cash balance, and helper functions", () => {
   assert.match(
     productionMigration,
@@ -587,8 +620,14 @@ test("theme and live notifications follow the application specification", () => 
   assert.match(themeContext, /prefers-color-scheme: dark/)
   assert.match(notificationContext, /\.channel\(`organization-notifications:/)
   assert.match(notificationContext, /"postgres_changes"/)
+  assert.match(notificationContext, /fetchSalesOrders/)
+  assert.match(notificationContext, /fetchQuotations/)
+  assert.match(notificationContext, /window\.localStorage/)
+  assert.match(notificationContext, /window\.setInterval\(refresh, 60_000\)/)
+  assert.match(notificationContext, /table: "products"/)
+  assert.match(notificationContext, /table: "quotations"/)
   assert.match(
-    productionMigration,
+    productionMigration + quotationReferenceMigration,
     /alter publication supabase_realtime add table/,
   )
 })

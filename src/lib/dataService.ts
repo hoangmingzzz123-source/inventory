@@ -83,6 +83,48 @@ export type ProductPricing = {
   latest_customer_quotation_date: string | null
 }
 
+export type QuotationReferenceRecord = {
+  referenceType: "SALE" | "IMPORT" | "MANUAL"
+  quotationItemId?: string | null
+  quotationId?: string | null
+  quotationLabel?: string | null
+  quotationStatus?: string | null
+  receiptItemId?: string | null
+  receiptId?: string | null
+  receiptRef?: string | null
+  productId?: string | null
+  productName?: string | null
+  sku?: string | null
+  categoryId?: string | null
+  categoryName?: string | null
+  customerId?: string | null
+  customerName?: string | null
+  supplierId?: string | null
+  supplierName?: string | null
+  quantity?: number | null
+  salePrice?: number | null
+  importPrice?: number | null
+  importUnit?: string | null
+  vatPct?: number | null
+  marginPct?: number | null
+  referenceDate?: string | null
+  warehouseId?: string | null
+  warehouseName?: string | null
+  salesperson?: string | null
+  deliveryId?: string | null
+  deliveryRef?: string | null
+  invoiceId?: string | null
+  invoiceRef?: string | null
+}
+
+export type QuotationReferenceContext = {
+  primary: QuotationReferenceRecord | null
+  matchType: "CUSTOMER_AND_CATEGORY" | "CATEGORY_ONLY" | "NONE"
+  sameCustomer: QuotationReferenceRecord[]
+  recentSales: QuotationReferenceRecord[]
+  recentImports: QuotationReferenceRecord[]
+}
+
 export type QuotationAllocationContext = {
   quotation: {
     id: string
@@ -1509,6 +1551,122 @@ export async function recordFinanceTransaction(payload: Record<string, any>, { i
   return { error }
 }
 
+function referenceRecordTime(record: QuotationReferenceRecord) {
+  return new Date(record.referenceDate ?? 0).getTime()
+}
+
+export async function fetchQuotationReference(
+  {
+    categoryId,
+    customerId,
+    limit = 10,
+  }: { categoryId: string; customerId?: string; limit?: number },
+  { isDemo, orgId }: Ctx,
+) {
+  if (!categoryId) {
+    return {
+      data: { primary: null, matchType: "NONE", sameCustomer: [], recentSales: [], recentImports: [] } as QuotationReferenceContext,
+      error: null,
+    }
+  }
+  if (isDemo) {
+    const productResult = await fetchProducts({ isDemo: true, orgId })
+    const products = (productResult.data ?? []) as any[]
+    const productById = new Map(products.map(product => [normalizeDemoId(product.id), product]))
+    const quotationsResult = await fetchQuotations({ isDemo: true, orgId })
+    const validStatuses = new Set(["sent", "accepted", "converted", "awaiting delivery", "delivered"])
+    const recentSales = ((quotationsResult.data ?? []) as any[]).flatMap(quotation => {
+      if (!validStatuses.has(String(quotation.status).toLowerCase())) return []
+      return (quotation.items ?? []).flatMap((item: any) => {
+        const product = productById.get(normalizeDemoId(item.product_id))
+        const itemCategoryId = item.category_id ?? product?.category_id
+        if (String(itemCategoryId) !== String(categoryId)) return []
+        const latestImport = (mock.importRecords as any[])
+          .filter(row => normalizeDemoId(row.product_id) === normalizeDemoId(product?.id))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+        const importPrice = toNumber(item.cost_price ?? latestImport?.cost_price ?? product?.cost)
+        const salePrice = toNumber(item.selling_price ?? item.unit_price)
+        return [{
+          referenceType: "SALE" as const,
+          quotationItemId: String(item.id),
+          quotationId: String(quotation.id),
+          quotationLabel: String(quotation.id),
+          quotationStatus: quotation.status,
+          productId: product?.id ?? null,
+          productName: product?.name ?? item.product_name ?? item.name ?? item.category_name,
+          sku: product?.sku ?? null,
+          categoryId: itemCategoryId,
+          categoryName: item.category_name ?? product?.category,
+          customerId: quotation.customer_id,
+          customerName: quotation.customer_name,
+          quantity: toNumber(item.qty ?? item.quantity),
+          salePrice,
+          importPrice,
+          vatPct: toNumber(item.vat_pct ?? quotation.tax_pct),
+          marginPct: importPrice > 0 ? (salePrice - importPrice) * 100 / importPrice : null,
+          referenceDate: quotation.date,
+          warehouseId: quotation.warehouse_id ?? null,
+          warehouseName: quotation.warehouse_name ?? null,
+          salesperson: quotation.created_by ?? null,
+          supplierId: latestImport?.supplier_id ?? null,
+          supplierName: latestImport?.supplier_name ?? null,
+          receiptId: latestImport?.receipt_id ?? null,
+          receiptRef: latestImport?.receipt_id ?? null,
+        } satisfies QuotationReferenceRecord]
+      })
+    }).sort((a, b) => {
+      const priorityA = ["accepted", "converted", "awaiting delivery", "delivered"].includes(String(a.quotationStatus).toLowerCase()) ? 0 : 1
+      const priorityB = ["accepted", "converted", "awaiting delivery", "delivered"].includes(String(b.quotationStatus).toLowerCase()) ? 0 : 1
+      return priorityA - priorityB || referenceRecordTime(b) - referenceRecordTime(a)
+    }).slice(0, Math.max(1, Math.min(limit, 20)))
+    const sameCustomer = recentSales.filter(record =>
+      customerId && normalizeDemoId(record.customerId) === normalizeDemoId(customerId),
+    )
+    const recentImports = (mock.importRecords as any[]).flatMap(row => {
+      const product = productById.get(normalizeDemoId(row.product_id))
+      if (String(product?.category_id) !== String(categoryId)) return []
+      return [{
+        referenceType: "IMPORT" as const,
+        receiptItemId: String(row.id),
+        receiptId: String(row.receipt_id),
+        receiptRef: String(row.receipt_id),
+        productId: product?.id ?? row.product_id,
+        productName: product?.name ?? row.product_name,
+        sku: product?.sku ?? null,
+        categoryId,
+        categoryName: product?.category ?? null,
+        supplierId: row.supplier_id ?? null,
+        supplierName: row.supplier_name ?? null,
+        quantity: toNumber(row.quantity),
+        importPrice: toNumber(row.cost_price),
+        importUnit: row.unit ?? null,
+        referenceDate: row.date,
+        warehouseId: row.warehouse_id ?? null,
+        warehouseName: row.warehouse_name ?? null,
+      } satisfies QuotationReferenceRecord]
+    }).sort((a, b) => referenceRecordTime(b) - referenceRecordTime(a))
+      .slice(0, Math.max(1, Math.min(limit, 20)))
+    const primary = sameCustomer[0] ?? recentSales[0] ?? null
+    return {
+      data: {
+        primary,
+        matchType: primary ? (sameCustomer.length ? "CUSTOMER_AND_CATEGORY" : "CATEGORY_ONLY") : "NONE",
+        sameCustomer,
+        recentSales,
+        recentImports,
+      } as QuotationReferenceContext,
+      error: productResult.error ?? quotationsResult.error,
+    }
+  }
+  if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
+  const { data, error } = await (supabase as any).rpc("get_quotation_reference", {
+    p_category_id: categoryId,
+    p_customer_id: customerId || null,
+    p_limit: Math.max(1, Math.min(limit, 20)),
+  })
+  return { data: data as QuotationReferenceContext | null, error }
+}
+
 // --- Quotations ---
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
   if (isDemo) return {
@@ -1561,8 +1719,21 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
         { data: [], error: null },
         { data: [], error: null },
       ]
-  const itemsByQuotation = (itemsResult.data as any[] ?? []).reduce((groups, item) => {
-    ;(groups[item.quotation_id] ??= []).push(item)
+  const quotationItems = itemsResult.data as any[] ?? []
+  const quotationItemIds = quotationItems.map(item => item.id).filter(Boolean)
+  const referenceResult = quotationItemIds.length
+    ? await safeSelect("quotation_item_references", "quotation_item_id, snapshot", query =>
+        query.in("quotation_item_id", quotationItemIds),
+      )
+    : { data: [], error: null }
+  const referenceByItem = new Map(
+    (referenceResult.data as any[] ?? []).map(reference => [reference.quotation_item_id, reference.snapshot]),
+  )
+  const itemsByQuotation = quotationItems.reduce((groups, item) => {
+    ;(groups[item.quotation_id] ??= []).push({
+      ...item,
+      reference: referenceByItem.get(item.id) ?? null,
+    })
     return groups
   }, {} as Record<string, any[]>)
   const reservationByAllocation = new Map(
@@ -1587,7 +1758,7 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
       total: toNumber(row.total ?? 0),
       status: row.status ?? "Draft",
     })),
-    error: error ?? itemsResult.error ?? allocationResult.error ?? reservationResult.error,
+    error: error ?? itemsResult.error ?? allocationResult.error ?? reservationResult.error ?? referenceResult.error,
   }
 }
 
@@ -1754,6 +1925,7 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
       selling_price: item.selling_price ?? 0,
       vat_pct: item.vat_pct ?? 0,
       total: item.total ?? 0,
+      reference: item.reference ?? null,
   }))
   const { error } = await (supabase as any).rpc("save_quotation", {
     p_id: source.id ?? null,

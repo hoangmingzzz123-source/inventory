@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { Plus, FileSpreadsheet, Download, Check, X, FileText, Save, Info, Edit, Trash2, Send, Ban, PackageCheck, Truck } from "lucide-react"
+import { Plus, FileSpreadsheet, Download, Check, X, FileText, Save, Info, Edit, Trash2, Send, Ban, PackageCheck, Truck, ExternalLink, Star, RefreshCw } from "lucide-react"
 import { useLang } from "../i18n/LangContext"
 import { exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchLookup, fetchQuotationAllocationContext, fetchQuotations, upsertQuotation, deleteQuotation, type QuotationAllocationContext } from "../lib/dataService"
+import { cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchLookup, fetchQuotationAllocationContext, fetchQuotationReference, fetchQuotations, upsertQuotation, deleteQuotation, type QuotationAllocationContext, type QuotationReferenceContext, type QuotationReferenceRecord } from "../lib/dataService"
 import { defaultCompanySettings, loadCompanySettings } from "../lib/companySettings"
 import logoUrl from "../data/logo.png"
 import { formatDateKeyUtc7 } from "../lib/dateUtils"
@@ -223,7 +223,169 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
   }
 }
 
-function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, canExport = true, onLoadLookup, onLookupProducts }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, canExport?: boolean; onLoadLookup: QuotationLookupLoader; onLookupProducts?: (categoryId: string, warehouseId: string) => Promise<ProductOption[]> }) {
+function referenceHref(screen: string, value?: string | null, exactId = false) {
+  const params = new URLSearchParams()
+  params.set("screen", screen)
+  if (value) params.set(exactId ? "id" : "search", value)
+  return `${window.location.pathname}?${params.toString()}`
+}
+
+function ReferenceLink({ screen, value, label, exactId = false }: {
+  screen: string
+  value?: string | null
+  label?: string | null
+  exactId?: boolean
+}) {
+  if (!value && !label) return <span className="text-slate-400">—</span>
+  return <a
+    href={referenceHref(screen, value || label, exactId)}
+    target="_blank"
+    rel="noreferrer"
+    className="inline-flex max-w-full items-center gap-1 font-medium text-blue-600 hover:underline"
+    onClick={event => event.stopPropagation()}
+  >
+    <span className="truncate">{label || value}</span><ExternalLink size={10} className="shrink-0" />
+  </a>
+}
+
+function referenceIdentity(record?: QuotationReferenceRecord | null) {
+  return record?.quotationItemId
+    ? `${record.quotationItemId}:${record.productId ?? "unallocated"}`
+    : record?.receiptItemId || ""
+}
+
+function formatReferenceDate(value?: string | null, vi = true) {
+  if (!value) return "—"
+  const dateValue = new Date(value)
+  if (Number.isNaN(dateValue.getTime())) return value
+  return new Intl.DateTimeFormat(vi ? "vi-VN" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(dateValue)
+}
+
+function QuotationReferencePanel({
+  vi,
+  item,
+  context,
+  loading,
+  error,
+  isView,
+  onRetry,
+  onUseReference,
+  onApplyPrice,
+}: {
+  vi: boolean
+  item: any
+  context: QuotationReferenceContext | null
+  loading: boolean
+  error: string
+  isView: boolean
+  onRetry: () => void
+  onUseReference: (record: QuotationReferenceRecord) => void
+  onApplyPrice: (record: QuotationReferenceRecord) => void
+}) {
+  const [tab, setTab] = useState<"same" | "recent" | "imports">("same")
+  const sameCustomer = context?.sameCustomer ?? []
+  const recentSales = context?.recentSales ?? []
+  const recentImports = context?.recentImports ?? []
+  const records = tab === "same" ? sameCustomer : tab === "recent" ? recentSales : recentImports
+  const selectedIdentity = referenceIdentity(item?.reference)
+  const featuredRecord = item?.reference ?? context?.primary ?? null
+
+  useEffect(() => {
+    if (!context) return
+    if (context.sameCustomer.length) setTab("same")
+    else if (context.recentSales.length) setTab("recent")
+    else setTab("imports")
+  }, [item?.category_id, context])
+
+  const renderRecord = (record: QuotationReferenceRecord) => {
+    const isSale = record.referenceType === "SALE"
+    const isPrimary = referenceIdentity(context?.primary) === referenceIdentity(record)
+    const isSelected = selectedIdentity === referenceIdentity(record)
+    const sourceScreen = isSale ? "quotations" : "goods-receipt"
+    const sourceValue = isSale ? record.quotationId : record.receiptRef
+    return <div key={referenceIdentity(record)} className={`rounded-lg border bg-white p-3 text-[11px] ${isSelected ? "border-blue-400 ring-1 ring-blue-100" : ""}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1 font-semibold text-slate-900">
+            {isPrimary && <Star size={11} className="shrink-0 fill-amber-400 text-amber-500" />}
+            <ReferenceLink screen="products" value={record.productName || record.sku} label={record.productName || record.sku || (vi ? "Chưa phân bổ SKU" : "SKU not allocated")} />
+          </div>
+          {record.sku && <div className="mt-0.5 font-mono text-[9px] text-slate-400">{record.sku}</div>}
+        </div>
+        {isSelected && <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">{vi ? "ĐANG DÙNG" : "SELECTED"}</span>}
+      </div>
+      <div className="mt-2 grid grid-cols-[84px_minmax(0,1fr)] gap-x-2 gap-y-1">
+        {isSale ? <>
+          <span className="text-slate-500">{vi ? "Khách hàng" : "Customer"}</span>
+          <ReferenceLink screen="customers" value={record.customerName || record.customerId} label={record.customerName || record.customerId} />
+          <span className="text-slate-500">{vi ? "Số lượng" : "Quantity"}</span><b>{fmt(Number(record.quantity ?? 0))}</b>
+          <span className="text-slate-500">{vi ? "Giá nhập" : "Import price"}</span>
+          <ReferenceLink screen={sourceScreen} value={sourceValue} label={money(record.importPrice)} exactId={isSale} />
+          <span className="text-slate-500">{vi ? "Giá bán" : "Sale price"}</span>
+          <ReferenceLink screen="quotations" value={record.quotationId} label={money(record.salePrice)} exactId />
+          <span className="text-slate-500">{vi ? "Lãi tham chiếu" : "Reference margin"}</span><b>{record.marginPct == null ? "—" : `${fmt(Number(record.marginPct))}%`}</b>
+          <span className="text-slate-500">VAT</span><b>{fmt(Number(record.vatPct ?? 0))}%</b>
+          <span className="text-slate-500">{vi ? "Báo giá" : "Quotation"}</span>
+          <ReferenceLink screen="quotations" value={record.quotationId} label={record.quotationLabel || record.quotationId} exactId />
+          {record.invoiceRef && <><span className="text-slate-500">{vi ? "Hóa đơn" : "Invoice"}</span><ReferenceLink screen="invoices" value={record.invoiceRef} label={record.invoiceRef} /></>}
+        </> : <>
+          <span className="text-slate-500">{vi ? "Nhà cung cấp" : "Supplier"}</span>
+          <ReferenceLink screen="suppliers" value={record.supplierName || record.supplierId} label={record.supplierName || record.supplierId} />
+          <span className="text-slate-500">{vi ? "Số lượng" : "Quantity"}</span><b>{fmt(Number(record.quantity ?? 0))} {record.importUnit || ""}</b>
+          <span className="text-slate-500">{vi ? "Giá nhập" : "Import price"}</span>
+          <ReferenceLink screen="goods-receipt" value={record.receiptRef} label={money(record.importPrice)} />
+          <span className="text-slate-500">{vi ? "Phiếu nhập" : "Receipt"}</span>
+          <ReferenceLink screen="goods-receipt" value={record.receiptRef} label={record.receiptRef} />
+        </>}
+        <span className="text-slate-500">{vi ? "Ngày" : "Date"}</span><b>{formatReferenceDate(record.referenceDate, vi)}</b>
+        {record.warehouseName && <><span className="text-slate-500">{vi ? "Kho" : "Warehouse"}</span><ReferenceLink screen="warehouses" value={record.warehouseName} label={record.warehouseName} /></>}
+      </div>
+      {!isView && <div className="mt-3 flex gap-1.5 border-t pt-2">
+        <button type="button" onClick={() => onUseReference(record)} className="flex-1 rounded-md border border-blue-200 px-2 py-1.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50">
+          {vi ? "Dùng làm tham chiếu" : "Use as reference"}
+        </button>
+        {isSale && <button type="button" onClick={() => onApplyPrice(record)} className="flex-1 rounded-md bg-blue-600 px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-blue-700">
+          {vi ? "Áp dụng giá" : "Apply price"}
+        </button>}
+      </div>}
+    </div>
+  }
+
+  return <div className="rounded-xl border bg-white shadow-sm" style={{ borderColor: "var(--border)" }}>
+    <div className="flex items-center gap-2 border-b p-4" style={{ borderColor: "var(--border)" }}>
+      <Star size={15} className="text-amber-500" />
+      <div className="min-w-0"><h3 className="text-sm font-semibold text-slate-900">{vi ? "Tham chiếu báo giá" : "Quotation references"}</h3><div className="truncate text-[10px] text-slate-400">{item?.category_name || (vi ? "Chưa chọn danh mục" : "No category selected")}</div></div>
+    </div>
+    <div className="space-y-3 p-3">
+      {!item?.category_id ? <div className="rounded-lg border border-dashed p-5 text-center text-xs text-slate-400">{vi ? "Hãy chọn danh mục sản phẩm để xem thông tin tham chiếu." : "Select a product category to view references."}</div> : <>
+        {loading && <div className="rounded-lg bg-slate-50 p-3 text-center text-xs text-slate-500">{vi ? "Đang tải lịch sử giá..." : "Loading price history..."}</div>}
+        {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700"><div>{error}</div><button type="button" onClick={onRetry} className="mt-2 inline-flex items-center gap-1 font-semibold hover:underline"><RefreshCw size={11} />{vi ? "Thử lại" : "Retry"}</button></div>}
+        {!loading && !error && context && <>
+          {context.matchType === "CATEGORY_ONLY" && <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-800">{vi ? "Chưa có lịch sử cùng khách hàng. Đang hiển thị giao dịch gần nhất của danh mục." : "No history for this customer. Showing recent category transactions."}</div>}
+          {item.reference && <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-[10px] text-blue-800">{vi ? "Tham chiếu đã chọn sẽ được lưu snapshot cùng dòng báo giá." : "The selected reference will be snapshotted with this quotation line."}</div>}
+          {featuredRecord && <div className="space-y-1.5"><div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{item.reference ? (vi ? "Tham chiếu đã chọn" : "Selected reference") : (vi ? "★ Gợi ý ưu tiên" : "★ Primary suggestion")}</div>{renderRecord(featuredRecord)}</div>}
+          <div className="grid grid-cols-3 rounded-lg bg-slate-100 p-1">
+            {([
+              ["same", vi ? "Cùng khách" : "Same customer", sameCustomer.length],
+              ["recent", vi ? "Gần đây" : "Recent", recentSales.length],
+              ["imports", vi ? "Giá nhập" : "Import prices", recentImports.length],
+            ] as const).map(([key, label, count]) => <button type="button" key={key} onClick={() => setTab(key)} className={`rounded-md px-1 py-1.5 text-[9px] font-semibold ${tab === key ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{label} ({count})</button>)}
+          </div>
+          <div className="max-h-[360px] space-y-2 overflow-auto pr-1">
+            {records.filter(record => referenceIdentity(record) !== referenceIdentity(featuredRecord)).map(renderRecord)}
+            {records.filter(record => referenceIdentity(record) !== referenceIdentity(featuredRecord)).length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{tab === "imports" ? (vi ? "Chưa có thêm lịch sử giá nhập của danh mục này." : "No additional category import history.") : (vi ? "Chưa có thêm lịch sử bán hàng phù hợp." : "No additional matching sales history.")}</div>}
+          </div>
+        </>}
+      </>}
+    </div>
+  </div>
+}
+
+function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, canExport = true, onLoadLookup, onLookupProducts, onLoadReference }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, canExport?: boolean; onLoadLookup: QuotationLookupLoader; onLookupProducts?: (categoryId: string, warehouseId: string) => Promise<ProductOption[]>; onLoadReference?: (categoryId: string, customerId: string) => Promise<QuotationReferenceContext> }) {
   const { profile } = useAuth()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
   const [selectedCustomer, setSelectedCustomer] = useState<QuotationLookupOption | null>(initialData?.customer_id ? {
@@ -260,6 +422,10 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const loadedProductScopesRef = useRef(new Set<string>())
   const [productLookupLoading, setProductLookupLoading] = useState(false)
   const [productLookupError, setProductLookupError] = useState("")
+  const [referenceContext, setReferenceContext] = useState<QuotationReferenceContext | null>(null)
+  const [referenceLoading, setReferenceLoading] = useState(false)
+  const [referenceError, setReferenceError] = useState("")
+  const referenceRequestRef = useRef(0)
 
   const activeItem = items.find(i => i.id === activeRowId)
   const isView = mode === "view"
@@ -292,6 +458,46 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     ),
     [activeItem?.id, initialData?.allocations],
   )
+
+  const loadActiveReference = useCallback(async () => {
+    const categoryId = activeItem?.category_id
+    if (!categoryId || !onLoadReference) {
+      setReferenceContext(null)
+      setReferenceError("")
+      return
+    }
+    const requestId = ++referenceRequestRef.current
+    setReferenceLoading(true)
+    setReferenceError("")
+    try {
+      const result = await onLoadReference(categoryId, customerId)
+      if (referenceRequestRef.current === requestId) {
+        const sameCustomer = result.sameCustomer.filter(record => record.quotationId !== initialData?.id)
+        const recentSales = result.recentSales.filter(record => record.quotationId !== initialData?.id)
+        const primary = sameCustomer[0] ?? recentSales[0] ?? null
+        setReferenceContext({
+          ...result,
+          sameCustomer,
+          recentSales,
+          primary,
+          matchType: primary
+            ? (sameCustomer.length ? "CUSTOMER_AND_CATEGORY" : "CATEGORY_ONLY")
+            : "NONE",
+        })
+      }
+    } catch (error: any) {
+      if (referenceRequestRef.current === requestId) {
+        setReferenceContext(null)
+        setReferenceError(error?.message ?? (vi ? "Không tải được dữ liệu tham chiếu" : "Could not load references"))
+      }
+    } finally {
+      if (referenceRequestRef.current === requestId) setReferenceLoading(false)
+    }
+  }, [activeItem?.category_id, customerId, initialData?.id, onLoadReference, vi])
+
+  useEffect(() => {
+    void loadActiveReference()
+  }, [loadActiveReference])
 
   const loadCategoryProducts = async (categoryId: string, targetWarehouseId: string) => {
     if (!onLookupProducts || !categoryId || !targetWarehouseId) {
@@ -329,25 +535,12 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     if (isView) return
     if (!categoryId) {
       setItems(previous => previous.map(item => item.id === rowId
-        ? { ...item, category_id: "", category_name: "", cost_price: 0, selling_price: 0, total: 0 }
+        ? { ...item, category_id: "", category_name: "", cost_price: 0, selling_price: 0, total: 0, reference: null }
         : item))
       return
     }
     const products = await loadCategoryProducts(categoryId, warehouseId)
-    const availableProducts = products.filter(product => product.available > 0)
-    const referenceProducts = availableProducts.length ? availableProducts : products
-    const totalWeight = referenceProducts.reduce((sum, product) =>
-      sum + (availableProducts.length ? product.available : 1), 0)
-    const weightedValue = (field: "averageCost" | "price") => totalWeight > 0
-      ? referenceProducts.reduce((sum, product) =>
-          sum + Number(product[field] ?? 0) * (availableProducts.length ? product.available : 1), 0) / totalWeight
-      : 0
-    // A quotation promises the category, not one arbitrary SKU. Use the
-    // weighted category pool only as an editable internal pricing reference.
-    const cost = Math.round(weightedValue("averageCost"))
-    const sell = Math.round(weightedValue("price") || cost * 1.2)
-    const profit = cost > 0 ? (sell / cost - 1) * 100 : 20
-    const unit = referenceProducts[0]?.unit || "Piece"
+    const unit = products[0]?.unit || "Piece"
     setItems(prev => prev.map(i => {
       if (i.id === rowId) {
         return {
@@ -355,11 +548,12 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
           category_id: categoryId,
           category_name: category?.label ?? i.category_name ?? "",
           sell_unit: unit,
-          cost_price: cost,
-          profit_pct: profit,
-          selling_price: sell,
+          cost_price: 0,
+          profit_pct: 20,
+          selling_price: 0,
           vat_pct: 10,
-          total: sell * i.qty
+          total: 0,
+          reference: null,
         }
       }
       return i
@@ -391,6 +585,30 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
       }
       return i
     }))
+  }
+
+  const useReference = (record: QuotationReferenceRecord) => {
+    if (!activeItem || isView) return
+    setItems(previous => previous.map(item => {
+      if (item.id !== activeItem.id) return item
+      const referenceCost = Number(record.importPrice ?? item.cost_price ?? 0)
+      const sellingPrice = Number(item.selling_price ?? 0)
+      return {
+        ...item,
+        reference: record,
+        cost_price: referenceCost,
+        profit_pct: referenceCost > 0 && sellingPrice > 0
+          ? (sellingPrice - referenceCost) * 100 / referenceCost
+          : Number(record.marginPct ?? item.profit_pct),
+      }
+    }))
+    showAppToast(vi ? "Đã chọn và lưu giá trị tham chiếu cho dòng báo giá." : "Reference selected for this quotation line.", "success")
+  }
+
+  const applyReferencePrice = (record: QuotationReferenceRecord) => {
+    if (!activeItem || isView || record.salePrice == null) return
+    handleUpdateItem(activeItem.id, "selling_price", Number(record.salePrice))
+    showAppToast(vi ? "Đã áp dụng giá bán tham chiếu. Bạn vẫn có thể chỉnh sửa." : "Reference sale price applied. It remains editable.", "success")
   }
 
   const subtotal = items.reduce((acc, curr) => acc + (curr.total || 0), 0)
@@ -529,7 +747,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                     <th className="py-2.5 px-3 font-medium text-slate-600 w-[80px]">{vi ? "ĐVT bán" : "Sales unit"}</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[60px]">SL</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[100px]">{vi ? "Giá vốn tham khảo" : "Reference cost"}</th>
-                    <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[60px]">% Lãi</th>
+                    <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[70px]">{vi ? "Lãi tham chiếu %" : "Reference margin %"}</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[90px]">{vi ? "Giá bán" : "Price"}</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[60px]">VAT %</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[100px]">{vi ? "Thành tiền" : "Total"}</th>
@@ -649,7 +867,19 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
           </div>
         </div>
 
-        <div className="w-80 bg-white m-4 ml-0 rounded-xl border shadow-sm flex flex-col" style={{ borderColor: "var(--border)" }}>
+        <aside className="m-4 ml-0 w-96 shrink-0 space-y-4 overflow-auto">
+          <QuotationReferencePanel
+            vi={vi}
+            item={activeItem}
+            context={referenceContext}
+            loading={referenceLoading}
+            error={referenceError}
+            isView={isView}
+            onRetry={() => void loadActiveReference()}
+            onUseReference={useReference}
+            onApplyPrice={applyReferencePrice}
+          />
+        <div className="min-h-[360px] rounded-xl border bg-white shadow-sm flex flex-col" style={{ borderColor: "var(--border)" }}>
           <div className="p-4 border-b flex items-center gap-2" style={{ borderColor: "var(--border)" }}>
             <Info size={16} className="text-blue-600" />
             <h3 className="text-sm font-semibold text-slate-900">{activeAllocations.length
@@ -713,6 +943,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
             )}
           </div>
         </div>
+        </aside>
       </div>
     </div>
   )
@@ -995,6 +1226,21 @@ export default function Quotations() {
     if (result.error) throw result.error
     return toProductOptions(result.data ?? [])
   }, [isDemo, profile?.org_id])
+
+  const loadQuotationReference = useCallback(async (categoryId: string, customerId: string) => {
+    const result = await fetchQuotationReference(
+      { categoryId, customerId: customerId || undefined, limit: 10 },
+      { isDemo, orgId: profile?.org_id },
+    )
+    if (result.error) throw result.error
+    return result.data ?? {
+      primary: null,
+      matchType: "NONE" as const,
+      sameCustomer: [],
+      recentSales: [],
+      recentImports: [],
+    }
+  }, [isDemo, profile?.org_id])
   
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
@@ -1215,9 +1461,9 @@ export default function Quotations() {
         <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
       </div>
 
-      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
-      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
-      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
+      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
+      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
+      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
       {allocationQuotationId && <QuotationAllocationModal quotationId={allocationQuotationId} onLoadLookup={loadLookupPage} vi={vi} isDemo={isDemo} orgId={profile?.org_id} onClose={() => setAllocationQuotationId(null)} onComplete={() => { setAllocationQuotationId(null); void refreshQuotations() }} />}
     </div>
   )

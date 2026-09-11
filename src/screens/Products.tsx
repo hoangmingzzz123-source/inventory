@@ -433,7 +433,7 @@ export default function Products() {
       setWarehouseOptions((warehouseRes.data ?? []).map((row: any) => ({ value: String(row.id ?? row.code ?? ""), label: row.name ?? row.code ?? "" })))
     })
   }, [isDemo, profile])
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "")
   const [selected, setSelected] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)

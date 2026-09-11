@@ -410,7 +410,7 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
 
 export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile, readOnly = false, moduleName = "Master Data", onRefresh }: any) {
   const { t, lang } = useLang();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [relatedOptions, setRelatedOptions] = useState<Record<string, string[]>>({
@@ -806,6 +806,7 @@ export function Warehouses() {
 export function SalesOrders() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const { isDemo } = useDemo();
   const { profile, can } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
@@ -813,9 +814,11 @@ export function SalesOrders() {
   useEffect(() => {
     reload()
   }, [isDemo, profile]);
+  const filteredData = data.filter(row => !search || [row.ref, row.doc_no, row.customer, row.customer_name]
+    .some(value => String(value ?? "").toLowerCase().includes(search.toLowerCase())))
   const approve = async (row: any) => { const result = await upsertSalesOrder({ id: row.id, status: "Approved" }, { isDemo, orgId: profile?.org_id }); if (result.error) showAppToast(result.error.message ?? String(result.error)); else await reload() }
   const heads = ["DATE", "DOC_NO", "CUSTOMER", "WAREHOUSE", "TOTAL", "STATUS"]
-  return <><div className="flex h-full flex-col"><Toolbar onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} onRefresh={() => void reload()} onExportCsv={can("Sales", "export") ? () => exportCsv("sales-orders", heads, data.map(row => [row.date, row.doc_no, row.customer, row.warehouse_name, row.total, row.status])) : undefined} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[...heads, ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{head}</th>)}</tr></thead><tbody>{data.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.doc_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5">{row.warehouse_name}</td><td className="px-4 py-2.5 text-right font-semibold mono">{money(row.total)}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Sales", "approve") && ["Draft", "Pending Approval"].includes(row.status) && <button onClick={() => void approve(row)} className="h-7 rounded-lg bg-blue-600 px-2 text-[10px] font-medium text-white">{lang === "vi" ? "Duyệt" : "Approve"}</button>}</td></tr>)}{!data.length && <tr><td colSpan={7} className="py-16 text-center text-slate-400">{lang === "vi" ? "Chưa có đơn bán" : "No sales orders"}</td></tr>}</tbody></table></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
+  return <><div className="flex h-full flex-col"><Toolbar search={search} onSearch={setSearch} onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} onRefresh={() => void reload()} onExportCsv={can("Sales", "export") ? () => exportCsv("sales-orders", heads, data.map(row => [row.date, row.doc_no, row.customer, row.warehouse_name, row.total, row.status])) : undefined} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[...heads, ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{head}</th>)}</tr></thead><tbody>{filteredData.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.doc_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5">{row.warehouse_name}</td><td className="px-4 py-2.5 text-right font-semibold mono">{money(row.total)}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Sales", "approve") && ["Draft", "Pending Approval"].includes(row.status) && <button onClick={() => void approve(row)} className="h-7 rounded-lg bg-blue-600 px-2 text-[10px] font-medium text-white">{lang === "vi" ? "Duyệt" : "Approve"}</button>}</td></tr>)}{!filteredData.length && <tr><td colSpan={7} className="py-16 text-center text-slate-400">{lang === "vi" ? "Không có đơn bán phù hợp" : "No matching sales orders"}</td></tr>}</tbody></table></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
 }
 
 function SalesDocumentModal({ kind, salesOrders, deliveries, initialDeliveryRef, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; initialDeliveryRef?: string; onClose: () => void; onSaved: () => Promise<void> }) {
@@ -2926,6 +2929,7 @@ export function Invoices() {
   const { lang } = useLang()
   const { isDemo } = useDemo(); const { profile, can } = useAuth(); const [invoices, setInvoices] = useState<any[]>([])
   const [error, setError] = useState("")
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "")
   const reload = async () => {
     const result = await fetchInvoices({ isDemo, orgId: profile?.org_id })
     setInvoices((result.data ?? []).map((row: any) => ({ ...row, id: row.ref, so: row.so_ref ?? "", customer: row.customer_name, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "" })))
@@ -2939,9 +2943,13 @@ export function Invoices() {
   const totalPaid = invoices.reduce((sum, row) => sum + Number(row.paid_amount ?? 0), 0)
   const totalOutstanding = invoices.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(0, Number(row.total ?? 0) - Number(row.paid_amount ?? 0))), 0)
   const totalOverdue = invoices.filter(row => row.status === "Overdue").reduce((sum, row) => sum + Number(row.outstanding_amount ?? 0), 0)
+  const filteredInvoices = invoices.filter(row => !search || [row.id, row.so, row.customer, row.delivery_ref]
+    .some(value => String(value ?? "").toLowerCase().includes(search.toLowerCase())))
   return (
     <div className="flex flex-col h-full">
       <Toolbar
+        search={search}
+        onSearch={setSearch}
         onRefresh={() => void reload()}
         onPrint={can("Sales", "export") ? () => printTable("invoices", heads.slice(0, -1), invoices.map(inv => [inv.id, inv.so, inv.customer, inv.amount, inv.tax, inv.total, inv.status, inv.date])) : undefined}
       />
@@ -2967,7 +2975,7 @@ export function Invoices() {
             </tr>
           </thead>
           <tbody>
-            {invoices.map(inv => (
+            {filteredInvoices.map(inv => (
               <tr key={inv.id} className="border-b hover:bg-slate-50/60 cursor-pointer group" style={{ borderColor: "var(--border)" }}>
                 <td className="px-4 py-2.5 mono text-blue-600 font-semibold">{inv.id}</td>
                 <td className="px-4 py-2.5 mono text-slate-500">{inv.so}</td>
@@ -2980,6 +2988,7 @@ export function Invoices() {
                 <td className="px-4 py-2.5"><span className="text-[10px] text-blue-600">{inv.delivery_ref ?? "-"}</span></td>
               </tr>
             ))}
+            {!filteredInvoices.length && <tr><td colSpan={9} className="py-16 text-center text-slate-400">{lang === "vi" ? "Không có hóa đơn phù hợp" : "No matching invoices"}</td></tr>}
           </tbody>
         </table>
       </div>

@@ -33,7 +33,7 @@ export default function PurchaseOrders() {
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [warehouses, setWarehouses] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "")
   const [filterStatus, setFilterStatus] = useState("all")
   const [showCreate, setShowCreate] = useState(false)
   const [showDetail, setShowDetail] = useState<any | null>(null)

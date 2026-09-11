@@ -46,14 +46,23 @@ function NotifRow({ n, lang, onRead, onDismiss, onNavigate }: { n: AppNotificati
   const body = lang === "vi" ? n.bodyVi : n.bodyEn
   const action = lang === "vi" ? n.actionVi : n.actionEn
 
+  const navigate = () => {
+    if (!n.navigateTo) return
+    const params = new URLSearchParams()
+    params.set("screen", n.navigateTo)
+    if (n.navigateId) params.set("id", n.navigateId)
+    if (n.navigateSearch) params.set("search", n.navigateSearch)
+    window.history.pushState({}, "", `${window.location.pathname}?${params.toString()}`)
+    onNavigate?.(n.navigateTo)
+  }
   const handleClick = () => {
     onRead()
-    if (n.navigateTo) onNavigate?.(n.navigateTo)
+    navigate()
   }
   const handleAction = (e: React.MouseEvent) => {
     e.stopPropagation()
     onRead()
-    if (n.navigateTo) onNavigate?.(n.navigateTo)
+    navigate()
   }
 
   return (

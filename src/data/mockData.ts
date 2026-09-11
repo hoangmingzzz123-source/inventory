@@ -155,35 +155,35 @@ export const units = [
 export const quotations = [
   {
     id: "QT-2026-001",
-    customer_id: "CUST-001",
-    customer_name: "Công ty ABC",
+    customer_id: "C001",
+    customer_name: "FPT Telecom",
     date: "2026-08-01",
     valid_until: "2026-08-15",
-    subtotal: 12000000,
+    subtotal: 27600000,
     discount_pct: 5,
     tax_pct: 10,
-    total: 12540000,
+    total: 28842000,
     status: "accepted",
     notes: "Báo giá thiết bị văn phòng",
     items: [
-      { product_id: "P-001", name: "Laptop Dell XPS 15", quantity: 1, unit_price: 10000000, profit_pct: 20 },
-      { product_id: "P-002", name: "Chuột Logitech", quantity: 2, unit_price: 1000000, profit_pct: 15 }
+      { product_id: "P001", name: "Dell Latitude 5540 i5", quantity: 1, cost_price: 18500000, unit_price: 22000000, profit_pct: 18.92, vat_pct: 10 },
+      { product_id: "P004", name: "Logitech MX Keys", quantity: 2, cost_price: 2100000, unit_price: 2800000, profit_pct: 33.33, vat_pct: 10 }
     ]
   },
   {
     id: "QT-2026-002",
-    customer_id: "CUST-003",
-    customer_name: "Đại lý Thành Phát",
+    customer_id: "C003",
+    customer_name: "Viettel Store",
     date: "2026-08-05",
     valid_until: "2026-08-20",
-    subtotal: 5000000,
+    subtotal: 39000000,
     discount_pct: 0,
     tax_pct: 8,
-    total: 5400000,
-    status: "pending",
+    total: 42120000,
+    status: "sent",
     notes: "Báo giá vật tư",
     items: [
-      { product_id: "P-003", name: "Bàn phím cơ", quantity: 5, unit_price: 1000000, profit_pct: 10 }
+      { product_id: "P003", name: "LG 27\" 4K Monitor", quantity: 5, cost_price: 6200000, unit_price: 7800000, profit_pct: 25.81, vat_pct: 8 }
     ]
   }
 ]
