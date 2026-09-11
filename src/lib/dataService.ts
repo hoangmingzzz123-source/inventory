@@ -10,6 +10,50 @@ import { formatVnd } from "./numberFormat"
 
 type Ctx = { isDemo: boolean; orgId?: string }
 
+export type LookupKind =
+  | "warehouses"
+  | "categories"
+  | "customers"
+  | "suppliers"
+  | "products"
+  | "units"
+
+export type LookupItem = {
+  id: string
+  code: string
+  label: string
+  source?: string
+  demoRunId?: string | null
+  categoryId?: string | null
+  unit?: string | null
+  price?: number
+  referenceCost?: number
+  averageCost?: number
+  trackBatch?: boolean
+  onHand?: number
+  reserved?: number
+  available?: number
+  [key: string]: unknown
+}
+
+export type DemoScenario = {
+  code: string
+  name: string
+  description: string
+  finalStatus: string
+}
+
+export type DemoRun = {
+  id: string
+  scenario_code: string
+  status: "RUNNING" | "SUCCESS" | "FAILED"
+  created_by: string
+  started_at: string
+  completed_at: string | null
+  error_message: string | null
+  metadata: Record<string, any>
+}
+
 export type ProductPricing = {
   product_id: string
   product_name: string
@@ -164,6 +208,127 @@ async function safeSelect(table: string, columns = "*", configure?: (query: any)
   } catch (error: any) {
     return { data: [], error }
   }
+}
+
+function demoLookupRows(kind: LookupKind) {
+  if (kind === "warehouses") return mock.warehouses
+  if (kind === "categories") return mock.categories
+  if (kind === "customers") return mock.customers
+  if (kind === "suppliers") return mock.suppliers
+  if (kind === "units") return mock.units
+  return mock.products
+}
+
+/** Compact tenant-scoped read model for dropdowns. Live requests go through a
+ * guarded RPC; demo-preview requests use the equivalent in-memory fixtures. */
+export async function fetchLookup(
+  kind: LookupKind,
+  options: Ctx & {
+    search?: string
+    limit?: number
+    offset?: number
+    categoryId?: string | null
+    warehouseId?: string | null
+    includeStock?: boolean
+    includeDemo?: boolean
+  },
+) {
+  const {
+    isDemo,
+    orgId,
+    search = "",
+    limit = 50,
+    offset = 0,
+    categoryId = null,
+    warehouseId = null,
+    includeStock = false,
+    includeDemo = false,
+  } = options
+  if (isDemo) {
+    const normalizedSearch = search.trim().toLocaleLowerCase("vi")
+    const productRows = kind === "products"
+      ? ((await fetchProducts({ isDemo: true, orgId })).data as any[])
+      : demoLookupRows(kind)
+    const rows = (productRows as any[])
+      .filter(row => String(row.status ?? "Active").toLowerCase() === "active")
+      .filter(row => kind !== "products" || !categoryId || String(row.category_id) === categoryId)
+      .filter(row => !normalizedSearch || [row.code, row.sku, row.name, row.name_vi, row.name_en]
+        .some(value => String(value ?? "").toLocaleLowerCase("vi").includes(normalizedSearch)))
+      .slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, Math.min(limit, 200)))
+      .map(row => ({
+        id: String(row.id ?? row.code),
+        code: String(row.code ?? row.sku ?? ""),
+        label: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? row.sku),
+        categoryId: row.category_id ?? null,
+        unit: row.unit ?? row.name_vi ?? null,
+        price: toNumber(row.price),
+        referenceCost: toNumber(row.cost),
+        averageCost: toNumber(row.average_cost ?? row.cost),
+        trackBatch: Boolean(row.track_batch),
+        onHand: includeStock ? toNumber(row.qty) : undefined,
+        reserved: includeStock ? toNumber(row.reserved) : undefined,
+        available: includeStock ? toNumber(row.available ?? row.qty) : undefined,
+        representative: row.representative ?? row.contact_person ?? row.contact_name ?? "",
+        address: row.address ?? row.location ?? "",
+        phone: row.phone ?? "",
+        email: row.email ?? "",
+        taxCode: row.tax_code ?? "",
+      })) satisfies LookupItem[]
+    return { data: rows, error: null }
+  }
+  if (!orgId) return { data: [] as LookupItem[], error: new Error("Authenticated organization is required") }
+  const { data, error } = await (supabase as any).rpc("get_lookup_items", {
+    p_entity: kind,
+    p_search: search || null,
+    p_limit: limit,
+    p_offset: offset,
+    p_category_id: categoryId,
+    p_warehouse_id: warehouseId,
+    p_include_stock: includeStock,
+    p_include_demo: includeDemo,
+  })
+  return { data: ((data as any)?.items ?? []) as LookupItem[], error }
+}
+
+export async function fetchDemoScenarios({ isDemo, orgId }: Ctx) {
+  if (isDemo || !orgId) return { data: [] as DemoScenario[], error: new Error("Authentication is required") }
+  const { data, error } = await (supabase as any).rpc("get_demo_scenarios")
+  return { data: ((data as any)?.items ?? []) as DemoScenario[], error }
+}
+
+export async function fetchDemoRuns({ isDemo, orgId }: Ctx) {
+  if (isDemo || !orgId) return { data: [] as DemoRun[], error: new Error("Authentication is required") }
+  const { data, error } = await safeSelect("demo_runs", "*", query =>
+    query.eq("org_id", orgId).order("started_at", { ascending: false }).limit(30),
+  )
+  return { data: (data ?? []) as DemoRun[], error }
+}
+
+export async function runDemoScenario(
+  scenario: string,
+  idempotencyKey: string,
+  { isDemo, orgId }: Ctx,
+) {
+  if (isDemo || !orgId) return { data: null, error: new Error("Authentication is required") }
+  const { data, error } = await (supabase as any).rpc("run_demo_scenario", {
+    p_scenario: scenario,
+    p_idempotency_key: idempotencyKey,
+  })
+  const businessError = data?.status === "FAILED"
+    ? new Error(data.error ?? "Demo scenario failed")
+    : null
+  return { data, error: error ?? businessError }
+}
+
+export async function cleanupDemoData(
+  demoRunId: string | null,
+  { isDemo, orgId }: Ctx,
+) {
+  if (isDemo || !orgId) return { data: null, error: new Error("Authentication is required") }
+  const { data, error } = await (supabase as any).rpc("cleanup_demo_data", {
+    p_demo_run_id: demoRunId,
+  })
+  return { data, error }
 }
 
 // ─── Products ────────────────────────────────────────────────
@@ -1631,7 +1796,7 @@ export async function fetchQuotationAllocationContext(
     }
   }
   if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
-  const { data, error } = await (supabase as any).rpc("get_quotation_allocation_context", {
+  const { data, error } = await (supabase as any).rpc("get_quotation_allocation_context_v2", {
     p_quotation_id: quotationId,
   })
   return { data: data as QuotationAllocationContext | null, error }

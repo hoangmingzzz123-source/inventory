@@ -41,6 +41,7 @@ export const translations = {
     auditLogs: "Nhật ký thao tác",
     settings: "Cài đặt",
     notifications: "Thông báo",
+    systemDemo: "Demo nghiệp vụ",
 
     // Actions
     create: "Tạo mới",
@@ -280,6 +281,7 @@ export const translations = {
     auditLogs: "Audit Logs",
     settings: "Settings",
     notifications: "Notifications",
+    systemDemo: "Business Demo",
     create: "Create",
     edit: "Edit",
     delete: "Delete",

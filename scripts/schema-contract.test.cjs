@@ -19,6 +19,10 @@ const allocationMigration = fs.readFileSync(
   "supabase/migrations/20260918000000_quotation_category_allocation.sql",
   "utf8",
 )
+const demoMigration = fs.readFileSync(
+  "supabase/migrations/20260919000000_demo_scenarios_lookups.sql",
+  "utf8",
+)
 const dataService = fs.readFileSync("src/lib/dataService.ts", "utf8")
 const authContext = fs.readFileSync("src/contexts/AuthContext.tsx", "utf8")
 const genericScreens = fs.readFileSync("src/screens/GenericList.tsx", "utf8")
@@ -32,6 +36,8 @@ const notificationContext = fs.readFileSync(
   "utf8",
 )
 const themeContext = fs.readFileSync("src/contexts/ThemeContext.tsx", "utf8")
+const systemDemoScreen = fs.readFileSync("src/screens/SystemDemo.tsx", "utf8")
+const demoFeature = fs.readFileSync("src/lib/demoFeature.ts", "utf8")
 const interactiveScreens = [
   "src/screens/GenericList.tsx",
   "src/screens/Products.tsx",
@@ -585,4 +591,61 @@ test("theme and live notifications follow the application specification", () => 
     productionMigration,
     /alter publication supabase_realtime add table/,
   )
+})
+
+test("lookup RPC is authenticated, tenant scoped, searchable, and reservation aware", () => {
+  assert.match(demoMigration, /create or replace function get_lookup_items/)
+  assert.match(demoMigration, /auth\.uid\(\) is null or current_org is null/)
+  assert.match(demoMigration, /product\.org_id = current_org/)
+  assert.match(demoMigration, /lower\(product\.status\) = 'active'/)
+  assert.match(demoMigration, /p_category_id is null or product\.category_id = p_category_id/)
+  assert.match(demoMigration, /p_warehouse_id is null or ledger\.warehouse_id is not distinct from p_warehouse_id/)
+  assert.match(demoMigration, /'available'.*item\.on_hand - item\.reserved/)
+  assert.match(demoMigration, /p_include_demo or product\.source <> 'dataDemo'/)
+  assert.match(demoMigration, /row_limit.*least\(coalesce\(p_limit, 50\), 200\)/)
+  assert.match(demoMigration, /revoke execute on function get_lookup_items[\s\S]*from public, anon/)
+  assert.match(dataService, /rpc\("get_lookup_items"/)
+})
+
+test("Demo scenarios are isolated, idempotent, transactional, and reuse business RPCs", () => {
+  assert.match(demoMigration, /create table if not exists demo_runs/)
+  assert.match(demoMigration, /demo_runs_idempotency_idx/)
+  assert.match(demoMigration, /new\.source := 'dataDemo'/)
+  assert.match(demoMigration, /new\.demo_run_id := context_run_id::uuid/)
+  assert.match(demoMigration, /new\.source := 'manual'/)
+  assert.match(demoMigration, /new\.source := old\.source/)
+  assert.match(demoMigration, /before insert or update on %I/)
+  assert.match(demoMigration, /create or replace function run_demo_scenario/)
+  assert.match(demoMigration, /exception when others/)
+  assert.match(demoMigration, /status = 'FAILED'/)
+  assert.match(demoMigration, /perform require_permission\('Inventory', 'create'\)/)
+  for (const command of ["save_quotation", "set_quotation_status", "convert_quotation_allocations", "deliver_quotation"]) {
+    assert.match(demoMigration, new RegExp(command + "\\("))
+  }
+  assert.match(demoMigration, /create or replace function cleanup_demo_data/)
+  assert.match(demoMigration, /created_by = current_user_id/)
+  assert.match(demoMigration, /source = 'dataDemo'/)
+  assert.match(demoMigration, /perform require_permission\('Administration', 'delete'\)/)
+  assert.ok(
+    demoMigration.indexOf("delete from inventory_ledger") <
+      demoMigration.indexOf("delete from quotations"),
+    "Demo cleanup must delete ledger references before quotations",
+  )
+  assert.ok(
+    demoMigration.indexOf("delete from goods_receipts") <
+      demoMigration.indexOf("delete from purchase_orders"),
+    "Demo cleanup must delete receipts before purchase orders",
+  )
+})
+
+test("Demo UI supports feature visibility, run history, links, and confirmed cleanup", () => {
+  assert.match(demoFeature, /VITE_DEMO_FEATURE_ENABLED/)
+  assert.match(demoFeature, /localStorage/)
+  assert.match(systemDemoScreen, /fetchDemoScenarios/)
+  assert.match(systemDemoScreen, /crypto\.randomUUID\(\)/)
+  assert.match(systemDemoScreen, /runLocked\.current/)
+  assert.match(systemDemoScreen, /confirmAppAction/)
+  assert.match(systemDemoScreen, /cleanupDemoData/)
+  assert.match(systemDemoScreen, /demo_run_id/)
+  assert.match(systemDemoScreen, /Xem báo giá/)
 })

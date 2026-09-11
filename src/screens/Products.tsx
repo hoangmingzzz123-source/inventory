@@ -760,7 +760,8 @@ export default function Products() {
                   <td className="px-3 py-2 mono text-slate-600 whitespace-nowrap">{p.sku}</td>
                   <td className="px-3 py-2 mono text-slate-400 whitespace-nowrap">{p.barcode || "—"}</td>
                   <td className="px-3 py-2 font-medium text-slate-800 max-w-[200px]">
-                    <button onClick={() => setDetailProduct(p)} className="hover:text-blue-600 text-left truncate w-full">{p.name}</button>
+                    <button onClick={() => setDetailProduct(p)} className="hover:text-blue-600 text-left truncate max-w-[150px] align-middle">{p.name}</button>
+                    {(p as any).source === "dataDemo" && <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[8px] font-bold text-violet-700">DEMO</span>}
                   </td>
                   <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.category}</td>
                   <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.brand}</td>
@@ -830,7 +831,7 @@ export default function Products() {
                 </div>
                 <div className="p-2.5 flex flex-col gap-1 flex-1 cursor-pointer" onClick={() => setDetailProduct(p)}>
                   <div className="text-[10px] mono text-slate-400">{p.sku}</div>
-                  <div className="text-xs font-semibold text-slate-800 leading-tight line-clamp-2">{p.name}</div>
+                  <div className="text-xs font-semibold text-slate-800 leading-tight line-clamp-2">{p.name} {(p as any).source === "dataDemo" && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[8px] font-bold text-violet-700">DEMO</span>}</div>
                   <div className="text-[10px] text-slate-400">{p.brand} · {p.category}</div>
                   <div className="mt-auto pt-1.5 border-t flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
                     <span className="text-[10px] text-slate-400">{lang === "vi" ? "Giá bán" : "Price"}</span>

@@ -8,7 +8,8 @@ This guide assumes the existing Supabase project has already applied migrations 
 1. Create a database backup or restore point in Supabase.
 2. Apply `supabase/migrations/20260916000000_production_readiness.sql`,
    `supabase/migrations/20260917000000_inventory_lot_costing.sql`, then
-   `supabase/migrations/20260918000000_quotation_category_allocation.sql` to staging first.
+   `supabase/migrations/20260918000000_quotation_category_allocation.sql`, and finally
+   `supabase/migrations/20260919000000_demo_scenarios_lookups.sql` to staging first.
 3. Do not edit or re-run the older migration files for this release.
 4. Confirm the migration completed without an error before deploying the frontend.
 5. Regenerate `src/lib/database.types.ts` from the staging schema with the team's normal
@@ -29,6 +30,12 @@ Accepted quotations allocate existing or newly received SKUs, create active inve
 and move to `Awaiting Delivery`. Only delivery creates the outbound ledger movement and invoice;
 cancellation releases reservations without removing stock that was physically received.
 
+The Demo/lookup migration adds authenticated, tenant-scoped dropdown read models, filters Demo data
+out of normal selection flows, and introduces tracked `demo_runs`. Demo scenarios reuse the real
+quotation status/allocation/delivery RPCs, stamp every generated row with `source=dataDemo` and a
+`demo_run_id`, and provide administrator-only transactional cleanup for the current user's runs or
+one explicitly selected run in the same organization.
+
 ## 2. Configure the frontend
 
 Set these values in the deployment environment:
@@ -36,7 +43,12 @@ Set these values in the deployment environment:
 ```dotenv
 VITE_SUPABASE_PROJECT_ID=your-project-id
 VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_DEMO_FEATURE_ENABLED=true
 ```
+
+Set `VITE_DEMO_FEATURE_ENABLED=false` to remove the Business Demo module from the deployed frontend.
+When enabled, each authenticated user can also hide or restore the tab from Settings. Scenario RPCs
+remain authenticated and permission-checked regardless of menu visibility.
 
 Use the public anon key only. Never expose the service-role key in the frontend or commit it
 to the repository.
@@ -123,6 +135,10 @@ Before production, test these flows with real staging accounts:
 - Customer receipt, supplier payment, invoice/PO outstanding amount, and cash-book balance.
 - Concurrent stock-out attempts for the same product and warehouse.
 - Dashboard, report filters, Excel/CSV export, dark mode, and realtime notification refresh.
+- Lookup search, category/product dependency, warehouse-specific available stock, and empty/error
+  dropdown states.
+- Every Demo scenario, idempotent retry, per-run cleanup, Demo badges, and verification that normal
+  dropdowns do not expose `source=dataDemo` records.
 
 The Users screen currently creates and copies a secure invitation link; an administrator must
 send that link through the company's approved communication channel. Automated invitation email
@@ -130,7 +146,7 @@ delivery requires a separately configured server-side email/Edge Function integr
 
 ## 7. Production cutover
 
-1. Apply all three new migrations to production in timestamp order during a maintenance window.
+1. Apply all four new migrations to production in timestamp order during a maintenance window.
 2. Run reconciliation for every organization.
 3. Deploy the frontend only after database and permission checks pass.
 4. Monitor Supabase database logs, authentication failures, RPC errors, and reconciliation counts

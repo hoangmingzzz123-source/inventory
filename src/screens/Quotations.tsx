@@ -1,15 +1,16 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Plus, FileSpreadsheet, Download, Check, X, FileText, Save, Info, Edit, Trash2, Send, Ban, PackageCheck, Truck } from "lucide-react"
 import { useLang } from "../i18n/LangContext"
 import { exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchCategories, fetchCustomers, fetchProducts, fetchQuotationAllocationContext, fetchQuotations, fetchSuppliers, fetchWarehouses, upsertQuotation, deleteQuotation, type QuotationAllocationContext } from "../lib/dataService"
+import { cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchLookup, fetchQuotationAllocationContext, fetchQuotations, upsertQuotation, deleteQuotation, type QuotationAllocationContext } from "../lib/dataService"
 import { defaultCompanySettings, loadCompanySettings } from "../lib/companySettings"
 import logoUrl from "../data/logo.png"
 import { formatDateKeyUtc7 } from "../lib/dateUtils"
 import { confirmAppAction, showAppToast } from "../lib/appEvents"
 import { formatQuantity, formatVnd } from "../lib/numberFormat"
+import AsyncPaginatedSelect, { type AsyncSelectOption, type AsyncSelectPage } from "../components/AsyncPaginatedSelect"
 
 const fmt = formatQuantity
 const money = formatVnd
@@ -30,23 +31,40 @@ type ProductOption = {
   averageCost: number
 }
 
-type CategoryOption = { value: string; label: string; code: string }
+type QuotationLookupKind = "warehouses" | "categories" | "customers" | "suppliers" | "units"
+
+type QuotationLookupOption = AsyncSelectOption & {
+  code?: string
+  name?: string
+  representative?: string
+  address?: string
+  phone?: string
+  email?: string
+  tax_code?: string
+}
+
+type QuotationLookupLoader = (
+  kind: QuotationLookupKind,
+  search: string,
+  offset: number,
+  limit: number,
+) => Promise<AsyncSelectPage<QuotationLookupOption>>
 
 function toProductOptions(products: any[]): ProductOption[] {
   return products.map(product => ({
     value: product.id,
-    label: `${product.name} (${product.sku})`,
-    name: product.name,
-    sku: product.sku,
-    cost: Number(product.average_cost ?? product.cost ?? 0),
+    label: product.label ?? `${product.name} (${product.sku ?? product.code})`,
+    name: product.name ?? product.label,
+    sku: product.sku ?? product.code,
+    cost: Number(product.average_cost ?? product.averageCost ?? product.cost ?? product.referenceCost ?? 0),
     price: Number(product.price ?? 0),
     unit: product.unit || "Piece",
-    trackBatch: Boolean(product.track_batch),
-    categoryId: product.category_id || "",
-    onHand: Number(product.qty ?? 0),
+    trackBatch: Boolean(product.track_batch ?? product.trackBatch),
+    categoryId: product.category_id ?? product.categoryId ?? "",
+    onHand: Number(product.qty ?? product.onHand ?? 0),
     reserved: Number(product.reserved ?? 0),
-    available: Number(product.available ?? product.qty ?? 0),
-    averageCost: Number(product.average_cost ?? product.cost ?? 0),
+    available: Number(product.available ?? product.qty ?? product.onHand ?? 0),
+    averageCost: Number(product.average_cost ?? product.averageCost ?? product.cost ?? product.referenceCost ?? 0),
   }))
 }
 
@@ -187,15 +205,29 @@ async function exportQuotationPdf(data: { id?: string; company: typeof defaultCo
   }
 }
 
-function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, productOptions = [], categoryOptions = [], customerOptions = [], warehouseOptions = [], canExport = true }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, productOptions?: ProductOption[], categoryOptions?: CategoryOption[], customerOptions?: Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>, warehouseOptions?: Array<{value: string, label: string}>, canExport?: boolean }) {
+function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, canExport = true, onLoadLookup, onLookupProducts }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, canExport?: boolean; onLoadLookup: QuotationLookupLoader; onLookupProducts?: (categoryId: string, warehouseId: string) => Promise<ProductOption[]> }) {
   const { profile } = useAuth()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
+  const [selectedCustomer, setSelectedCustomer] = useState<QuotationLookupOption | null>(initialData?.customer_id ? {
+    value: initialData.customer_id,
+    label: initialData.customer_name || initialData.customer_id,
+    name: initialData.customer_name || "",
+    representative: initialData.customer_representative || "",
+    address: initialData.customer_address || "",
+    phone: initialData.customer_phone || "",
+    email: initialData.customer_email || "",
+    tax_code: initialData.customer_tax_code || "",
+  } : null)
   const [date, setDate] = useState(initialData?.date || formatDateKeyUtc7())
   const [validUntil, setValidUntil] = useState(initialData?.valid_until || "")
   const [globalDiscount, setGlobalDiscount] = useState(initialData?.discount_val || 0)
   const [discountType, setDiscountType] = useState<"pct" | "amount">(initialData?.discount_type || "pct")
   const [notes, setNotes] = useState(initialData?.notes || "")
-  const [warehouseId, setWarehouseId] = useState(initialData?.warehouse_id || warehouseOptions[0]?.value || "")
+  const [warehouseId, setWarehouseId] = useState(initialData?.warehouse_id || "")
+  const [selectedWarehouse, setSelectedWarehouse] = useState<QuotationLookupOption | null>(initialData?.warehouse_id ? {
+    value: initialData.warehouse_id,
+    label: initialData.warehouse_name || initialData.warehouse_id,
+  } : null)
   
   const [items, setItems] = useState<any[]>(initialData?.items?.length
     ? initialData.items.map((it: any, i: number) => ({
@@ -206,17 +238,35 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     : [{ id: Date.now(), category_id: "", category_name: "", sell_unit: "Piece", qty: 1, cost_price: 0, profit_pct: 20, selling_price: 0, vat_pct: 10, total: 0 }])
   const [activeRowId, setActiveRowId] = useState<number | null>(null)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [resolvedProductOptions, setResolvedProductOptions] = useState<ProductOption[]>([])
+  const loadedProductScopesRef = useRef(new Set<string>())
+  const [productLookupLoading, setProductLookupLoading] = useState(false)
+  const [productLookupError, setProductLookupError] = useState("")
 
   const activeItem = items.find(i => i.id === activeRowId)
   const isView = mode === "view"
+  const loadCustomers = useCallback((search: string, offset: number, limit: number) => onLoadLookup("customers", search, offset, limit), [onLoadLookup])
+  const loadWarehouses = useCallback((search: string, offset: number, limit: number) => onLoadLookup("warehouses", search, offset, limit), [onLoadLookup])
+  const loadCategories = useCallback((search: string, offset: number, limit: number) => onLoadLookup("categories", search, offset, limit), [onLoadLookup])
+  const loadUnits = useCallback((search: string, offset: number, limit: number) => onLoadLookup("units", search, offset, limit), [onLoadLookup])
+
+  useEffect(() => {
+    if (!initialData?.customer_id || !initialData?.customer_name) return
+    let active = true
+    loadCustomers(initialData.customer_name, 0, 10).then(page => {
+      const customer = page.options.find(option => option.value === initialData.customer_id)
+      if (active && customer) setSelectedCustomer(customer)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [initialData?.customer_id, initialData?.customer_name, loadCustomers])
 
   useEffect(() => {
     if (activeRowId == null && items.length > 0) setActiveRowId(items[0].id)
   }, [activeRowId, items])
 
   const categoryProducts = useMemo(
-    () => productOptions.filter(product => product.categoryId === activeItem?.category_id),
-    [activeItem?.category_id, productOptions],
+    () => resolvedProductOptions.filter(product => product.categoryId === activeItem?.category_id),
+    [activeItem?.category_id, resolvedProductOptions],
   )
   const activeAllocations = useMemo(
     () => (initialData?.allocations ?? []).filter((allocation: any) =>
@@ -225,10 +275,47 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     [activeItem?.id, initialData?.allocations],
   )
 
-  const handleCategoryChange = (rowId: number, categoryId: string) => {
+  const loadCategoryProducts = async (categoryId: string, targetWarehouseId: string) => {
+    if (!onLookupProducts || !categoryId || !targetWarehouseId) {
+      return resolvedProductOptions.filter(product => product.categoryId === categoryId)
+    }
+    const scopeKey = `${targetWarehouseId}:${categoryId}`
+    loadedProductScopesRef.current.add(scopeKey)
+    setProductLookupLoading(true)
+    setProductLookupError("")
+    try {
+      const products = await onLookupProducts(categoryId, targetWarehouseId)
+      setResolvedProductOptions(current => [
+        ...current.filter(product => product.categoryId !== categoryId),
+        ...products,
+      ])
+      return products
+    } catch (error: any) {
+      loadedProductScopesRef.current.delete(scopeKey)
+      setProductLookupError(error?.message ?? (vi ? "Không tải được sản phẩm" : "Could not load products"))
+      return []
+    } finally {
+      setProductLookupLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const categoryId = activeItem?.category_id
+    if (!categoryId || !warehouseId || !onLookupProducts) return
+    const scopeKey = `${warehouseId}:${categoryId}`
+    if (loadedProductScopesRef.current.has(scopeKey)) return
+    void loadCategoryProducts(categoryId, warehouseId)
+  }, [activeItem?.category_id, onLookupProducts, warehouseId])
+
+  const handleCategoryChange = async (rowId: number, categoryId: string, category: QuotationLookupOption | null) => {
     if (isView) return
-    const category = categoryOptions.find(option => option.value === categoryId)
-    const products = productOptions.filter(product => product.categoryId === categoryId)
+    if (!categoryId) {
+      setItems(previous => previous.map(item => item.id === rowId
+        ? { ...item, category_id: "", category_name: "", cost_price: 0, selling_price: 0, total: 0 }
+        : item))
+      return
+    }
+    const products = await loadCategoryProducts(categoryId, warehouseId)
     const availableProducts = products.filter(product => product.available > 0)
     const referenceProducts = availableProducts.length ? availableProducts : products
     const totalWeight = referenceProducts.reduce((sum, product) =>
@@ -248,7 +335,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
         return {
           ...i,
           category_id: categoryId,
-          category_name: category?.label ?? "",
+          category_name: category?.label ?? i.category_name ?? "",
           sell_unit: unit,
           cost_price: cost,
           profit_pct: profit,
@@ -260,6 +347,13 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
       return i
     }))
     setActiveRowId(rowId)
+  }
+
+  const handleWarehouseChange = async (nextWarehouseId: string) => {
+    if (isView) return
+    setWarehouseId(nextWarehouseId)
+    const selectedCategories = Array.from(new Set(items.map(item => item.category_id).filter(Boolean))) as string[]
+    await Promise.all(selectedCategories.map(categoryId => loadCategoryProducts(categoryId, nextWarehouseId)))
   }
 
   const handleUpdateItem = (rowId: number, field: string, val: number | string) => {
@@ -295,10 +389,10 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const finalTotal = totalBeforeVat + totalVat
 
   const exportData = async (format: "xlsx" | "pdf") => {
-    const customer = customerOptions.find(option => option.value === customerId) || { label: initialData?.customer_name || "" }
+    const customer = selectedCustomer || { label: initialData?.customer_name || "" }
     const exportItems = items.map(item => ({
       ...item,
-      productName: categoryOptions.find(category => category.value === item.category_id)?.label || item.category_name,
+      productName: item.category_name,
       supplierName: "",
     }))
     const payload = { id: initialData?.id, company: loadCompanySettings(profile?.org_id), customer: { ...customer, name: customer.label }, date, validUntil, notes, items: exportItems, subtotal, discountAmount, totalBeforeVat, totalVat, finalTotal }
@@ -321,12 +415,14 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     if (onSave) {
       onSave({
         customer_id: customerId,
+        customer_name: selectedCustomer?.label || initialData?.customer_name || "",
         date,
         valid_until: validUntil,
         discount_val: globalDiscount,
         discount_type: discountType,
         notes,
         warehouse_id: warehouseId,
+        warehouse_name: selectedWarehouse?.label || initialData?.warehouse_name || "",
         items: items.map(item => ({ ...item, qty: Number(item.qty ?? item.quantity ?? 0), total: Number(item.total ?? (item.quantity ?? 0) * (item.selling_price ?? item.unit_price ?? 0)), selling_price: Number(item.selling_price ?? item.unit_price ?? 0) })),
         total: finalTotal
       })
@@ -358,10 +454,18 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
             <div className="grid grid-cols-4 gap-4">
               <div className="col-span-2">
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Khách hàng *" : "Customer *"}</label>
-                <select disabled={isView} value={customerId} onChange={e => setCustomerId(e.target.value)} className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-white disabled:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                  <option value="">-- {vi ? "Chọn khách hàng" : "Select customer"} --</option>
-                  {customerOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
+                <AsyncPaginatedSelect
+                  value={customerId}
+                  selectedOption={selectedCustomer}
+                  onChange={(nextValue, option) => { setCustomerId(nextValue); setSelectedCustomer(option) }}
+                  loadPage={loadCustomers}
+                  disabled={isView}
+                  placeholder={vi ? "-- Chọn khách hàng --" : "-- Select customer --"}
+                  searchPlaceholder={vi ? "Tìm theo mã, tên, SĐT hoặc email..." : "Search code, name, phone, or email..."}
+                  emptyText={vi ? "Không có khách hàng phù hợp" : "No matching customer"}
+                  loadingText={vi ? "Đang tải khách hàng..." : "Loading customers..."}
+                  loadMoreText={vi ? "Tải thêm khách hàng" : "Load more customers"}
+                />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Ngày báo giá *" : "Date *"}</label>
@@ -373,10 +477,18 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Kho thực hiện" : "Fulfillment warehouse"}</label>
-                <select disabled={isView} value={warehouseId} onChange={e => setWarehouseId(e.target.value)} className="w-full h-9 px-3 rounded-lg border text-sm outline-none bg-white disabled:bg-slate-50" style={{ borderColor: "var(--border)" }}>
-                  <option value="">-- {vi ? "Chọn kho" : "Select warehouse"} --</option>
-                  {warehouseOptions.map(warehouse => <option key={warehouse.value} value={warehouse.value}>{warehouse.label}</option>)}
-                </select>
+                <AsyncPaginatedSelect
+                  value={warehouseId}
+                  selectedOption={selectedWarehouse}
+                  onChange={(nextValue, option) => { setSelectedWarehouse(option); void handleWarehouseChange(nextValue) }}
+                  loadPage={loadWarehouses}
+                  disabled={isView}
+                  placeholder={vi ? "-- Chọn kho --" : "-- Select warehouse --"}
+                  searchPlaceholder={vi ? "Tìm mã hoặc tên kho..." : "Search warehouse code or name..."}
+                  emptyText={vi ? "Không có kho phù hợp" : "No matching warehouse"}
+                  loadingText={vi ? "Đang tải kho..." : "Loading warehouses..."}
+                  loadMoreText={vi ? "Tải thêm kho" : "Load more warehouses"}
+                />
               </div>
               <div className="col-span-3">
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Ghi chú" : "Notes"}</label>
@@ -406,20 +518,35 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                   {items.map((it, idx) => (
                     <tr key={it.id} onClick={() => setActiveRowId(it.id)} className={`border-b cursor-pointer transition-colors ${activeRowId === it.id ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`} style={{ borderColor: "var(--border)" }}>
                       <td className="py-2 px-3">
-                        <select disabled={isView} value={it.category_id ?? ""} onChange={e => handleCategoryChange(it.id, e.target.value)} className="w-full h-8 px-1 text-xs rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }}>
-                          <option value="">-- {vi ? "Chọn" : "Select"} --</option>
-                          {categoryOptions.map(category => <option key={category.value} value={category.value}>{category.label}</option>)}
-                        </select>
+                        <AsyncPaginatedSelect
+                          value={it.category_id ?? ""}
+                          selectedOption={it.category_id ? { value: it.category_id, label: it.category_name || it.category_id } : null}
+                          onChange={(nextValue, option) => void handleCategoryChange(it.id, nextValue, option)}
+                          loadPage={loadCategories}
+                          disabled={isView}
+                          placeholder={vi ? "-- Chọn --" : "-- Select --"}
+                          searchPlaceholder={vi ? "Tìm mã hoặc tên danh mục..." : "Search category code or name..."}
+                          emptyText={vi ? "Không có danh mục phù hợp" : "No matching category"}
+                          loadingText={vi ? "Đang tải danh mục..." : "Loading categories..."}
+                          loadMoreText={vi ? "Tải thêm danh mục" : "Load more categories"}
+                          buttonClassName="h-8 text-xs"
+                        />
                       </td>
                       <td className="py-2 px-3">
-                        <select disabled={isView} value={it.sell_unit ?? ""} onChange={e => handleUpdateItem(it.id, 'sell_unit', e.target.value)} className="w-full h-8 px-1 text-xs rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }}>
-                          <option value="Piece">{vi ? "Cái" : "Piece"}</option>
-                          <option value="Roll">{vi ? "Cuộn" : "Roll"}</option>
-                          <option value="Kg">{vi ? "Kg" : "Kg"}</option>
-                          <option value="Box">{vi ? "Hộp" : "Box"}</option>
-                          <option value="Set">{vi ? "Bộ" : "Set"}</option>
-                          <option value="Meter">{vi ? "Mét" : "Meter"}</option>
-                        </select>
+                        <AsyncPaginatedSelect
+                          value={it.sell_unit ?? ""}
+                          selectedOption={it.sell_unit ? { value: it.sell_unit, label: it.sell_unit } : null}
+                          onChange={nextValue => handleUpdateItem(it.id, "sell_unit", nextValue)}
+                          loadPage={loadUnits}
+                          disabled={isView}
+                          allowClear={false}
+                          placeholder={vi ? "Chọn ĐVT" : "Select unit"}
+                          searchPlaceholder={vi ? "Tìm đơn vị tính..." : "Search units..."}
+                          emptyText={vi ? "Không có đơn vị phù hợp" : "No matching unit"}
+                          loadingText={vi ? "Đang tải đơn vị..." : "Loading units..."}
+                          loadMoreText={vi ? "Tải thêm đơn vị" : "Load more units"}
+                          buttonClassName="h-8 text-xs"
+                        />
                       </td>
                       <td className="py-2 px-3 text-right"><input disabled={isView} type="number" min={1} value={it.qty ?? ""} onChange={e => handleUpdateItem(it.id, 'qty', Number(e.target.value))} className="w-full h-8 px-1 text-xs text-right rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }} /></td>
                       <td className="py-2 px-3 text-right"><input disabled={isView} type="number" value={it.cost_price ?? ""} onChange={e => handleUpdateItem(it.id, 'cost_price', Number(e.target.value))} className="w-full h-8 px-1 text-xs text-right rounded border outline-none bg-white disabled:bg-transparent disabled:border-transparent" style={{ borderColor: "var(--border)" }} /></td>
@@ -504,6 +631,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               : (vi ? "Khả năng đáp ứng danh mục" : "Category availability")}</h3>
           </div>
           <div className="p-4 flex-1 overflow-auto bg-slate-50/50">
+            {productLookupError && <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-[10px] text-red-700">{productLookupError}</div>}
+            {productLookupLoading && <div className="mb-3 rounded-lg border bg-white p-2 text-[10px] text-slate-500">{vi ? "Đang tính tồn khả dụng theo kho..." : "Calculating warehouse availability..."}</div>}
             {!activeItem?.category_id ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center text-xs px-4">
                 <PackageCheck size={24} className="mb-2 opacity-50" />
@@ -520,7 +649,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                   <div className="mt-2 flex justify-between border-t pt-2"><span>{vi ? "Yêu cầu" : "Required"}</span><b>{fmt(Number(activeItem.qty))} {activeItem.sell_unit}</b></div>
                 </div>
                 {activeAllocations.map((allocation: any) => {
-                  const product = productOptions.find(option => option.value === allocation.product_id)
+                  const product = resolvedProductOptions.find(option => option.value === allocation.product_id)
                   const reservation = String(allocation.reservation_status ?? "").toUpperCase()
                   return <div key={allocation.id ?? `${allocation.product_id}-${allocation.source_type}`} className="rounded-lg border bg-white p-3 text-xs">
                     <div className="flex items-start justify-between gap-2">
@@ -563,9 +692,9 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   )
 }
 
-function QuotationAllocationModal({ quotationId, supplierOptions, vi, isDemo, orgId, onClose, onComplete }: {
+function QuotationAllocationModal({ quotationId, onLoadLookup, vi, isDemo, orgId, onClose, onComplete }: {
   quotationId: string
-  supplierOptions: Array<{ value: string; label: string }>
+  onLoadLookup: QuotationLookupLoader
   vi: boolean
   isDemo: boolean
   orgId?: string
@@ -576,6 +705,7 @@ function QuotationAllocationModal({ quotationId, supplierOptions, vi, isDemo, or
   const [rows, setRows] = useState<AllocationDraft[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const loadSuppliers = useCallback((search: string, offset: number, limit: number) => onLoadLookup("suppliers", search, offset, limit), [onLoadLookup])
 
   useEffect(() => {
     let mounted = true
@@ -733,7 +863,27 @@ function QuotationAllocationModal({ quotationId, supplierOptions, vi, isDemo, or
                       {row.new_product && <div className="mt-3 grid grid-cols-2 gap-2"><input value={row.new_product.sku} onChange={event => updateNewProduct(row.key, { sku: event.target.value })} placeholder="SKU *" className="h-8 rounded border px-2 text-xs" /><input value={row.new_product.name} onChange={event => updateNewProduct(row.key, { name: event.target.value })} placeholder={vi ? "Tên sản phẩm *" : "Product name *"} className="h-8 rounded border px-2 text-xs" /><input value={row.new_product.unit} onChange={event => updateNewProduct(row.key, { unit: event.target.value })} placeholder={vi ? "Đơn vị *" : "Unit *"} className="h-8 rounded border px-2 text-xs" /><label className="flex h-8 items-center gap-2 rounded border bg-white px-2 text-[10px]"><input type="checkbox" checked={row.new_product.track_batch} onChange={event => updateNewProduct(row.key, { track_batch: event.target.checked })} />{vi ? "Theo dõi lô" : "Track batch"}</label></div>}
                       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                         <label className="text-[9px] text-slate-500">{vi ? "Số lượng" : "Quantity"}<input type="number" min={0.01} max={maxQty} step="0.01" value={row.qty} onChange={event => updateRow(row.key, { qty: Math.max(0, Number(event.target.value)) })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-right text-xs" /></label>
-                        {row.source_type === "NEW_STOCK" && <><label className="text-[9px] text-slate-500">{vi ? "Nhà cung cấp" : "Supplier"}<select value={row.supplier_id} onChange={event => updateRow(row.key, { supplier_id: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-1 text-xs"><option value="">--</option>{supplierOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="text-[9px] text-slate-500">{vi ? "Giá thực nhập" : "Actual cost"}<input type="number" min={0} value={row.unit_cost} onChange={event => updateRow(row.key, { unit_cost: Math.max(0, Number(event.target.value)) })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-right text-xs" /></label><label className="text-[9px] text-slate-500">{vi ? "Số lô" : "Batch"}<input value={row.batch_number} onChange={event => updateRow(row.key, { batch_number: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label><label className="text-[9px] text-slate-500">{vi ? "Ngày SX" : "Manufactured"}<input type="date" value={row.manufacture_date} onChange={event => updateRow(row.key, { manufacture_date: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label><label className="text-[9px] text-slate-500">{vi ? "Hạn dùng" : "Expiry"}<input type="date" min={row.manufacture_date || undefined} value={row.expiry_date} onChange={event => updateRow(row.key, { expiry_date: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label></>}
+                        {row.source_type === "NEW_STOCK" && <>
+                          <label className="text-[9px] text-slate-500">
+                            {vi ? "Nhà cung cấp" : "Supplier"}
+                            <AsyncPaginatedSelect
+                              value={row.supplier_id}
+                              onChange={nextValue => updateRow(row.key, { supplier_id: nextValue })}
+                              loadPage={loadSuppliers}
+                              placeholder="--"
+                              searchPlaceholder={vi ? "Tìm nhà cung cấp..." : "Search suppliers..."}
+                              emptyText={vi ? "Không có nhà cung cấp phù hợp" : "No matching supplier"}
+                              loadingText={vi ? "Đang tải..." : "Loading..."}
+                              loadMoreText={vi ? "Tải thêm" : "Load more"}
+                              className="mt-1"
+                              buttonClassName="h-8 text-xs"
+                            />
+                          </label>
+                          <label className="text-[9px] text-slate-500">{vi ? "Giá thực nhập" : "Actual cost"}<input type="number" min={0} value={row.unit_cost} onChange={event => updateRow(row.key, { unit_cost: Math.max(0, Number(event.target.value)) })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-right text-xs" /></label>
+                          <label className="text-[9px] text-slate-500">{vi ? "Số lô" : "Batch"}<input value={row.batch_number} onChange={event => updateRow(row.key, { batch_number: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label>
+                          <label className="text-[9px] text-slate-500">{vi ? "Ngày SX" : "Manufactured"}<input type="date" value={row.manufacture_date} onChange={event => updateRow(row.key, { manufacture_date: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label>
+                          <label className="text-[9px] text-slate-500">{vi ? "Hạn dùng" : "Expiry"}<input type="date" min={row.manufacture_date || undefined} value={row.expiry_date} onChange={event => updateRow(row.key, { expiry_date: event.target.value })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-xs" /></label>
+                        </>}
                       </div>
                     </div>
                   })}
@@ -753,64 +903,70 @@ export default function Quotations() {
   const { lang } = useLang()
   const vi = lang === "vi"
   const [data, setData] = useState<any[]>([])
-  const [productOptions, setProductOptions] = useState<ProductOption[]>([])
-  const [categoryOptions, setCategoryOptions] = useState<CategoryOption[]>([])
-  const [supplierOptions, setSupplierOptions] = useState<Array<{value: string, label: string}>>([])
-  const [customerOptions, setCustomerOptions] = useState<Array<{value: string, label: string; name?: string; representative?: string; address?: string; phone?: string; email?: string; tax_code?: string}>>([])
-  const [warehouseOptions, setWarehouseOptions] = useState<Array<{value: string, label: string}>>([])
   const { isDemo } = useDemo()
   const { profile, can } = useAuth()
+  const lookupPageCacheRef = useRef(new Map<string, Promise<AsyncSelectPage<QuotationLookupOption>>>())
+
+  const loadQuotationData = useCallback(async () => {
+    const result = await fetchQuotations({ isDemo, orgId: profile?.org_id })
+    if (result.error) showAppToast(result.error.message ?? String(result.error))
+    if (result.data) setData(result.data)
+  }, [isDemo, profile?.org_id])
 
   useEffect(() => {
-    Promise.all([
-      fetchQuotations({ isDemo, orgId: profile?.org_id }),
-      fetchProducts({ isDemo, orgId: profile?.org_id }),
-      fetchSuppliers({ isDemo, orgId: profile?.org_id }),
-      fetchCustomers({ isDemo, orgId: profile?.org_id }),
-      fetchWarehouses({ isDemo, orgId: profile?.org_id }),
-      fetchCategories({ isDemo, orgId: profile?.org_id }),
-    ]).then(([quotRes, prodRes, suppRes, custRes, warehouseRes, categoryRes]) => {
-      // Load quotations
-      if (quotRes.data) setData(quotRes.data)
-      
-      // Map products to options
-      if (prodRes.data) {
-        setProductOptions(toProductOptions(prodRes.data))
+    void loadQuotationData()
+  }, [loadQuotationData])
+
+  useEffect(() => {
+    lookupPageCacheRef.current.clear()
+  }, [isDemo, profile?.org_id])
+
+  const loadLookupPage = useCallback<QuotationLookupLoader>((kind, searchText, offset, limit) => {
+    const cacheKey = `${isDemo}:${profile?.org_id ?? ""}:${kind}:${searchText.trim().toLocaleLowerCase("vi")}:${offset}:${limit}`
+    const cached = lookupPageCacheRef.current.get(cacheKey)
+    if (cached) return cached
+    const request = (async () => {
+      const result = await fetchLookup(kind, {
+        isDemo,
+        orgId: profile?.org_id,
+        search: searchText,
+        offset,
+        limit,
+      })
+      if (result.error) throw result.error
+      const rows = result.data ?? []
+      return {
+        options: rows.map(option => ({
+          value: kind === "units" ? option.label : option.id,
+          label: option.label,
+          code: option.code,
+          name: option.label,
+          representative: String(option.representative ?? ""),
+          address: String(option.address ?? ""),
+          phone: String(option.phone ?? ""),
+          email: String(option.email ?? ""),
+          tax_code: String(option.taxCode ?? ""),
+        })),
+        hasMore: rows.length === limit,
       }
-      
-      // Map suppliers to options
-      if (suppRes.data) {
-        setSupplierOptions(suppRes.data.map((s: any) => ({
-          value: s.id || s.code,
-          label: s.name
-        })))
-      }
-      
-      // Map customers to options
-      if (custRes.data) {
-        setCustomerOptions(custRes.data.map((c: any) => ({
-          value: c.id || c.code,
-          label: c.name,
-          name: c.name,
-          representative: c.representative || c.contact_person || c.contact_name || "",
-          address: c.address || c.location || "",
-          phone: c.phone || "",
-          email: c.email || "",
-          tax_code: c.tax_code || "",
-        })))
-      }
-      if (warehouseRes.data) setWarehouseOptions(warehouseRes.data
-        .filter((warehouse: any) => String(warehouse.status ?? "Active").toLowerCase() === "active")
-        .map((warehouse: any) => ({ value: warehouse.id || warehouse.code, label: warehouse.name })))
-      if (categoryRes.data) setCategoryOptions(categoryRes.data
-        .filter((category: any) => String(category.status ?? "Active").toLowerCase() === "active")
-        .map((category: any) => ({
-          value: category.id,
-          label: category.name_vi || category.name_en || category.code,
-          code: category.code,
-        })))
+    })()
+    lookupPageCacheRef.current.set(cacheKey, request)
+    request.catch(() => lookupPageCacheRef.current.delete(cacheKey))
+    return request
+  }, [isDemo, profile?.org_id])
+
+  const lookupProductsForCategory = useCallback(async (categoryId: string, warehouseId: string) => {
+    const result = await fetchLookup("products", {
+      isDemo,
+      orgId: profile?.org_id,
+      categoryId,
+      warehouseId,
+      includeStock: true,
+      limit: 200,
     })
-  }, [isDemo, profile])
+    if (result.error) throw result.error
+    return toProductOptions(result.data ?? [])
+  }, [isDemo, profile?.org_id])
   
   const [search, setSearch] = useState("")
   const [showCreate, setShowCreate] = useState(false)
@@ -837,12 +993,8 @@ export default function Quotations() {
   }
 
   const refreshQuotations = async () => {
-    const [quotationResult, productResult] = await Promise.all([
-      fetchQuotations({ isDemo, orgId: profile?.org_id }),
-      fetchProducts({ isDemo, orgId: profile?.org_id }),
-    ])
+    const quotationResult = await fetchQuotations({ isDemo, orgId: profile?.org_id })
     if (quotationResult.data) setData(quotationResult.data)
-    if (productResult.data) setProductOptions(toProductOptions(productResult.data))
   }
 
   const deliverAllocatedQuotation = async (quotation: any) => {
@@ -894,8 +1046,7 @@ export default function Quotations() {
   }
 
   const handleSave = (form: any) => {
-    const customerName = customerOptions.find(c => c.value === form.customer_id)?.label || ""
-    const normalizedForm = { ...form, customer_name: customerName }
+    const normalizedForm = { ...form, customer_name: form.customer_name || "" }
     if (editingItem) {
       upsertQuotation({ id: editingItem.id, ...normalizedForm } as any, { isDemo, orgId: profile?.org_id }).then(res => {
         if (res && res.error) showAppToast(res.error.message ?? String(res.error))
@@ -971,7 +1122,7 @@ export default function Quotations() {
           <tbody>
             {data.filter(q => q.id.toLowerCase().includes(search.toLowerCase()) || q.customer_name?.toLowerCase().includes(search.toLowerCase())).map(q => (
               <tr key={q.id} className="group hover:bg-slate-50 transition-colors border-b" style={{ borderColor: "var(--border)" }}>
-                <td className="py-3 text-sm font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => setViewingItem(q)}>{q.id}</td>
+                <td className="py-3 text-sm font-medium text-blue-600 cursor-pointer" onClick={() => setViewingItem(q)}><span className="hover:underline">{q.id}</span>{q.source === "dataDemo" && <span className="ml-2 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-700">DEMO</span>}</td>
                 <td className="py-3 text-sm text-slate-700">{q.customer_name}</td>
                 <td className="py-3 text-sm text-slate-500">{q.date}</td>
                 <td className="py-3 text-sm text-slate-500">{q.valid_until}</td>
@@ -1036,10 +1187,10 @@ export default function Quotations() {
         <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
       </div>
 
-      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} productOptions={productOptions} categoryOptions={categoryOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
-      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} productOptions={productOptions} categoryOptions={categoryOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
-      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} productOptions={productOptions} categoryOptions={categoryOptions} customerOptions={customerOptions} warehouseOptions={warehouseOptions} />}
-      {allocationQuotationId && <QuotationAllocationModal quotationId={allocationQuotationId} supplierOptions={supplierOptions} vi={vi} isDemo={isDemo} orgId={profile?.org_id} onClose={() => setAllocationQuotationId(null)} onComplete={() => { setAllocationQuotationId(null); void refreshQuotations() }} />}
+      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
+      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
+      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} />}
+      {allocationQuotationId && <QuotationAllocationModal quotationId={allocationQuotationId} onLoadLookup={loadLookupPage} vi={vi} isDemo={isDemo} orgId={profile?.org_id} onClose={() => setAllocationQuotationId(null)} onComplete={() => { setAllocationQuotationId(null); void refreshQuotations() }} />}
     </div>
   )
 }

@@ -3,7 +3,7 @@ import {
   DollarSign, BarChart2, Settings, Shield, ChevronRight,
   ChevronDown, Box, Users, Truck, Tag, Layers, ArrowLeftRight,
   ClipboardList, FileText, Receipt, CreditCard, UserCog,
-  KeyRound, ScrollText, Building2, BookOpen,
+  KeyRound, ScrollText, Building2, BookOpen, PlayCircle,
 } from "lucide-react"
 import { useState } from "react"
 import { useAuth } from "../contexts/AuthContext"
@@ -64,6 +64,7 @@ const navItems: NavItem[] = [
     ]
   },
   { id: "reports", labelKey: "reports", icon: <BarChart2 size={16} /> },
+  { id: "system-demo", labelKey: "systemDemo", icon: <PlayCircle size={16} /> },
   {
     id: "administration", labelKey: "administration", icon: <Shield size={16} />,
     children: [
@@ -79,9 +80,10 @@ interface SidebarProps {
   active: string
   onNavigate: (id: string) => void
   collapsed: boolean
+  showSystemDemo?: boolean
 }
 
-export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps) {
+export default function Sidebar({ active, onNavigate, collapsed, showSystemDemo = false }: SidebarProps) {
   const { t, lang } = useLang()
   const { profile, can } = useAuth()
   const role = String(profile?.role ?? "staff").toLowerCase()
@@ -118,11 +120,13 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
     "audit-logs": "Administration",
     settings: "Administration",
     notifications: "Dashboard",
+    "system-demo": "Dashboard",
   }
   const canAccess = (screen: string) => {
     if (!profile) return true
+    if (screen === "system-demo") return showSystemDemo
     if (role === "admin") return true
-    if (["dashboard", "user-guide", "notifications"].includes(screen)) return true
+    if (["dashboard", "user-guide", "notifications", "settings"].includes(screen)) return true
 
     const module = screenToModule[screen]
     if (!module) return false
@@ -131,6 +135,7 @@ export default function Sidebar({ active, onNavigate, collapsed }: SidebarProps)
   }
 
   const navItemsFiltered = navItems.filter(item => {
+    if (item.id === "system-demo" && !showSystemDemo) return false
     if (!item.children) return canAccess(item.id)
     const visibleChildren = item.children.filter(child => canAccess(child.id))
     return visibleChildren.length > 0

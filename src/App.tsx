@@ -11,6 +11,12 @@ import { DemoProvider, useDemo } from "./contexts/DemoContext"
 import { Check, AlertCircle, Info, LogOut, User } from "lucide-react"
 import { APP_CONFIRM_EVENT, APP_TOAST_EVENT, type AppConfirmRequest } from "./lib/appEvents"
 import { ThemeProvider } from "./contexts/ThemeContext"
+import {
+  DEMO_VISIBILITY_EVENT,
+  demoFeatureEnabled,
+  isDemoFeatureHidden,
+  setDemoFeatureHidden,
+} from "./lib/demoFeature"
 
 const Dashboard = lazy(() => import("./screens/Dashboard"))
 const Products = lazy(() => import("./screens/Products"))
@@ -43,6 +49,7 @@ const Invoices = lazy(() => import("./screens/GenericList").then(module => ({ de
 const CustomerReceipts = lazy(() => import("./screens/GenericList").then(module => ({ default: module.CustomerReceipts })))
 const Payables = lazy(() => import("./screens/GenericList").then(module => ({ default: module.Payables })))
 const CashBook = lazy(() => import("./screens/GenericList").then(module => ({ default: module.CashBook })))
+const SystemDemo = lazy(() => import("./screens/SystemDemo"))
 
 export type ToastPayload = { msg: string; type: "success" | "error" | "info" }
 
@@ -78,6 +85,7 @@ const breadcrumbKeys: Record<string, string[]> = {
   "audit-logs":       ["administration", "auditLogs"],
   settings:           ["settings"],
   notifications:      ["notifications"],
+  "system-demo":      ["systemDemo"],
 }
 
 function PlaceholderScreen({ id }: { id: string }) {
@@ -116,6 +124,20 @@ function AppInner() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
   const [toast, setToast] = useState<ToastPayload | null>(null)
   const [confirmation, setConfirmation] = useState<AppConfirmRequest | null>(null)
+  const [demoFeatureHidden, setDemoFeatureHiddenState] = useState(false)
+
+  useEffect(() => {
+    setDemoFeatureHiddenState(isDemoFeatureHidden(user?.id))
+    const syncVisibility = () => setDemoFeatureHiddenState(isDemoFeatureHidden(user?.id))
+    window.addEventListener(DEMO_VISIBILITY_EVENT, syncVisibility)
+    window.addEventListener("storage", syncVisibility)
+    return () => {
+      window.removeEventListener(DEMO_VISIBILITY_EVENT, syncVisibility)
+      window.removeEventListener("storage", syncVisibility)
+    }
+  }, [user?.id])
+
+  const showSystemDemo = Boolean(user && demoFeatureEnabled && !demoFeatureHidden)
 
   useEffect(() => {
     const handleToast = (event: Event) => {
@@ -179,11 +201,13 @@ function AppInner() {
     "audit-logs": "Administration",
     settings: "Administration",
     notifications: "Dashboard",
+    "system-demo": "Dashboard",
   }
   const canAccess = (screen: string) => {
     if (!user) return true
+    if (screen === "system-demo") return showSystemDemo
     if (role === "admin") return true
-    if (["dashboard", "user-guide", "notifications"].includes(screen)) return true
+    if (["dashboard", "user-guide", "notifications", "settings"].includes(screen)) return true
 
     const module = screenToModule[screen]
     if (!module) return false
@@ -196,7 +220,7 @@ function AppInner() {
       setActive("dashboard")
       setToast({ msg: lang === "vi" ? "Bạn không có quyền truy cập màn hình này." : "You do not have access to this screen.", type: "error" })
     }
-  }, [active, user, role, lang, profile, can])
+  }, [active, user, role, lang, profile, can, showSystemDemo])
 
   // Sync demo mode with auth state
   useEffect(() => {
@@ -257,6 +281,10 @@ function AppInner() {
       case "payable":          return canAccess("payable") ? <Payables /> : null
       case "cashbook":         return canAccess("cashbook") ? <CashBook /> : null
       case "notifications":    return canAccess("notifications") ? <NotificationCenter onNavigate={setActive} /> : null
+      case "system-demo":      return canAccess("system-demo") ? <SystemDemo onNavigate={setActive} onHide={() => {
+        setDemoFeatureHidden(true, user?.id)
+        setActive("dashboard")
+      }} /> : null
       default:                 return <PlaceholderScreen id={active} />
     }
   }
@@ -267,7 +295,7 @@ function AppInner() {
       {isDemo && <DemoBanner onGoLive={() => window.location.search = "?auth"} />}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
-        <Sidebar active={active} onNavigate={setActive} collapsed={sidebarCollapsed} />
+        <Sidebar active={active} onNavigate={setActive} collapsed={sidebarCollapsed} showSystemDemo={showSystemDemo} />
 
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
           <Topbar

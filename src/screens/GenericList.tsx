@@ -14,6 +14,12 @@ import { getReportCatalog } from "../lib/reportCatalog"
 import { confirmAppAction, showAppToast } from "../lib/appEvents"
 import { formatQuantity, formatVnd } from "../lib/numberFormat"
 import {
+  DEMO_VISIBILITY_EVENT,
+  demoFeatureEnabled,
+  isDemoFeatureHidden,
+  setDemoFeatureHidden,
+} from "../lib/demoFeature"
+import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
 
@@ -603,9 +609,10 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
           <tbody>
             {filtered.map((item: any, i: number) => (
               <tr key={i} className="border-b hover:bg-slate-50/60 group cursor-pointer" style={{ borderColor: "var(--border)" }}>
-                {columns.map((c: any) => (
+                {columns.map((c: any, columnIndex: number) => (
                   <td key={c.key} className={"px-4 py-2.5 " + (c.isStatus ? "" : "text-slate-800")}>
                     {c.isStatus ? <StatusBadge status={item[c.key]} /> : (c.format ? c.format(item[c.key]) : item[c.key])}
+                    {columnIndex === 0 && item.source === "dataDemo" && <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[8px] font-bold text-violet-700">DEMO</span>}
                   </td>
                 ))}
                 {!readOnly && <td className="px-4 py-2.5">
@@ -2570,10 +2577,22 @@ function SaveBtn({ label, onSave }: { label: string; onSave?: () => void | Promi
 export function Settings() {
   const { t, lang } = useLang()
   const vi = lang === "vi"
-  const { profile, can } = useAuth()
+  const { profile, can, user } = useAuth()
   const { isDemo } = useDemo()
   const [company, setCompany] = useState<CompanySettings>(() => loadCompanySettings(profile?.org_id))
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [demoTabHidden, setDemoTabHidden] = useState(() => isDemoFeatureHidden(user?.id))
+
+  useEffect(() => {
+    const syncDemoVisibility = () => setDemoTabHidden(isDemoFeatureHidden(user?.id))
+    syncDemoVisibility()
+    window.addEventListener(DEMO_VISIBILITY_EVENT, syncDemoVisibility)
+    window.addEventListener("storage", syncDemoVisibility)
+    return () => {
+      window.removeEventListener(DEMO_VISIBILITY_EVENT, syncDemoVisibility)
+      window.removeEventListener("storage", syncDemoVisibility)
+    }
+  }, [user?.id])
 
   useEffect(() => {
     let active = true
@@ -2652,6 +2671,26 @@ export function Settings() {
           ) : (
             <div className="text-xs text-slate-400">{vi ? "Bạn chỉ có quyền xem cài đặt." : "You have read-only access to settings."}</div>
           )}
+        </section>
+        <section className="mt-4 rounded-2xl border bg-white p-5" style={{ borderColor: "var(--border)" }}>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">{vi ? "Tính năng Demo nghiệp vụ" : "Business Demo feature"}</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {!demoFeatureEnabled
+                  ? (vi ? "Tính năng đã bị tắt bởi cấu hình triển khai VITE_DEMO_FEATURE_ENABLED." : "The feature is disabled by VITE_DEMO_FEATURE_ENABLED.")
+                  : (vi ? "Tùy chọn này chỉ thay đổi menu của tài khoản hiện tại trên trình duyệt này." : "This preference only changes the current account's menu in this browser.")}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={!demoFeatureEnabled}
+              onClick={() => setDemoFeatureHidden(!demoTabHidden, user?.id)}
+              className={`h-9 min-w-28 rounded-lg px-4 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300 ${demoTabHidden ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-600 hover:bg-slate-700"}`}
+            >
+              {demoTabHidden ? (vi ? "Hiển thị Demo" : "Show Demo") : (vi ? "Ẩn Demo" : "Hide Demo")}
+            </button>
+          </div>
         </section>
       </div>
     </div>
