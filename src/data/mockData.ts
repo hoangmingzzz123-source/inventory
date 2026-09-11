@@ -89,12 +89,12 @@ export const lowStockItems = [
 ]
 
 export const recentActivities = [
-  { type: "purchase", text: "PO-202608-000002 received 20 units Samsung Galaxy A55", time: "2 phút trước", user: "Tran Thi B" },
-  { type: "sales", text: "SO-202608-000048 completed — FPT Telecom", time: "15 phút trước", user: "Tran Thi B" },
-  { type: "inventory", text: "Stock adjustment — Dell Latitude 5540 (+5 units)", time: "1 giờ trước", user: "Le Van C" },
-  { type: "purchase", text: "PO-202608-000003 created — Dell EMC Vietnam", time: "2 giờ trước", user: "Le Van C" },
-  { type: "sales", text: "SO-202608-000046 approved — Viettel Store", time: "3 giờ trước", user: "Nguyen Van A" },
-  { type: "system", text: "Daily inventory snapshot completed", time: "6 giờ trước", user: "System" },
+  { type: "purchase", text: "PO-202608-000002 received 20 units Samsung Galaxy A55", textVi: "PO-202608-000002 đã nhập 20 chiếc Samsung Galaxy A55", textEn: "PO-202608-000002 received 20 units Samsung Galaxy A55", time: "2 phút trước", timeVi: "2 phút trước", timeEn: "2 minutes ago", user: "Tran Thi B" },
+  { type: "sales", text: "SO-202608-000048 completed — FPT Telecom", textVi: "SO-202608-000048 đã hoàn tất — FPT Telecom", textEn: "SO-202608-000048 completed — FPT Telecom", time: "15 phút trước", timeVi: "15 phút trước", timeEn: "15 minutes ago", user: "Tran Thi B" },
+  { type: "inventory", text: "Stock adjustment — Dell Latitude 5540 (+5 units)", textVi: "Điều chỉnh tồn kho — Dell Latitude 5540 (+5 chiếc)", textEn: "Stock adjustment — Dell Latitude 5540 (+5 units)", time: "1 giờ trước", timeVi: "1 giờ trước", timeEn: "1 hour ago", user: "Le Van C" },
+  { type: "purchase", text: "PO-202608-000003 created — Dell EMC Vietnam", textVi: "PO-202608-000003 đã được tạo — Dell EMC Vietnam", textEn: "PO-202608-000003 created — Dell EMC Vietnam", time: "2 giờ trước", timeVi: "2 giờ trước", timeEn: "2 hours ago", user: "Le Van C" },
+  { type: "sales", text: "SO-202608-000046 approved — Viettel Store", textVi: "SO-202608-000046 đã được duyệt — Viettel Store", textEn: "SO-202608-000046 approved — Viettel Store", time: "3 giờ trước", timeVi: "3 giờ trước", timeEn: "3 hours ago", user: "Nguyen Van A" },
+  { type: "system", text: "Daily inventory snapshot completed", textVi: "Đã hoàn tất ảnh chụp tồn kho hằng ngày", textEn: "Daily inventory snapshot completed", time: "6 giờ trước", timeVi: "6 giờ trước", timeEn: "6 hours ago", user: "System" },
 ]
 
 export const auditLogs = [
@@ -193,4 +193,3 @@ export const importRecords = [
   { id: "IMP-002", receipt_id: "GR-002", product_id: "P001", product_name: "Dell Latitude 5540 i5", supplier_id: "SUP-002", supplier_name: "Dell EMC Vietnam", cost_price: 18500000, unit: "Piece", quantity: 100, date: "2026-08-01", quotation_id: "QT-2026-001", customer_id: "CUST-001", customer_name: "Công ty ABC" },
   { id: "IMP-003", receipt_id: "GR-003", product_id: "P004", product_name: "Logitech MX Keys", supplier_id: "SUP-003", supplier_name: "Logitech APAC", cost_price: 2000000, unit: "Piece", quantity: 200, date: "2026-07-28", quotation_id: "", customer_id: "", customer_name: "" }
 ]
-

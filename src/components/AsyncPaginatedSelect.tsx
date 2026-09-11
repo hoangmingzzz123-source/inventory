@@ -23,6 +23,8 @@ type AsyncPaginatedSelectProps<T extends AsyncSelectOption> = {
   emptyText?: string
   loadingText?: string
   loadMoreText?: string
+  retryText?: string
+  clearLabel?: string
   disabled?: boolean
   allowClear?: boolean
   pageSize?: number
@@ -46,6 +48,8 @@ export default function AsyncPaginatedSelect<T extends AsyncSelectOption>({
   emptyText = "No matching data",
   loadingText = "Loading...",
   loadMoreText = "Load more",
+  retryText = "Retry",
+  clearLabel = "Clear selection",
   disabled = false,
   allowClear = true,
   pageSize = 30,
@@ -238,7 +242,7 @@ export default function AsyncPaginatedSelect<T extends AsyncSelectOption>({
           <button type="button" onClick={() => void loadNextPage()} className="w-full px-3 py-2 text-center text-[10px] font-medium text-blue-600 hover:bg-blue-50">{loadMoreText}</button>
         )}
         {!loading && error && (
-          <button type="button" onClick={() => void replacePage(search)} className="w-full px-3 py-2 text-center text-[10px] font-medium text-blue-600 hover:bg-blue-50">Retry</button>
+          <button type="button" onClick={() => void replacePage(search)} className="w-full px-3 py-2 text-center text-[10px] font-medium text-blue-600 hover:bg-blue-50">{retryText}</button>
         )}
       </div>
     </div>,
@@ -259,7 +263,7 @@ export default function AsyncPaginatedSelect<T extends AsyncSelectOption>({
       >
         {selection?.label || placeholder}
       </button>
-      {allowClear && value && !disabled && <button type="button" aria-label="Clear selection" onClick={() => choose(null)} className="px-1 text-slate-400 hover:text-slate-600"><X size={13} /></button>}
+      {allowClear && value && !disabled && <button type="button" aria-label={clearLabel} onClick={() => choose(null)} className="px-1 text-slate-400 hover:text-slate-600"><X size={13} /></button>}
       <button type="button" tabIndex={-1} disabled={disabled} onClick={() => setOpen(current => !current)} className="px-2 text-slate-400 disabled:cursor-default"><ChevronDown size={14} /></button>
       {panel}
     </div>

@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown, AlertTriangle, Activity, ShoppingCart, Package } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { kpiData, revenueData, inventoryDonutData, lowStockItems, recentActivities } from "../data/mockData"
 import { useLang } from "../i18n/LangContext"
 import { useDemo } from "../contexts/DemoContext"
@@ -13,6 +13,37 @@ const activityIcon: Record<string, React.ReactNode> = {
   sales: <TrendingUp size={13} className="text-emerald-500" />,
   inventory: <Package size={13} className="text-violet-500" />,
   system: <Activity size={13} className="text-slate-400" />,
+}
+
+const quotationStatusLabels: Record<string, { vi: string; en: string }> = {
+  draft: { vi: "Nháp", en: "Draft" },
+  pending: { vi: "Chờ duyệt", en: "Pending" },
+  sent: { vi: "Đã gửi", en: "Sent" },
+  accepted: { vi: "Đã chấp thuận", en: "Accepted" },
+  rejected: { vi: "Đã từ chối", en: "Rejected" },
+  converted: { vi: "Đã chuyển đổi", en: "Converted" },
+  "awaiting delivery": { vi: "Chờ giao hàng", en: "Awaiting delivery" },
+  delivered: { vi: "Đã giao hàng", en: "Delivered" },
+  cancelled: { vi: "Đã hủy", en: "Cancelled" },
+  unknown: { vi: "Không xác định", en: "Unknown" },
+}
+
+function quotationStatusLabel(status: unknown, lang: "vi" | "en") {
+  const normalized = String(status || "unknown").trim().toLowerCase()
+  return quotationStatusLabels[normalized]?.[lang] ?? String(status || quotationStatusLabels.unknown[lang])
+}
+
+function activityText(activity: any, lang: "vi" | "en") {
+  return lang === "vi"
+    ? activity.textVi ?? activity.text_vi ?? activity.text
+    : activity.textEn ?? activity.text_en ?? activity.text
+}
+
+function activityTime(activity: any, lang: "vi" | "en") {
+  const localized = lang === "vi"
+    ? activity.timeVi ?? activity.time_vi
+    : activity.timeEn ?? activity.time_en
+  return localized || formatDateTimeUtc7(activity.time)
 }
 
 export default function Dashboard() {
@@ -58,6 +89,18 @@ export default function Dashboard() {
   const dashboardInventoryData = isDemo ? inventoryDonutData : (liveDashboard?.inventoryDonutData ?? [])
   const dashboardLowStockItems = isDemo ? lowStockItems : (liveDashboard?.lowStockItems ?? [])
   const dashboardActivities = isDemo ? recentActivities : (liveDashboard?.recentActivities ?? [])
+  const quotationStatusData = useMemo(() => {
+    const counts = quotationsData.reduce<Record<string, number>>((totals, quotation) => {
+      const status = String(quotation.status || "unknown").trim().toLowerCase()
+      totals[status] = (totals[status] ?? 0) + 1
+      return totals
+    }, {})
+    return Object.entries(counts).map(([status, value]) => ({
+      status,
+      name: quotationStatusLabel(status, lang),
+      value,
+    }))
+  }, [lang, quotationsData])
   const displayDate = new Intl.DateTimeFormat(lang === "vi" ? "vi-VN" : "en-US", { dateStyle: "full", timeZone: "Asia/Ho_Chi_Minh" }).format(new Date())
   const chartYear = liveDashboard?.year ?? new Date().getFullYear()
 
@@ -178,22 +221,24 @@ export default function Dashboard() {
             <div style={{ width: 240, height: 160 }}>
               <ResponsiveContainer width="100%" height={160}>
                 <PieChart>
-                  <Pie dataKey="value" data={Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map(([k, v]) => ({ name: k, value: v }))} innerRadius={36} outerRadius={68} paddingAngle={3}>
-                    {Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map((entry, i) => (
-                      <Cell key={i} fill={["#2563eb", "#7c3aed", "#10b981", "#ef4444", "#f59e0b"][i % 5]} />
+                  <Pie dataKey="value" data={quotationStatusData} nameKey="name" innerRadius={36} outerRadius={68} paddingAngle={3}>
+                    {quotationStatusData.map((entry, i) => (
+                      <Cell key={entry.status} fill={["#2563eb", "#7c3aed", "#10b981", "#ef4444", "#f59e0b"][i % 5]} />
                     ))}
                   </Pie>
+                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0" }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
             <div className="flex-1">
               <div className="grid grid-cols-2 gap-2">
-                {Object.entries(quotationsData.reduce((acc: any, q: any) => ({ ...acc, [q.status || 'Unknown']: (acc[q.status || 'Unknown'] || 0) + 1 }), {})).map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between text-sm px-2 py-1 border rounded" style={{ borderColor: 'var(--border)' }}>
-                    <span className="text-slate-700">{k}</span>
-                    <span className="font-semibold text-slate-900 mono">{String(v)}</span>
+                {quotationStatusData.map(item => (
+                  <div key={item.status} className="flex items-center justify-between text-sm px-2 py-1 border rounded" style={{ borderColor: "var(--border)" }}>
+                    <span className="text-slate-700">{item.name}</span>
+                    <span className="font-semibold text-slate-900 mono">{item.value}</span>
                   </div>
                 ))}
+                {!quotationStatusData.length && <div className="col-span-2 py-6 text-center text-xs text-slate-400">{lang === "vi" ? "Chưa có báo giá" : "No quotations"}</div>}
               </div>
             </div>
           </div>
@@ -218,11 +263,11 @@ export default function Dashboard() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium text-slate-800 truncate">{item.name}</div>
-                <div className="text-[11px] text-slate-400 mono">{item.sku} · {item.warehouse}</div>
+                <div className="text-[11px] text-slate-400 mono">{item.sku} · {item.warehouse === "All warehouses" ? (lang === "vi" ? "Tất cả kho" : "All warehouses") : item.warehouse}</div>
               </div>
               <div className="text-right flex-shrink-0">
-                <div className="text-sm font-bold text-amber-600 mono">{item.qty}</div>
-                <div className="text-[10px] text-slate-400">{lang === "vi" ? "Tối thiểu" : "Min"}: {item.min}</div>
+                <div className="text-sm font-bold text-amber-600 mono">{new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(Number(item.qty))}</div>
+                <div className="text-[10px] text-slate-400">{lang === "vi" ? "Tối thiểu" : "Minimum"}: {new Intl.NumberFormat(lang === "vi" ? "vi-VN" : "en-US").format(Number(item.min))}</div>
               </div>
             </div>
           ))}
@@ -243,11 +288,11 @@ export default function Dashboard() {
                 {activityIcon[act.type]}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs text-slate-700 leading-relaxed">{act.text}</div>
+                <div className="text-xs text-slate-700 leading-relaxed">{activityText(act, lang)}</div>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[11px] text-slate-400">{formatDateTimeUtc7(act.time)}</span>
+                  <span className="text-[11px] text-slate-400">{activityTime(act, lang)}</span>
                   <span className="text-[11px] text-slate-300">·</span>
-                  <span className="text-[11px] text-blue-600">{act.user}</span>
+                  <span className="text-[11px] text-blue-600">{lang === "vi" && String(act.user).toLowerCase() === "system" ? "Hệ thống" : act.user}</span>
                 </div>
               </div>
             </div>

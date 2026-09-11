@@ -1660,20 +1660,51 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
   const activityRows = [
     ...receipts.map(row => {
       const items = receiptItemsByReceipt[row.id] ?? []
-      const itemSummary = items.length
-        ? items.slice(0, 2).map((item: any) => `${item.product_name} x${toNumber(item.qty)}`).join(", ")
+      const itemSummaryVi = items.length
+        ? items.slice(0, 2).map((item: any) => `${item.product_name} × ${toNumber(item.qty)}`).join(", ")
+        : `${toNumber(row.items)} mặt hàng`
+      const itemSummaryEn = items.length
+        ? items.slice(0, 2).map((item: any) => `${item.product_name} × ${toNumber(item.qty)}`).join(", ")
         : `${toNumber(row.items)} items`
-      const extra = items.length > 2 ? ` +${items.length - 2} more` : ""
+      const extraVi = items.length > 2 ? ` và ${items.length - 2} mặt hàng khác` : ""
+      const extraEn = items.length > 2 ? ` and ${items.length - 2} more` : ""
+      const reference = row.ref || row.id
+      const warehouse = row.warehouse_name || "warehouse"
       return {
         type: "purchase",
-        text: `Goods receipt ${row.ref || row.id} completed: ${itemSummary}${extra} at ${row.warehouse_name || "warehouse"}`,
+        text: `Goods receipt ${reference} completed: ${itemSummaryEn}${extraEn} at ${warehouse}`,
+        textEn: `Goods receipt ${reference} completed: ${itemSummaryEn}${extraEn} at ${warehouse}`,
+        textVi: `Phiếu nhập kho ${reference} đã hoàn tất: ${itemSummaryVi}${extraVi} tại ${row.warehouse_name || "kho"}`,
         time: row.created_at,
         user: row.created_by || "System",
       }
     }),
-    ...activePurchases.map(row => ({ type: "purchase", text: `Purchase order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
-    ...activeSales.map(row => ({ type: "sales", text: `Sales order ${row.ref || row.id} created`, time: row.created_at || row.date, user: row.created_by || "System" })),
-    ...ledger.map(row => ({ type: "inventory", text: `${row.movement_type || "Inventory"}: ${row.product_name || row.sku} (${toNumber(row.qty_in) - toNumber(row.qty_out)})`, time: row.created_at, user: row.created_by || "System" })),
+    ...activePurchases.map(row => ({ type: "purchase", text: `Purchase order ${row.ref || row.id} created`, textEn: `Purchase order ${row.ref || row.id} created`, textVi: `Đơn mua hàng ${row.ref || row.id} đã được tạo`, time: row.created_at || row.date, user: row.created_by || "System" })),
+    ...activeSales.map(row => ({ type: "sales", text: `Sales order ${row.ref || row.id} created`, textEn: `Sales order ${row.ref || row.id} created`, textVi: `Đơn bán hàng ${row.ref || row.id} đã được tạo`, time: row.created_at || row.date, user: row.created_by || "System" })),
+    ...ledger.map(row => {
+      const movementType = String(row.movement_type || "Inventory").toUpperCase()
+      const movementVi: Record<string, string> = {
+        OPENING_BALANCE: "Tồn đầu kỳ",
+        RECEIPT: "Nhập kho",
+        SALE: "Xuất bán",
+        RETURN_IN: "Hàng trả nhập lại",
+        RETURN_OUT: "Trả hàng nhà cung cấp",
+        ADJUSTMENT_IN: "Điều chỉnh tăng",
+        ADJUSTMENT_OUT: "Điều chỉnh giảm",
+        TRANSFER_IN: "Nhập chuyển kho",
+        TRANSFER_OUT: "Xuất chuyển kho",
+      }
+      const product = row.product_name || row.sku
+      const quantity = toNumber(row.qty_in) - toNumber(row.qty_out)
+      return {
+        type: "inventory",
+        text: `${row.movement_type || "Inventory"}: ${product} (${quantity})`,
+        textEn: `${row.movement_type || "Inventory"}: ${product} (${quantity})`,
+        textVi: `${movementVi[movementType] || "Biến động tồn kho"}: ${product} (${quantity})`,
+        time: row.created_at,
+        user: row.created_by || "System",
+      }
+    }),
   ].sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime()).slice(0, 6)
   const lowStock = products.filter(row => toNumber(ledgerQtyByProduct[row.id] ?? row.qty) <= toNumber(row.min_qty ?? row.min_stock ?? 0)).map(row => ({ sku: row.sku, name: row.name, qty: toNumber(ledgerQtyByProduct[row.id] ?? row.qty), min: toNumber(row.min_qty ?? row.min_stock ?? 0), warehouse: "All warehouses" }))
   return { data: {

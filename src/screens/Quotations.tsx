@@ -90,6 +90,24 @@ type AllocationDraft = {
   }
 }
 
+function allocationSourceLabel(sourceType: string, vi: boolean) {
+  const normalized = sourceType.toUpperCase()
+  if (normalized === "STOCK") return vi ? "Tồn kho" : "Stock"
+  if (normalized === "NEW_STOCK") return vi ? "Nhập mới" : "New stock"
+  return sourceType
+}
+
+function reservationStatusLabel(status: string, vi: boolean) {
+  const normalized = status.toUpperCase()
+  const labels: Record<string, { vi: string; en: string }> = {
+    ACTIVE: { vi: "Đang giữ chỗ", en: "Reserved" },
+    CONSUMED: { vi: "Đã xuất kho", en: "Consumed" },
+    RELEASED: { vi: "Đã giải phóng", en: "Released" },
+    CANCELLED: { vi: "Đã hủy", en: "Cancelled" },
+  }
+  return labels[normalized]?.[vi ? "vi" : "en"] ?? status
+}
+
 function quotationFileName(quotationId: string | undefined, extension: string) {
   return `quotation-${quotationId || "new"}.${extension}`
 }
@@ -465,6 +483,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                   emptyText={vi ? "Không có khách hàng phù hợp" : "No matching customer"}
                   loadingText={vi ? "Đang tải khách hàng..." : "Loading customers..."}
                   loadMoreText={vi ? "Tải thêm khách hàng" : "Load more customers"}
+                  retryText={vi ? "Thử lại" : "Retry"}
+                  clearLabel={vi ? "Bỏ chọn khách hàng" : "Clear customer"}
                 />
               </div>
               <div>
@@ -488,6 +508,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                   emptyText={vi ? "Không có kho phù hợp" : "No matching warehouse"}
                   loadingText={vi ? "Đang tải kho..." : "Loading warehouses..."}
                   loadMoreText={vi ? "Tải thêm kho" : "Load more warehouses"}
+                  retryText={vi ? "Thử lại" : "Retry"}
+                  clearLabel={vi ? "Bỏ chọn kho" : "Clear warehouse"}
                 />
               </div>
               <div className="col-span-3">
@@ -504,7 +526,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                 <thead className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
                   <tr>
                     <th className="py-2.5 px-3 font-medium text-slate-600 w-[220px]">{vi ? "Danh mục" : "Category"}</th>
-                    <th className="py-2.5 px-3 font-medium text-slate-600 w-[80px]">{vi ? "ĐV Bán" : "Out Unit"}</th>
+                    <th className="py-2.5 px-3 font-medium text-slate-600 w-[80px]">{vi ? "ĐVT bán" : "Sales unit"}</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[60px]">SL</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[100px]">{vi ? "Giá vốn tham khảo" : "Reference cost"}</th>
                     <th className="py-2.5 px-3 font-medium text-slate-600 text-right w-[60px]">% Lãi</th>
@@ -529,6 +551,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                           emptyText={vi ? "Không có danh mục phù hợp" : "No matching category"}
                           loadingText={vi ? "Đang tải danh mục..." : "Loading categories..."}
                           loadMoreText={vi ? "Tải thêm danh mục" : "Load more categories"}
+                          retryText={vi ? "Thử lại" : "Retry"}
+                          clearLabel={vi ? "Bỏ chọn danh mục" : "Clear category"}
                           buttonClassName="h-8 text-xs"
                         />
                       </td>
@@ -545,6 +569,8 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                           emptyText={vi ? "Không có đơn vị phù hợp" : "No matching unit"}
                           loadingText={vi ? "Đang tải đơn vị..." : "Loading units..."}
                           loadMoreText={vi ? "Tải thêm đơn vị" : "Load more units"}
+                          retryText={vi ? "Thử lại" : "Retry"}
+                          clearLabel={vi ? "Bỏ chọn đơn vị" : "Clear unit"}
                           buttonClassName="h-8 text-xs"
                         />
                       </td>
@@ -636,7 +662,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
             {!activeItem?.category_id ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center text-xs px-4">
                 <PackageCheck size={24} className="mb-2 opacity-50" />
-                {vi ? "Chọn danh mục để xem các SKU có thể phân bổ khi Convert." : "Select a category to preview SKUs available at conversion."}
+                {vi ? "Chọn danh mục để xem các SKU có thể phân bổ khi xác nhận báo giá." : "Select a category to preview SKUs available at conversion."}
               </div>
             ) : activeAllocations.length ? (
               <div className="space-y-3">
@@ -654,17 +680,17 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                   return <div key={allocation.id ?? `${allocation.product_id}-${allocation.source_type}`} className="rounded-lg border bg-white p-3 text-xs">
                     <div className="flex items-start justify-between gap-2">
                       <div><div className="font-semibold text-slate-900">{product?.name ?? allocation.product_name ?? allocation.product_id}</div><div className="mt-0.5 text-[10px] text-slate-400 mono">{product?.sku ?? allocation.sku ?? ""}</div></div>
-                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${allocation.source_type === "NEW_STOCK" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{allocation.source_type}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${allocation.source_type === "NEW_STOCK" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{allocationSourceLabel(allocation.source_type, vi)}</span>
                     </div>
                     <div className="mt-2 flex justify-between border-t pt-2"><span className="text-slate-500">{vi ? "Số lượng" : "Quantity"}</span><b>{fmt(Number(allocation.qty))}</b></div>
-                    {reservation && <div className="mt-1 flex justify-between"><span className="text-slate-500">Reservation</span><b className={reservation === "ACTIVE" ? "text-amber-700" : reservation === "CONSUMED" ? "text-emerald-700" : "text-slate-500"}>{reservation}</b></div>}
+                    {reservation && <div className="mt-1 flex justify-between"><span className="text-slate-500">{vi ? "Trạng thái giữ chỗ" : "Reservation"}</span><b className={reservation === "ACTIVE" ? "text-amber-700" : reservation === "CONSUMED" ? "text-emerald-700" : "text-slate-500"}>{reservationStatusLabel(reservation, vi)}</b></div>}
                   </div>
                 })}
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="rounded-lg border bg-blue-50 p-3 text-xs text-blue-800">
-                  {vi ? "Báo giá chỉ cam kết danh mục. Tồn và giá vốn ở đây là tham khảo tổng hợp; Convert sẽ tính lại Available theo kho, còn giá vốn thực tế được chốt khi giao." : "The quote commits to a category. Stock and cost here are pooled references; conversion rechecks warehouse availability and actual COGS is finalized at delivery."}
+                  {vi ? "Báo giá chỉ cam kết theo danh mục. Tồn kho và giá vốn tại đây là số liệu tham khảo tổng hợp; khi xác nhận phân bổ, hệ thống sẽ tính lại lượng khả dụng theo kho. Giá vốn thực tế được chốt khi giao hàng." : "The quote commits to a category. Stock and cost here are pooled references; conversion rechecks warehouse availability and actual COGS is finalized at delivery."}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-lg border bg-white p-3"><div className="text-[10px] text-slate-500">{vi ? "SKU phù hợp" : "Matching SKUs"}</div><div className="mt-1 text-lg font-bold">{categoryProducts.length}</div></div>
@@ -682,7 +708,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
                     <div className="mt-2 flex justify-between border-t pt-2 text-[10px]"><span className="text-slate-500">{vi ? "Giá vốn bình quân" : "Average cost"}</span><b>{money(product.averageCost)}</b></div>
                   </div>
                 ))}
-                {categoryProducts.length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{vi ? "Chưa có SKU trong danh mục; có thể tạo SKU mới lúc Convert." : "No SKU yet; a new one can be created during conversion."}</div>}
+                {categoryProducts.length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{vi ? "Chưa có SKU trong danh mục; bạn có thể tạo SKU mới khi xác nhận phân bổ." : "No SKU yet; a new one can be created during conversion."}</div>}
               </div>
             )}
           </div>
@@ -859,7 +885,7 @@ function QuotationAllocationModal({ quotationId, onLoadLookup, vi, isDemo, orgId
                     const product = productFor(row)
                     const maxQty = row.source_type === "STOCK" ? Number(product?.available ?? 0) : Number(item.qty)
                     return <div key={row.key} className={`rounded-lg border p-3 ${row.source_type === "STOCK" ? "border-blue-200 bg-blue-50/40" : "border-amber-200 bg-amber-50/40"}`}>
-                      <div className="flex items-start justify-between"><div><span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${row.source_type === "STOCK" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{row.source_type}</span><span className="ml-2 text-xs font-semibold">{row.new_product ? (vi ? "SKU mới" : "New SKU") : product?.name}</span></div><button onClick={() => setRows(previous => previous.filter(candidate => candidate.key !== row.key))} className="text-slate-400 hover:text-red-600"><Trash2 size={13} /></button></div>
+                      <div className="flex items-start justify-between"><div><span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${row.source_type === "STOCK" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{allocationSourceLabel(row.source_type, vi)}</span><span className="ml-2 text-xs font-semibold">{row.new_product ? (vi ? "SKU mới" : "New SKU") : product?.name}</span></div><button onClick={() => setRows(previous => previous.filter(candidate => candidate.key !== row.key))} className="text-slate-400 hover:text-red-600"><Trash2 size={13} /></button></div>
                       {row.new_product && <div className="mt-3 grid grid-cols-2 gap-2"><input value={row.new_product.sku} onChange={event => updateNewProduct(row.key, { sku: event.target.value })} placeholder="SKU *" className="h-8 rounded border px-2 text-xs" /><input value={row.new_product.name} onChange={event => updateNewProduct(row.key, { name: event.target.value })} placeholder={vi ? "Tên sản phẩm *" : "Product name *"} className="h-8 rounded border px-2 text-xs" /><input value={row.new_product.unit} onChange={event => updateNewProduct(row.key, { unit: event.target.value })} placeholder={vi ? "Đơn vị *" : "Unit *"} className="h-8 rounded border px-2 text-xs" /><label className="flex h-8 items-center gap-2 rounded border bg-white px-2 text-[10px]"><input type="checkbox" checked={row.new_product.track_batch} onChange={event => updateNewProduct(row.key, { track_batch: event.target.checked })} />{vi ? "Theo dõi lô" : "Track batch"}</label></div>}
                       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                         <label className="text-[9px] text-slate-500">{vi ? "Số lượng" : "Quantity"}<input type="number" min={0.01} max={maxQty} step="0.01" value={row.qty} onChange={event => updateRow(row.key, { qty: Math.max(0, Number(event.target.value)) })} className="mt-1 h-8 w-full rounded border bg-white px-2 text-right text-xs" /></label>
@@ -875,6 +901,8 @@ function QuotationAllocationModal({ quotationId, onLoadLookup, vi, isDemo, orgId
                               emptyText={vi ? "Không có nhà cung cấp phù hợp" : "No matching supplier"}
                               loadingText={vi ? "Đang tải..." : "Loading..."}
                               loadMoreText={vi ? "Tải thêm" : "Load more"}
+                              retryText={vi ? "Thử lại" : "Retry"}
+                              clearLabel={vi ? "Bỏ chọn nhà cung cấp" : "Clear supplier"}
                               className="mt-1"
                               buttonClassName="h-8 text-xs"
                             />
@@ -894,7 +922,7 @@ function QuotationAllocationModal({ quotationId, onLoadLookup, vi, isDemo, orgId
           </section>
         })}
       </div>
-      <div className="flex items-center justify-between border-t bg-white px-5 py-4"><div className={`text-xs ${allExact ? "text-emerald-700" : "text-amber-700"}`}>{allExact ? (vi ? "Tất cả danh mục đã được phân bổ đủ." : "Every category is fully allocated.") : (vi ? "Cần phân bổ đúng đủ số lượng cho mọi danh mục." : "Every category must be allocated exactly.")}</div><div className="flex gap-2"><button disabled={submitting} onClick={onClose} className="h-9 rounded-lg border px-4 text-xs">{vi ? "Đóng" : "Close"}</button><button disabled={!allExact || submitting} onClick={() => void submit()} className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{submitting ? (vi ? "Đang xác nhận..." : "Submitting...") : (vi ? "Xác nhận Convert" : "Confirm conversion")}</button></div></div>
+      <div className="flex items-center justify-between border-t bg-white px-5 py-4"><div className={`text-xs ${allExact ? "text-emerald-700" : "text-amber-700"}`}>{allExact ? (vi ? "Tất cả danh mục đã được phân bổ đủ." : "Every category is fully allocated.") : (vi ? "Cần phân bổ đúng đủ số lượng cho mọi danh mục." : "Every category must be allocated exactly.")}</div><div className="flex gap-2"><button disabled={submitting} onClick={onClose} className="h-9 rounded-lg border px-4 text-xs">{vi ? "Đóng" : "Close"}</button><button disabled={!allExact || submitting} onClick={() => void submit()} className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{submitting ? (vi ? "Đang xác nhận..." : "Submitting...") : (vi ? "Xác nhận phân bổ" : "Confirm conversion")}</button></div></div>
     </div>
   </div>
 }

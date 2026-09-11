@@ -1300,3 +1300,1096 @@ Available = OnHand - Reserved
 ```
 
 Đây sẽ là nền tảng khá sạch để sau này phát triển thêm **hủy đơn, giao từng phần, purchase order, nhiều kho, nhiều NCC, cost/profit và FEFO** mà không phải phá lại flow hiện tại.
+l
+# Cập nhật spec panel báo giá cũ:
+Kết hợp được, và thực ra **panel ref càng cần thiết hơn khi báo giá theo Category**. Chỉ cần đổi tư duy từ:
+
+> Chọn Product → xem latest record của Product
+
+thành:
+
+> Chọn Category → xem các giao dịch tham chiếu của **tất cả Product thuộc Category đó**, rồi user chọn một record làm `reference` cho dòng báo giá.
+
+Ví dụ bạn đang báo giá:
+
+```text
+Danh mục: Ống kẽm
+Số lượng: 12
+```
+
+Trong hệ thống:
+
+```text
+Ống kẽm
+├── Ống kẽm Hòa Phát v2026
+└── Ống kẽm Tân Việt
+```
+
+Panel bên phải có thể trở thành **“Thông tin tham chiếu”**.
+
+---
+
+## 1. UI mình đề xuất
+
+Màn báo giá:
+
+```text
+┌─────────────────────────────────────┐ ┌──────────────────────────────┐
+│             BÁO GIÁ                 │ │  THÔNG TIN THAM CHIẾU       │
+│                                     │ │                              │
+│ Khách hàng: [Công ty ABC]           │ │ Danh mục: Ống kẽm            │
+│                                     │ │                              │
+│ Danh mục: [Ống kẽm]                 │ │ [Cùng khách] [Tất cả]        │
+│ Số lượng: [12]                      │ │                              │
+│ Giá bán: [150.000]                  │ │ ★ Ref gần nhất               │
+│ VAT: [10%]                          │ │                              │
+│                                     │ │ SP: Ống kẽm Hòa Phát         │
+│                                     │ │ Khách: Công ty XYZ           │
+│                                     │ │ SL: 20                       │
+│                                     │ │ Giá nhập: 112.000            │
+│                                     │ │ Giá bán: 148.000             │
+│                                     │ │ Lợi nhuận: 32,14%            │
+│                                     │ │ Ngày: 01/09/2026             │
+│                                     │ │ Báo giá: QT-260901-01 ↗       │
+│                                     │ │                              │
+│                                     │ │ [Dùng giá này làm ref]       │
+└─────────────────────────────────────┘ └──────────────────────────────┘
+```
+
+Điểm quan trọng là **reference không có nghĩa Product này sẽ được giao**.
+
+Ví dụ bạn lấy:
+
+```text
+Ref giá:
+Ống kẽm Hòa Phát
+Giá bán 148.000
+```
+
+nhưng sau Convert có thể giao:
+
+```text
+6 Hòa Phát
+6 Tân Việt
+```
+
+Hai nghiệp vụ hoàn toàn độc lập.
+
+---
+
+# 2. Tách rõ 3 lớp dữ liệu
+
+Bạn nên coi hệ thống có ba layer:
+
+```text
+CATEGORY
+"Khách hàng đang mua cái gì?"
+
+        ↓
+
+REFERENCE
+"Giá này được tham khảo từ giao dịch nào?"
+
+        ↓
+
+ALLOCATION
+"Cuối cùng giao Product nào?"
+```
+
+Ví dụ:
+
+```text
+Quotation Item
+Category: Ống kẽm
+Quantity: 12
+Sale Price: 150.000
+```
+
+Reference:
+
+```text
+Reference Product:
+Ống kẽm Hòa Phát
+
+Reference Customer:
+Công ty XYZ
+
+Previous Sale Price:
+148.000
+
+Previous Import Price:
+112.000
+
+Previous Quotation:
+QT001
+```
+
+Sau Convert:
+
+```text
+Allocation:
+
+Hòa Phát      4
+Tân Việt      8
+```
+
+Không có vấn đề gì cả.
+
+---
+
+# 3. Panel nên lấy những thông tin gì?
+
+Với nhu cầu của bạn về:
+
+> giá, người mua, ...
+
+mình sẽ hiển thị mỗi reference record:
+
+| Field          | Ý nghĩa                        |
+| -------------- | ------------------------------ |
+| Product        | Product thực tế ở giao dịch cũ |
+| Category       | Danh mục                       |
+| Customer       | Người mua trước                |
+| Supplier       | NCC của Product                |
+| Quantity       | SL giao dịch                   |
+| Import price   | Giá nhập gần thời điểm đó      |
+| Sale price     | Giá bán                        |
+| Margin         | % lợi nhuận                    |
+| VAT            | VAT                            |
+| Quotation      | Báo giá nguồn                  |
+| Order/Invoice  | Chứng từ bán                   |
+| Import invoice | Chứng từ nhập                  |
+| Date           | Ngày giao dịch                 |
+| Warehouse      | Kho                            |
+| Salesperson    | Người tạo báo giá / sale       |
+
+Các ID liên quan đều nên clickable:
+
+```text
+QT-000123       ↗
+KH-000056       ↗
+NK-000291       ↗
+SP-000019       ↗
+```
+
+---
+
+# 4. Không chỉ hiển thị 1 record
+
+Spec ban đầu là:
+
+> latest impNcc
+
+Nhưng khi chuyển sang Category, chỉ lấy **1 latest record** sẽ hơi yếu.
+
+Ví dụ:
+
+```text
+Ống kẽm
+
+Hòa Phát:
+giá nhập 110k
+giá bán gần nhất 145k
+
+Tân Việt:
+giá nhập 105k
+giá bán gần nhất 140k
+```
+
+User nên nhìn thấy cả hai.
+
+Mình đề xuất panel mặc định hiển thị:
+
+### Giao dịch bán gần đây
+
+Ví dụ:
+
+```text
+GẦN ĐÂY
+
+01/09
+Hòa Phát
+Công ty ABC
+20 cái
+Giá bán: 148k
+Giá nhập: 112k
+Margin: 32%
+
+28/08
+Tân Việt
+Công ty DEF
+10 cái
+Giá bán: 142k
+Giá nhập: 106k
+Margin: 34%
+
+20/08
+Hòa Phát
+Công ty GHI
+50 cái
+Giá bán: 144k
+...
+```
+
+Khoảng:
+
+```text
+5–10 record
+```
+
+là hợp lý.
+
+---
+
+# 5. Nên có hai tab trong panel
+
+Panel:
+
+```text
+[ Giá bán ] [ Giá nhập ]
+```
+
+### Tab Giá bán
+
+Dữ liệu từ:
+
+```text
+Quotation / Order / Delivery
+```
+
+Hiển thị:
+
+```text
+Product
+Customer
+Quantity
+Sale Price
+VAT
+Margin
+Quotation
+Date
+```
+
+Đây là nơi Sale tham khảo:
+
+> Lần trước mình đã bán Category này bao nhiêu?
+
+### Tab Giá nhập
+
+Dữ liệu từ:
+
+```text
+impNcc / inventory receipt / ledger IN
+```
+
+Hiển thị:
+
+```text
+Product
+Supplier
+Quantity
+Import Price
+VAT
+Import unit
+Invoice
+Import date
+```
+
+Đây là nơi tham khảo:
+
+> Giá vốn gần nhất là bao nhiêu?
+
+---
+
+# 6. Filter cực kỳ hữu ích: “Cùng khách hàng”
+
+Giả sử hiện đang báo giá cho:
+
+```text
+Công ty Minh Anh
+```
+
+và Category:
+
+```text
+Ống kẽm
+```
+
+Panel nên ưu tiên:
+
+```text
+[Cùng khách hàng]
+```
+
+Kết quả:
+
+```text
+Lần gần nhất bán Ống kẽm cho
+Công ty Minh Anh:
+
+Ngày: 15/08
+Product: Hòa Phát
+SL: 30
+Giá bán: 143.000
+```
+
+Sau đó mới đến:
+
+```text
+[Tất cả khách hàng]
+```
+
+Điều này cực kỳ hữu ích cho sale vì nhiều khách thường có **giá riêng**.
+
+---
+
+# 7. Thứ tự ưu tiên Reference
+
+Khi chọn:
+
+```text
+Customer + Category
+```
+
+BE có thể trả:
+
+### Reference số 1
+
+```text
+Latest sale:
+same Customer
+same Category
+```
+
+Nếu không có:
+
+### Reference số 2
+
+```text
+Latest sale:
+any Customer
+same Category
+```
+
+Và song song:
+
+### Reference giá vốn
+
+```text
+Latest import:
+products in same Category
+```
+
+Logic:
+
+```text
+Customer A + Category X
+        ↓
+Có lịch sử Customer A mua Category X?
+        ↓ YES
+hiển thị lên đầu
+
+        ↓ NO
+
+Lấy lịch sử toàn bộ khách mua Category X
+```
+
+---
+
+# 8. “Dùng làm ref” chứ không auto áp dụng mù quáng
+
+Ví dụ panel:
+
+```text
+Previous Sale Price: 148.000
+
+[ Áp dụng giá ]
+```
+
+Khi click:
+
+```text
+SalePrice = 148.000
+```
+
+Nhưng user vẫn sửa được:
+
+```text
+150.000
+```
+
+Mình không khuyên tự động overwrite giá ngay khi Category thay đổi.
+
+Nên:
+
+```text
+Hiển thị gợi ý
+        ↓
+User chọn
+        ↓
+Apply
+```
+
+vì lịch sử có thể không phù hợp với deal hiện tại.
+
+---
+
+# 9. Có thể hiển thị Recommendation
+
+Panel có thể tổng hợp thêm:
+
+```text
+GIÁ THAM KHẢO
+
+Giá bán gần nhất:       148.000
+Giá bán cùng khách:     145.000
+Giá bán trung bình:     146.500
+
+Giá nhập gần nhất:
+Hòa Phát:               112.000
+Tân Việt:               106.000
+
+Giá bán hiện tại:       150.000
+```
+
+Và:
+
+```text
+Estimated margin:
+Hòa Phát: 33.9%
+Tân Việt: 41.5%
+```
+
+Nhưng đây chỉ là **reference**, vì chưa biết Product nào sẽ được allocate khi Convert.
+
+---
+
+# 10. Vậy `% lợi nhuận` tính thế nào khi chưa biết Product?
+
+Đây là điểm quan trọng nhất khi báo giá theo Category.
+
+Trước đây:
+
+```text
+Product
+→ biết giá nhập
+→ tính chính xác margin
+```
+
+Bây giờ:
+
+```text
+Category
+→ có nhiều Product
+→ nhiều giá nhập khác nhau
+```
+
+Không thể nói có một `cost price` chính xác.
+
+Mình đề xuất có:
+
+```text
+Reference Cost
+```
+
+Ví dụ user chọn:
+
+```text
+Reference:
+Ống kẽm Hòa Phát
+
+Reference Cost = 112.000
+```
+
+Nếu:
+
+```text
+Sale Price = 150.000
+```
+
+thì:
+
+```text
+Reference Margin
+= (150.000 - 112.000) / 112.000
+≈ 33.93%
+```
+
+UI phải gọi đúng tên:
+
+> **Lợi nhuận tham chiếu**
+
+không nên gọi:
+
+> Lợi nhuận thực tế
+
+---
+
+# 11. Lợi nhuận thực tế chỉ biết sau Convert
+
+Sau Convert:
+
+```text
+4 Hòa Phát @112k
+8 Tân Việt @106k
+```
+
+Cost thực tế:
+
+```text
+4 × 112
++
+8 × 106
+=
+1.296k
+```
+
+Average cost:
+
+```text
+1.296 / 12
+= 108k
+```
+
+Giá bán:
+
+```text
+150k × 12
+= 1.800k
+```
+
+Lúc đó mới tính được:
+
+```text
+Actual Gross Profit:
+504k
+```
+
+và margin thực tế.
+
+Do đó nên phân biệt:
+
+```text
+Quotation:
+Reference margin
+
+After Convert:
+Expected actual margin
+
+After Delivery:
+Actual margin
+```
+
+Kiến trúc như vậy sẽ rất sạch.
+
+---
+
+# 12. Nên lưu Reference vào QuotationItem
+
+Mình khuyên **có lưu**, chứ đừng chỉ hiển thị UI rồi mất.
+
+Ví dụ:
+
+```text
+quotation_item
+--------------------------
+category_id
+quantity
+unit_price
+
+reference_product_id
+reference_sale_id
+reference_import_id
+```
+
+Nhưng tốt hơn nữa là một bảng:
+
+```text
+quotation_item_references
+```
+
+Ví dụ:
+
+```text
+id
+quotation_item_id
+
+reference_type
+reference_entity_id
+
+product_id
+customer_id
+supplier_id
+
+reference_import_price
+reference_sale_price
+reference_quantity
+reference_date
+```
+
+`reference_type`:
+
+```text
+SALE
+IMPORT
+MANUAL
+```
+
+---
+
+# 13. Vì sao phải snapshot?
+
+Giả sử tháng 9 bạn tạo báo giá:
+
+```text
+QT100
+```
+
+tham khảo:
+
+```text
+QT050
+Sale price: 148k
+Import price: 112k
+```
+
+Sau này QT050 có correction hoặc product price thay đổi.
+
+QT100 vẫn phải nhớ:
+
+> Khi tạo báo giá, tôi đã tham khảo giá **148 / 112**.
+
+Nên Quotation Reference lưu cả:
+
+```text
+reference_id
++
+snapshot
+```
+
+Ví dụ:
+
+```json
+{
+  "referenceQuotationId": "QT050",
+  "referenceProductId": "P01",
+  "referenceCustomerId": "C10",
+
+  "snapshotSalePrice": 148000,
+  "snapshotImportPrice": 112000,
+  "snapshotMargin": 32.14,
+  "snapshotDate": "2026-09-01"
+}
+```
+
+Không chỉ FK.
+
+---
+
+# 14. API hợp lý
+
+Khi chọn Category:
+
+```http
+GET /api/quotation-reference
+    ?categoryId=CAT01
+    &customerId=CUS01
+```
+
+Response:
+
+```json
+{
+  "sameCustomer": [
+    {
+      "productId": "P01",
+      "productName": "Ống kẽm Hòa Phát v2026",
+      "customerId": "CUS01",
+      "customerName": "Công ty ABC",
+      "quantity": 20,
+      "salePrice": 148000,
+      "importPrice": 112000,
+      "quotationId": "QT050",
+      "date": "2026-09-01"
+    }
+  ],
+  "recentSales": [],
+  "recentImports": []
+}
+```
+
+FE panel chỉ render response.
+
+---
+
+# 15. Khi user click một record
+
+Ví dụ:
+
+```text
+Ống kẽm Hòa Phát
+Công ty ABC
+148.000
+
+[Dùng làm tham chiếu]
+```
+
+FE set:
+
+```text
+referenceProductId = P01
+referenceQuotationId = QT050
+referenceSalePrice = 148000
+referenceImportPrice = 112000
+```
+
+Nếu user click:
+
+```text
+[Áp dụng giá bán]
+```
+
+thì mới:
+
+```text
+unitPrice = 148000
+```
+
+Hai action nên khác nhau:
+
+```text
+Dùng làm tham chiếu
+```
+
+và:
+
+```text
+Áp dụng giá
+```
+
+---
+
+# 16. Mình đề xuất panel cuối cùng như sau
+
+```text
+┌────────────────────────────────────────┐
+│ THAM CHIẾU BÁO GIÁ                     │
+│                                        │
+│ Ống kẽm                                │
+│                                        │
+│ [Cùng khách] [Gần đây] [Giá nhập]      │
+│                                        │
+│ ────────────────────────────────────── │
+│ ★ Gần nhất cùng khách                  │
+│                                        │
+│ Ống kẽm Hòa Phát                       │
+│ Công ty ABC                            │
+│                                        │
+│ SL:             20                     │
+│ Giá nhập:       112.000                │
+│ Giá bán:        148.000                │
+│ Margin:          32,1%                 │
+│ VAT:             10%                   │
+│ Ngày:           01/09/2026             │
+│                                        │
+│ QT-000123 ↗     KH-00010 ↗             │
+│                                        │
+│ [Dùng làm ref] [Áp dụng giá]           │
+│                                        │
+│ ────────────────────────────────────── │
+│ Các giao dịch khác                     │
+│                                        │
+│ Tân Việt      142k      Công ty XYZ    │
+│ Hòa Phát      145k      Công ty DEF    │
+│ ...                                    │
+└────────────────────────────────────────┘
+```
+
+Và nếu chưa chọn Category:
+
+```text
+Hãy chọn danh mục sản phẩm để xem
+thông tin tham chiếu.
+```
+
+Nếu Category chưa có lịch sử:
+
+```text
+Chưa có lịch sử bán hàng của danh mục này.
+
+Giá nhập gần nhất:
+Hòa Phát: 112.000
+Tân Việt: 106.000
+```
+
+Nếu hoàn toàn chưa có:
+
+```text
+Chưa có dữ liệu tham chiếu.
+```
+
+---
+
+## Chốt nghiệp vụ
+
+Mình sẽ **không bỏ panel cũ**, mà nâng nó từ:
+
+```text
+Latest import của Product
+```
+
+thành:
+
+```text
+Reference Center của Category
+```
+
+Trong đó:
+
+```text
+Category
+   │
+   ├── lịch sử bán
+   │     ├── Product đã bán
+   │     ├── người mua
+   │     ├── số lượng
+   │     ├── giá bán
+   │     └── quotation ref
+   │
+   └── lịch sử nhập
+         ├── Product
+         ├── NCC
+         ├── giá nhập
+         └── chứng từ nhập
+```
+
+**Báo giá vẫn theo Category. Reference vẫn giữ được Product, giá, khách hàng/người mua, NCC và chứng từ cũ. Convert mới quyết định Product thực tế được giao.**
+
+Đây là cách kết hợp hai yêu cầu mà không làm mất giá trị của panel ban đầu, đồng thời không phá nghiệp vụ mới “một Category có nhiều Product”.
+
+Nên bổ sung rule lookup reference theo **thứ tự ưu tiên cố định** như sau:
+
+### Logic tìm báo giá tham chiếu
+
+Khi user chọn:
+
+```text
+Customer + Category
+```
+
+hệ thống tìm reference theo thứ tự:
+
+```text
+1. Báo giá gần nhất
+   cùng Customer
+   + cùng Category
+
+        ↓ nếu không có
+
+2. Báo giá gần nhất
+   của Category đó
+   bất kể Customer
+
+        ↓ nếu vẫn không có
+
+3. Không có dữ liệu báo giá tham chiếu
+   → chỉ hiển thị lịch sử giá nhập nếu có
+```
+
+Ví dụ đang tạo báo giá:
+
+```text
+Customer: Công ty ABC
+Category: Ống kẽm
+```
+
+Hệ thống query trước:
+
+```text
+Category = Ống kẽm
+Customer = Công ty ABC
+```
+
+Nếu có:
+
+```text
+QT-0098
+Customer: Công ty ABC
+Category: Ống kẽm
+Date: 01/09/2026
+Sale Price: 148.000
+```
+
+thì chọn `QT-0098` làm **Primary Reference**.
+
+Nếu Công ty ABC chưa từng mua Ống kẽm, hệ thống fallback sang:
+
+```text
+Category = Ống kẽm
+Customer = ANY
+```
+
+và lấy báo giá gần nhất, ví dụ:
+
+```text
+QT-0102
+Customer: Công ty XYZ
+Category: Ống kẽm
+Date: 05/09/2026
+Sale Price: 152.000
+```
+
+Panel cần ghi rõ nguồn:
+
+```text
+★ Báo giá tham chiếu
+
+QT-0102
+Ống kẽm Hòa Phát
+Khách hàng: Công ty XYZ
+Giá bán: 152.000
+Ngày: 05/09/2026
+
+⚠ Chưa có lịch sử cùng khách hàng.
+Đang hiển thị báo giá gần nhất của danh mục.
+```
+
+## Điều kiện "gần nhất"
+
+Không nên đơn giản lấy:
+
+```sql
+ORDER BY created_at DESC
+```
+
+Mà nên lấy theo **ngày hiệu lực/ngày báo giá**, rồi mới dùng `created_at` làm tie-breaker:
+
+```text
+ORDER BY quotation_date DESC,
+         created_at DESC
+```
+
+Và chỉ lấy các báo giá hợp lệ, ví dụ:
+
+```text
+status != DRAFT
+status != CANCELLED
+deleted_at IS NULL
+```
+
+Nếu hệ thống có `ACCEPTED`, mình còn khuyên ưu tiên:
+
+```text
+ACCEPTED / CONVERTED / DELIVERED
+```
+
+hơn quotation chỉ mới `SENT`, vì đây là mức giá thực tế khách đã chấp nhận.
+
+Thứ tự tốt hơn có thể là:
+
+```text
+1. Gần nhất cùng Customer + Category
+   và đã ACCEPTED/CONVERTED/DELIVERED
+
+2. Gần nhất cùng Customer + Category
+   trạng thái hợp lệ khác
+
+3. Gần nhất cùng Category
+   và đã ACCEPTED/CONVERTED/DELIVERED
+
+4. Gần nhất cùng Category
+
+5. Không có quotation reference
+```
+
+## API
+
+Có thể giữ một API:
+
+```http
+GET /api/quotation-reference
+    ?categoryId={categoryId}
+    &customerId={customerId}
+```
+
+BE tự xử lý fallback.
+
+Response nên nói rõ **vì sao record này được chọn**:
+
+```json
+{
+  "reference": {
+    "quotationId": "QT-0102",
+    "customerId": "CUS-XYZ",
+    "customerName": "Công ty XYZ",
+    "categoryId": "CAT-ONG-KEM",
+    "productId": "PROD-HP",
+    "productName": "Ống kẽm Hòa Phát",
+    "quantity": 20,
+    "salePrice": 152000,
+    "importPrice": 112000,
+    "quotationDate": "2026-09-05"
+  },
+  "matchType": "CATEGORY_ONLY"
+}
+```
+
+`matchType` nên có:
+
+```text
+CUSTOMER_AND_CATEGORY
+CATEGORY_ONLY
+NONE
+```
+
+FE nhờ vậy không cần tự suy luận.
+
+## Nếu một quotation có nhiều dòng cùng Category
+
+Reference phải trả theo `QuotationItem`, không chỉ theo `Quotation`.
+
+Ví dụ `QT-0102` có:
+
+```text
+Ống kẽm      152.000
+Bulong        80.000
+```
+
+thì reference của `Ống kẽm` phải lấy chính line:
+
+```text
+quotation_item.category_id = ONG_KEM
+```
+
+và trả:
+
+```text
+quotationItemId
+```
+
+để trace chính xác.
+
+### Rule cuối cùng
+
+```text
+Selected Customer
+       +
+Selected Category
+       │
+       ▼
+Có quotation cùng Customer + Category?
+       │
+   YES │              NO
+       ▼               ▼
+Lấy gần nhất       Tìm quotation
+                   cùng Category
+                         │
+                    YES  │   NO
+                         ▼
+                   Lấy gần nhất
+                         │
+                         ▼
+                 Reference Panel
+```
+
+Mình khuyên dùng rule này làm **auto-selected primary reference**, nhưng panel vẫn nên hiển thị thêm vài giao dịch gần đây để user có thể chọn một reference khác nếu mức giá gần nhất không phù hợp.
