@@ -27,6 +27,11 @@ const quotationReferenceMigration = fs.readFileSync(
   "supabase/migrations/20260921000000_quotation_reference_center.sql",
   "utf8",
 )
+const quotationCategoryExportMigration = fs.readFileSync(
+  "supabase/migrations/20260923000000_quotation_category_defaults_export.sql",
+  "utf8",
+)
+const quotationExport = fs.readFileSync("src/lib/quotationExport.ts", "utf8")
 const dataService = fs.readFileSync("src/lib/dataService.ts", "utf8")
 const authContext = fs.readFileSync("src/contexts/AuthContext.tsx", "utf8")
 const genericScreens = fs.readFileSync("src/screens/GenericList.tsx", "utf8")
@@ -428,11 +433,36 @@ test("category quotation references are ranked, selectable, and snapshotted", ()
     /create or replace function persist_quotation_item_reference/,
   )
   assert.match(quotationReferenceMigration, /item->'reference'/)
-  assert.match(dataService, /rpc\("get_quotation_reference"/)
+  assert.match(dataService, /rpc\("get_quotation_reference_v2"/)
   assert.match(dataService, /reference: item\.reference \?\? null/)
   for (const label of ["Cùng khách", "Gần đây", "Giá nhập", "Dùng làm tham chiếu", "Áp dụng giá"]) {
     assert.match(quotationScreen, new RegExp(label))
   }
+})
+
+test("category defaults and quotation export follow the controlled quotation spec", () => {
+  for (const field of [
+    "default_unit_id",
+    "default_purchase_price",
+    "default_sale_price",
+    "has_vat",
+    "default_vat_rate",
+  ]) assert.match(quotationCategoryExportMigration, new RegExp(field))
+  assert.match(quotationCategoryExportMigration, /create or replace function save_category_defaults/)
+  assert.match(quotationCategoryExportMigration, /create or replace function import_category_defaults/)
+  assert.match(quotationCategoryExportMigration, /CATEGORY_DEFAULT/)
+  assert.match(quotationCategoryExportMigration, /create or replace function save_quotation_v2/)
+  assert.match(quotationCategoryExportMigration, /create or replace function assert_quotation_version/)
+  assert.doesNotMatch(quotationCategoryExportMigration, /insert into inventory_ledger[\s\S]{0,80}save_category_defaults/)
+  for (const header of [
+    "Hàng hóa đề xuất",
+    "Hàng hóa cung cấp",
+    "Quy cách / Nhãn hiệu",
+    "Thành tiền trước thuế",
+    "Thành tiền sau thuế",
+  ]) assert.match(quotationExport, new RegExp(header))
+  assert.match(quotationScreen, /Xem trước & xuất/)
+  assert.match(genericScreens, /Mặc định báo giá/)
 })
 
 test("production migration protects ledger, cash balance, and helper functions", () => {
@@ -591,7 +621,7 @@ test("frontend uses guarded RPCs and does not duplicate signup organization crea
     "receive_goods_receipt",
     "deliver_sales_order",
     "record_finance_transaction",
-    "save_quotation",
+    "save_quotation_v2",
     "create_organization_invitation",
   ]) {
     assert.match(dataService, new RegExp(`rpc\\(\"${rpc}\"`))

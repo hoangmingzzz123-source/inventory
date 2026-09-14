@@ -120,14 +120,14 @@ export const stockLedger = [
 ]
 
 export const categories = [
-  { id: "CAT001", code: "LAPTOP", name_vi: "Máy tính xách tay", name_en: "Laptop", parent: null, status: "Active", items: 18 },
-  { id: "CAT002", code: "PHONE", name_vi: "Điện thoại di động", name_en: "Mobile Phone", parent: null, status: "Active", items: 12 },
-  { id: "CAT003", code: "MONITOR", name_vi: "Màn hình máy tính", name_en: "Monitor", parent: null, status: "Active", items: 8 },
-  { id: "CAT004", code: "KEYBOARD", name_vi: "Bàn phím", name_en: "Keyboard", parent: "INPUT", status: "Active", items: 15 },
-  { id: "CAT005", code: "STORAGE", name_vi: "Thiết bị lưu trữ", name_en: "Storage", parent: null, status: "Active", items: 22 },
-  { id: "CAT006", code: "MEMORY", name_vi: "Bộ nhớ RAM", name_en: "Memory", parent: null, status: "Active", items: 11 },
-  { id: "CAT007", code: "NETWORK", name_vi: "Thiết bị mạng", name_en: "Network", parent: null, status: "Active", items: 9 },
-  { id: "CAT008", code: "POWER", name_vi: "Nguồn điện & UPS", name_en: "Power & UPS", parent: null, status: "Active", items: 6 },
+  { id: "CAT001", code: "LAPTOP", name_vi: "Máy tính xách tay", name_en: "Laptop", parent: null, status: "Active", items: 18, default_unit: "Cái / Chiếc", default_purchase_price: 18500000, default_sale_price: 22000000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT002", code: "PHONE", name_vi: "Điện thoại di động", name_en: "Mobile Phone", parent: null, status: "Active", items: 12, default_unit: "Cái / Chiếc", default_purchase_price: 7800000, default_sale_price: 9500000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT003", code: "MONITOR", name_vi: "Màn hình máy tính", name_en: "Monitor", parent: null, status: "Active", items: 8, default_unit: "Cái / Chiếc", default_purchase_price: 6200000, default_sale_price: 7800000, has_vat: true, default_vat_rate: 8 },
+  { id: "CAT004", code: "KEYBOARD", name_vi: "Bàn phím", name_en: "Keyboard", parent: "INPUT", status: "Active", items: 15, default_unit: "Cái / Chiếc", default_purchase_price: 2100000, default_sale_price: 2800000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT005", code: "STORAGE", name_vi: "Thiết bị lưu trữ", name_en: "Storage", parent: null, status: "Active", items: 22, default_unit: "Cái / Chiếc", default_purchase_price: 1800000, default_sale_price: 2350000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT006", code: "MEMORY", name_vi: "Bộ nhớ RAM", name_en: "Memory", parent: null, status: "Active", items: 11, default_unit: "Cái / Chiếc", default_purchase_price: 1200000, default_sale_price: 1550000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT007", code: "NETWORK", name_vi: "Thiết bị mạng", name_en: "Network", parent: null, status: "Active", items: 9, default_unit: "Bộ", default_purchase_price: 3200000, default_sale_price: 4100000, has_vat: true, default_vat_rate: 10 },
+  { id: "CAT008", code: "POWER", name_vi: "Nguồn điện & UPS", name_en: "Power & UPS", parent: null, status: "Active", items: 6, default_unit: "Bộ", default_purchase_price: 5800000, default_sale_price: 7200000, has_vat: true, default_vat_rate: 10 },
 ]
 
 export const brands = [

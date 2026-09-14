@@ -14,9 +14,21 @@ insert into warehouses (id, org_id, code, name, address, phone, status)
 values ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'TEST-WH', 'Workflow Test Warehouse', 'Test address', '0900000000', 'Active')
 on conflict (id) do update set name = excluded.name, org_id = excluded.org_id;
 
-insert into categories (id, org_id, code, name_vi, name_en, status)
-values ('33333333-3333-4333-8333-333333333333', '11111111-1111-4111-8111-111111111111', 'TEST-CAT', 'Danh mục kiểm thử', 'Test Category', 'Active')
-on conflict (id) do update set name_vi = excluded.name_vi, name_en = excluded.name_en;
+insert into categories (
+  id, org_id, code, name_vi, name_en, status, default_unit,
+  default_purchase_price, default_sale_price, has_vat, default_vat_rate
+)
+values (
+  '33333333-3333-4333-8333-333333333333', '11111111-1111-4111-8111-111111111111',
+  'TEST-CAT', 'Danh mục kiểm thử', 'Test Category', 'Active', 'Cái',
+  100000, 150000, true, 10
+)
+on conflict (id) do update set name_vi = excluded.name_vi, name_en = excluded.name_en,
+  default_unit = excluded.default_unit,
+  default_purchase_price = excluded.default_purchase_price,
+  default_sale_price = excluded.default_sale_price,
+  has_vat = excluded.has_vat,
+  default_vat_rate = excluded.default_vat_rate;
 
 insert into brands (id, org_id, code, name, country, status)
 values ('44444444-4444-4444-8444-444444444444', '11111111-1111-4111-8111-111111111111', 'TEST-BRAND', 'Test Brand', 'Vietnam', 'Active')
@@ -26,9 +38,10 @@ insert into units (id, org_id, code, name_vi, name_en, status)
 values ('55555555-5555-4555-8555-555555555555', '11111111-1111-4111-8111-111111111111', 'PCS-TEST', 'Cái', 'Piece', 'Active')
 on conflict (id) do update set name_vi = excluded.name_vi, name_en = excluded.name_en;
 
-insert into customers (id, org_id, code, name, phone, email, tax_code, address, status)
-values ('66666666-6666-4666-8666-666666666666', '11111111-1111-4111-8111-111111111111', 'TEST-CUST', 'Khách hàng kiểm thử', '0911111111', 'customer@test.local', 'TEST-TAX-C', 'Địa chỉ khách hàng kiểm thử', 'Active')
-on conflict (id) do update set name = excluded.name, phone = excluded.phone, email = excluded.email, address = excluded.address;
+insert into customers (id, org_id, code, name, representative, phone, email, tax_code, address, status)
+values ('66666666-6666-4666-8666-666666666666', '11111111-1111-4111-8111-111111111111', 'TEST-CUST', 'Khách hàng kiểm thử', 'Người liên hệ kiểm thử', '0911111111', 'customer@test.local', 'TEST-TAX-C', 'Địa chỉ khách hàng kiểm thử', 'Active')
+on conflict (id) do update set name = excluded.name, representative = excluded.representative,
+  phone = excluded.phone, email = excluded.email, address = excluded.address;
 
 insert into suppliers (id, org_id, code, name, phone, email, tax_code, address, status)
 values ('77777777-7777-4777-8777-777777777777', '11111111-1111-4111-8111-111111111111', 'TEST-SUP', 'Nhà cung cấp kiểm thử', '0922222222', 'supplier@test.local', 'TEST-TAX-S', 'Địa chỉ nhà cung cấp kiểm thử', 'Active')

@@ -90,8 +90,27 @@ function cellValue(value: any): unknown {
   return String(value)
 }
 
-function rowsToObjects(rows: unknown[][]) {
-  const [headerRow = [], ...dataRows] = rows
+function normalizeHeader(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function rowsToObjects(rows: unknown[][], expectedHeaders: string[] = []) {
+  const expected = new Set(expectedHeaders.map(normalizeHeader).filter(Boolean))
+  let headerIndex = 0
+  if (expected.size) {
+    const candidateIndex = rows.findIndex(row =>
+      row.filter(value => expected.has(normalizeHeader(value))).length >= Math.min(2, expected.size),
+    )
+    if (candidateIndex >= 0) headerIndex = candidateIndex
+  }
+  const headerRow = rows[headerIndex] ?? []
+  const dataRows = rows.slice(headerIndex + 1)
   const headers = headerRow.map((value) =>
     String(value ?? "")
       .replace(/^\uFEFF/, "")
@@ -101,19 +120,21 @@ function rowsToObjects(rows: unknown[][]) {
     throw new Error("The import file has no header row.")
   return dataRows
     .filter((row) => row.some((value) => value !== "" && value != null))
-    .map((row) =>
-      Object.fromEntries(
+    .map((row, index) => ({
+      ...Object.fromEntries(
         headers.map((header, index) => [header, row[index] ?? ""]),
       ),
-    )
+      __rowNumber: headerIndex + index + 2,
+    }))
 }
 
 export async function importFromExcel(
   file: File,
+  expectedHeaders: string[] = [],
 ): Promise<Record<string, unknown>[]> {
   const extension = file.name.split(".").pop()?.toLowerCase()
   if (extension === "csv") {
-    return rowsToObjects(parseCsvRows(await file.text()))
+    return rowsToObjects(parseCsvRows(await file.text()), expectedHeaders)
   }
   if (extension !== "xlsx") {
     throw new Error("Only .csv and .xlsx files are supported.")
@@ -136,7 +157,7 @@ export async function importFromExcel(
     }
     rows.push(values)
   }
-  return rowsToObjects(rows)
+  return rowsToObjects(rows, expectedHeaders)
 }
 
 export async function downloadTemplate(headers: string[], filename: string) {

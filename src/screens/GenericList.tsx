@@ -4,10 +4,10 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchUsers, fetchPurchaseReturns, upsertCompanySettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchQuotationSettings, fetchUsers, fetchPurchaseReturns, upsertCompanySettings, upsertQuotationSettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportRowsToExcel, importFromExcel, sanitizeSpreadsheetCell, saveExcelWorkbook } from "../lib/excelUtils"
-import { loadCompanySettings, saveCompanySettings, type CompanySettings } from "../lib/companySettings"
+import { defaultQuotationSettings, loadCompanySettings, saveCompanySettings, type CompanySettings, type QuotationSettings } from "../lib/companySettings"
 import { formatDateKeyUtc7, formatDateTimeUtc7 } from "../lib/dateUtils"
 import { buildAgingBuckets, calculateCashBalance, deriveLedgerBalance, filterReportRows } from "../lib/reportService"
 import { getReportCatalog } from "../lib/reportCatalog"
@@ -38,14 +38,29 @@ function getImportKeyField(cols: string[]) {
   return cols.includes("code") ? "code" : (cols.includes("id") ? "id" : cols[0])
 }
 
-function mapRowToColumns(raw: Record<string, any>, cols: string[]) {
+type ImportColumnAliases = Record<string, string[]>
+
+function normalizeImportHeader(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function mapRowToColumns(raw: Record<string, any>, cols: string[], aliases: ImportColumnAliases = {}) {
   const lowerKeys = Object.keys(raw).reduce<Record<string, string>>((acc, k) => ({
     ...acc,
-    [k.toString().trim().toLowerCase()]: k.toString(),
+    [normalizeImportHeader(k)]: k.toString(),
   }), {})
   return cols.reduce<Record<string, any>>((obj, col) => {
-    const lookup = lowerKeys[col.toLowerCase()]
-    obj[col] = raw[lookup] ?? raw[col] ?? ""
+    const lookup = [col, ...(aliases[col] ?? [])]
+      .map(normalizeImportHeader)
+      .map(candidate => lowerKeys[candidate])
+      .find(Boolean)
+    obj[col] = (lookup ? raw[lookup] : undefined) ?? raw[col] ?? ""
     return obj
   }, {})
 }
@@ -97,7 +112,7 @@ function escapeHtml(value: string | number) {
 }
 
 // --- Import Modal ---
-export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImportRows }: { onClose: () => void; filename: string; cols: string[]; lang: string; existingKeys?: string[]; onImportRows?: (rows: any[]) => Promise<void> }) {
+export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImportRows, columnAliases = {}, templateHeaders = {}, normalizeRow, validateRow }: { onClose: () => void; filename: string; cols: string[]; lang: string; existingKeys?: string[]; onImportRows?: (rows: any[]) => Promise<void>; columnAliases?: ImportColumnAliases; templateHeaders?: Record<string, string>; normalizeRow?: (row: Record<string, any>) => Record<string, any>; validateRow?: (row: Record<string, any>, rowIndex: number) => string[] }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [previewRows, setPreviewRows] = useState<ImportPreviewRow[]>([])
@@ -109,12 +124,19 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
     setParseError(null)
     try {
       setProcessing(true)
-      const parsed = await importFromExcel(file)
+      const expectedHeaders = cols.flatMap(column => [
+        column,
+        templateHeaders[column] ?? "",
+        ...(columnAliases[column] ?? []),
+      ]).filter(Boolean)
+      const parsed = await importFromExcel(file, expectedHeaders)
       const keyField = getImportKeyField(cols)
       const existingSet = new Set((existingKeys ?? []).map(k => String(k).trim().toLowerCase()))
       const seen = new Set<string>()
       const rows = parsed.map((rawRow: any, index: number) => {
-        const row = mapRowToColumns(rawRow, cols)
+        const rowIndex = Number(rawRow.__rowNumber ?? index + 2)
+        const mappedRow = mapRowToColumns(rawRow, cols, columnAliases)
+        const row = normalizeRow ? normalizeRow(mappedRow) : mappedRow
         const keyValue = String(row[keyField] ?? "").trim()
         const issues = [] as string[]
         if (!keyValue) {
@@ -126,8 +148,9 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
           issues.push(lang === "vi" ? `Trùng ${keyField}` : `${keyField} duplicate`)
         }
         if (keyValue) seen.add(keyValueLower)
+        issues.push(...(validateRow?.(row, rowIndex) ?? []))
         return {
-          rowIndex: index + 1,
+          rowIndex,
           row,
           keyValue,
           issues,
@@ -147,7 +170,7 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
-    if (f && (f.name.endsWith(".csv") || f.name.endsWith(".xlsx") || f.name.endsWith(".xls"))) {
+    if (f && (f.name.endsWith(".csv") || f.name.endsWith(".xlsx"))) {
       setFile(f)
       parseFile(f)
     }
@@ -201,14 +224,14 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => downloadTemplate(filename, cols)}
+                    onClick={() => downloadTemplate(filename, cols.map(column => templateHeaders[column] ?? column))}
                     className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700"
                   >
                     <FileDown size={12} />
                     {lang === "vi" ? "Mẫu CSV" : "CSV Template"}
                   </button>
                   <button
-                    onClick={() => void downloadTemplateXlsx(filename, cols)}
+                    onClick={() => void downloadTemplateXlsx(filename, cols.map(column => templateHeaders[column] ?? column))}
                     className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700"
                   >
                     <FileSpreadsheet size={12} />
@@ -239,7 +262,7 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
                   onClick={() => fileRef.current?.click()}
                   className={`mt-2 border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${dragging ? "border-blue-400 bg-blue-50" : file ? "border-emerald-400 bg-emerald-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}
                 >
-                  <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
+                  <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden"
                     onChange={e => e.target.files?.[0] && handleFileChange(e.target.files[0])} />
                   {file ? (
                     <>
@@ -325,10 +348,11 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
 }
 
 // --- Toolbar shared ---
-export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onImportRows, templateFile, templateCols, existingKeys, extra, onExportCsv, onExportXlsx, onPrint, onRefresh }: {
+export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onImportRows, templateFile, templateCols, existingKeys, extra, onExportCsv, onExportXlsx, onPrint, onRefresh, importAliases, templateHeaders, normalizeImportRow, validateImportRow }: {
   onSearch?: (v: string) => void; search?: string; onCreate?: () => void; createLabel?: string
   onImport?: () => void; onImportRows?: (rows: any[]) => Promise<void>; templateFile?: string; templateCols?: string[]; existingKeys?: string[]; extra?: React.ReactNode;
   onExportCsv?: () => void; onExportXlsx?: () => void; onPrint?: () => void; onRefresh?: () => void
+  importAliases?: ImportColumnAliases; templateHeaders?: Record<string, string>; normalizeImportRow?: (row: Record<string, any>) => Record<string, any>; validateImportRow?: (row: Record<string, any>, rowIndex: number) => string[]
 }) {
   const { t, lang } = useLang()
   const [showImport, setShowImport] = useState(false)
@@ -388,6 +412,10 @@ export function Toolbar({ onSearch, search, onCreate, createLabel, onImport, onI
           cols={templateCols}
           lang={lang}
           existingKeys={existingKeys}
+          columnAliases={importAliases}
+          templateHeaders={templateHeaders}
+          normalizeRow={normalizeImportRow}
+          validateRow={validateImportRow}
           onImportRows={async (rows) => { if (typeof onImportRows === 'function') await onImportRows(rows) }}
         />
       )}
@@ -408,7 +436,7 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
 // --- Customers ---
 
 
-export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile, readOnly = false, moduleName = "Master Data", onRefresh }: any) {
+export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile, readOnly = false, moduleName = "Master Data", onRefresh, importAliases, templateHeaders, normalizeImportRow, validateImportRow }: any) {
   const { t, lang } = useLang();
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [showForm, setShowForm] = useState(false);
@@ -453,7 +481,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
         const warehouseNames = [...(warehousesRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
         const categoryNames = [...(categoriesRes.data ?? []).map((x: any) => x.name ?? x.name_vi ?? x.name_en).filter(Boolean)]
         const brandNames = [...(brandsRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
-        const unitNames = [...(unitsRes.data ?? []).map((x: any) => x.name ?? x.name_vi ?? x.name_en).filter(Boolean)]
+        const unitNames = [...(unitsRes.data ?? []).flatMap((x: any) => [x.code, x.name, x.name_vi, x.name_en]).filter(Boolean)]
 
         setRelatedOptions({
           customer: Array.from(new Set<string>([...nextOptions.customer, ...customerNames])).sort(),
@@ -594,6 +622,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
     <div className="flex flex-col h-full">
       <Toolbar search={search} onSearch={setSearch} onCreate={!readOnly && can(moduleName, "create") ? () => { setEditingItem(null); setShowForm(true); } : undefined} createLabel={lang === "vi" ? "Thêm " + title : "Add " + title}
         templateFile={templateFile} templateCols={!readOnly && can(moduleName, "create") ? templateCols : undefined} existingKeys={existingKeys} onImportRows={!readOnly && can(moduleName, "create") ? handleImportRows : undefined}
+        importAliases={importAliases} templateHeaders={templateHeaders} normalizeImportRow={normalizeImportRow} validateImportRow={validateImportRow}
         onExportCsv={can(moduleName, "export") ? () => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
         onExportXlsx={can(moduleName, "export") ? () => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
         onRefresh={onRefresh}
@@ -646,14 +675,24 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
               <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
                 {columns.filter((c: any) => !c.readOnly).map((c: any) => {
                   const fkKeyNames = ["customer", "supplier", "warehouse", "category", "brand", "unit"]
-                  const options = relatedOptions[c.key] || []
-                  const isFkSelector = fkKeyNames.includes(c.key)
+                  const options = relatedOptions[c.optionsKey ?? c.key] || []
+                  const isFkSelector = fkKeyNames.includes(c.key) || Boolean(c.optionsKey)
                   const inputType = c.type || (/(amount|price|cost|total|debt|credit|capacity|qty|quantity)/i.test(c.key) ? "number" : (/(email)/i.test(c.key) ? "email" : "text"))
                   const defaultValue = editingItem ? editingItem[c.key] ?? "" : ""
                   return (
                     <div key={c.key}>
                       <label className="block text-[11px] font-medium text-slate-600 mb-1">{c.label}</label>
-                      {isFkSelector || options.length > 0 ? (
+                      {c.type === "boolean" ? (
+                        <select
+                          name={c.key}
+                          defaultValue={String(defaultValue === "" ? false : Boolean(defaultValue))}
+                          className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white"
+                          style={{ borderColor: "var(--border)" }}
+                        >
+                          <option value="false">{lang === "vi" ? "Không" : "No"}</option>
+                          <option value="true">{lang === "vi" ? "Có" : "Yes"}</option>
+                        </select>
+                      ) : isFkSelector || options.length > 0 ? (
                         <select
                           name={c.key}
                           defaultValue={defaultValue}
@@ -744,16 +783,16 @@ export function Customers() {
   }, [isDemo, profile]);
 
   const columns = lang === "vi" ? [
-    { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "phone", label: "Điện thoại" },
+    { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "representative", label: "Người liên hệ" }, { key: "phone", label: "Điện thoại" },
     { key: "email", label: "Email" }, { key: "tax_code", label: "MST" }, { key: "credit_limit", label: "Hạn mức TD", format: money },
     { key: "debt", label: "Công nợ", format: money, readOnly: true }, { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
-    { key: "code", label: "Code" }, { key: "name", label: "Customer Name" }, { key: "phone", label: "Phone" },
+    { key: "code", label: "Code" }, { key: "name", label: "Customer Name" }, { key: "representative", label: "Contact Person" }, { key: "phone", label: "Phone" },
     { key: "email", label: "Email" }, { key: "tax_code", label: "Tax Code" }, { key: "credit_limit", label: "Credit Limit", format: money },
     { key: "debt", label: "Debt", format: money, readOnly: true }, { key: "status", label: "Status", isStatus: true }
   ];
 
-  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "phone", "email", "tax_code", "credit_limit", "status"]} templateFile="customers" />;
+  return <GenericCrudList title={lang === "vi" ? "khách hàng" : "customer"} data={data} setData={setData} columns={columns} templateCols={["code", "name", "representative", "phone", "email", "tax_code", "credit_limit", "status"]} templateFile="customers" />;
 }
 
 // --- Suppliers ---
@@ -911,20 +950,111 @@ export function InventoryAdjustment() {
 }
 
 // --- NEXT ---
+const categoryImportAliases: ImportColumnAliases = {
+  code: ["CODE", "Mã", "Mã danh mục"],
+  name: ["NAME", "Tên", "Tên danh mục"],
+  status: ["STATUS", "Trạng thái"],
+  default_unit: ["ĐVT", "DVT", "Đơn vị", "Đơn vị tính"],
+  default_purchase_price: ["giá nhập", "Giá mua", "DefaultPurchasePrice"],
+  default_sale_price: ["giá xuất", "giá bán", "DefaultSalePrice"],
+  has_vat: ["có vat hay không", "Có VAT", "HasVat"],
+  default_vat_rate: ["vat", "VAT (%)", "Thuế suất", "DefaultVatRate"],
+}
+
+const categoryTemplateHeaders: Record<string, string> = {
+  code: "CODE",
+  name: "NAME",
+  status: "STATUS",
+  default_unit: "ĐVT",
+  default_purchase_price: "giá nhập",
+  default_sale_price: "giá xuất",
+  has_vat: "có vat hay không",
+  default_vat_rate: "vat",
+}
+
+function parseCategoryBoolean(value: unknown) {
+  if (typeof value === "boolean") return value
+  const normalized = normalizeImportHeader(value)
+  if (["true", "1", "yes", "co"].includes(normalized)) return true
+  if (["false", "0", "no", "khong", ""].includes(normalized)) return false
+  return null
+}
+
+function normalizeCategoryImportRow(row: Record<string, any>) {
+  const hasVat = parseCategoryBoolean(row.has_vat)
+  return {
+    ...row,
+    code: String(row.code ?? "").trim(),
+    name: String(row.name ?? "").trim(),
+    status: String(row.status || "Active").trim(),
+    default_unit: String(row.default_unit ?? "").trim(),
+    default_purchase_price: row.default_purchase_price === "" ? 0 : Number(row.default_purchase_price),
+    default_sale_price: row.default_sale_price === "" ? 0 : Number(row.default_sale_price),
+    has_vat: hasVat ?? row.has_vat,
+    default_vat_rate: hasVat === false || row.default_vat_rate === "" ? 0 : Number(row.default_vat_rate),
+  }
+}
+
 export function Categories() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
   const { isDemo } = useDemo();
   const { profile } = useAuth();
+  const [validUnits, setValidUnits] = useState<string[]>([])
   useEffect(() => {
-    fetchCategories({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) })
+    Promise.all([
+      fetchCategories({ isDemo, orgId: profile?.org_id }),
+      fetchUnits({ isDemo, orgId: profile?.org_id }),
+    ]).then(([categoryResult, unitResult]) => {
+      if (categoryResult.data) setData(categoryResult.data)
+      setValidUnits((unitResult.data ?? []).flatMap((unit: any) => [unit.code, unit.name, unit.name_vi, unit.name_en])
+        .filter(Boolean).map((value: unknown) => normalizeImportHeader(value)))
+    })
   }, [isDemo, profile]);
   const columns = lang === "vi" ? [
-    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "code", label: "Mã" }, { key: "name", label: "Tên danh mục" },
+    { key: "default_unit", label: "ĐVT", optionsKey: "unit" },
+    { key: "default_purchase_price", label: "Giá nhập mặc định", type: "number", format: money },
+    { key: "default_sale_price", label: "Giá bán mặc định", type: "number", format: money },
+    { key: "has_vat", label: "Có VAT", type: "boolean", format: (value: unknown) => value ? "Có" : "Không" },
+    { key: "default_vat_rate", label: "VAT (%)", type: "number", format: (value: unknown) => `${fmt(value)}%` },
+    { key: "status", label: "Trạng thái", isStatus: true }
   ] : [
-    { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
+    { key: "code", label: "Code" }, { key: "name", label: "Category" },
+    { key: "default_unit", label: "Default unit", optionsKey: "unit" },
+    { key: "default_purchase_price", label: "Default purchase price", type: "number", format: money },
+    { key: "default_sale_price", label: "Default sale price", type: "number", format: money },
+    { key: "has_vat", label: "Has VAT", type: "boolean", format: (value: unknown) => value ? "Yes" : "No" },
+    { key: "default_vat_rate", label: "VAT (%)", type: "number", format: (value: unknown) => `${fmt(value)}%` },
+    { key: "status", label: "Status", isStatus: true }
   ];
-  return <GenericCrudList title={lang === "vi" ? "danh mục" : "category"} data={data} setData={setData} columns={columns} templateCols={["code","name","status"]} templateFile="categories" />;
+  const validateImportRow = (row: Record<string, any>) => {
+    const issues: string[] = []
+    if (!String(row.name ?? "").trim()) issues.push(lang === "vi" ? "Thiếu tên danh mục" : "Category name missing")
+    for (const [key, label] of [["default_purchase_price", "giá nhập"], ["default_sale_price", "giá bán"]] as const) {
+      if (!Number.isFinite(Number(row[key])) || Number(row[key]) < 0) issues.push(lang === "vi" ? `${label} phải là số không âm` : `${label} must be non-negative`)
+    }
+    const hasVat = parseCategoryBoolean(row.has_vat)
+    if (hasVat == null) issues.push(lang === "vi" ? `Giá trị VAT "${row.has_vat}" không hợp lệ` : `Invalid VAT flag "${row.has_vat}"`)
+    if (hasVat && (!Number.isFinite(Number(row.default_vat_rate)) || Number(row.default_vat_rate) <= 0 || Number(row.default_vat_rate) > 100)) {
+      issues.push(lang === "vi" ? "VAT phải lớn hơn 0 và không quá 100" : "VAT must be greater than 0 and at most 100")
+    }
+    const unit = normalizeImportHeader(row.default_unit)
+    if (unit && !validUnits.includes(unit)) issues.push(lang === "vi" ? `Đơn vị "${row.default_unit}" không tồn tại` : `Unit "${row.default_unit}" does not exist`)
+    return issues
+  }
+  return <GenericCrudList
+    title={lang === "vi" ? "danh mục" : "category"}
+    data={data}
+    setData={setData}
+    columns={columns}
+    templateCols={["code", "name", "status", "default_unit", "default_purchase_price", "default_sale_price", "has_vat", "default_vat_rate"]}
+    templateFile="categories"
+    importAliases={categoryImportAliases}
+    templateHeaders={categoryTemplateHeaders}
+    normalizeImportRow={normalizeCategoryImportRow}
+    validateImportRow={validateImportRow}
+  />;
 }
 
 // --- NEXT ---
@@ -2583,6 +2713,7 @@ export function Settings() {
   const { profile, can, user } = useAuth()
   const { isDemo } = useDemo()
   const [company, setCompany] = useState<CompanySettings>(() => loadCompanySettings(profile?.org_id))
+  const [quotationSettings, setQuotationSettings] = useState<QuotationSettings>(defaultQuotationSettings)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [demoTabHidden, setDemoTabHidden] = useState(() => isDemoFeatureHidden(user?.id))
 
@@ -2613,11 +2744,16 @@ export function Settings() {
         setCompany(result.data)
       }
     })
+    fetchQuotationSettings({ isDemo, orgId: profile?.org_id }).then(result => {
+      if (active && !result.error) setQuotationSettings(result.data)
+    })
     return () => { active = false }
   }, [isDemo, profile?.org_id])
 
   const updateCompany = (key: keyof CompanySettings, value: string) =>
     setCompany(current => ({ ...current, [key]: value }))
+  const updateQuotationSetting = <K extends keyof QuotationSettings>(key: K, value: QuotationSettings[K]) =>
+    setQuotationSettings(current => ({ ...current, [key]: value }))
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -2635,6 +2771,7 @@ export function Settings() {
             </div>
           )}
           <SettingField label={vi ? "Tên công ty" : "Company Name"} value={company.name} onChange={value => updateCompany("name", value)} />
+          <SettingField label={vi ? "Tên công ty tiếng Anh" : "English Company Name"} value={company.englishName} onChange={value => updateCompany("englishName", value)} />
           <SettingField label={vi ? "Người đại diện" : "Representative"} value={company.representative} onChange={value => updateCompany("representative", value)} />
           <SettingField label={vi ? "Mã số thuế (MST)" : "Tax ID / VAT Number"} value={company.taxId} onChange={value => updateCompany("taxId", value)} />
           <SettingField label={vi ? "Địa chỉ" : "Address"} value={company.address} onChange={value => updateCompany("address", value)} />
@@ -2643,6 +2780,12 @@ export function Settings() {
             <SettingField label={vi ? "Email liên hệ" : "Contact Email"} value={company.email} onChange={value => updateCompany("email", value)} type="email" />
           </div>
           <SettingField label="Website" value={company.website} onChange={value => updateCompany("website", value)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SettingField label={vi ? "Tên chủ tài khoản" : "Bank Account Name"} value={company.bankAccountName} onChange={value => updateCompany("bankAccountName", value)} />
+            <SettingField label={vi ? "Số tài khoản" : "Bank Account Number"} value={company.bankAccountNumber} onChange={value => updateCompany("bankAccountNumber", value)} />
+            <SettingField label={vi ? "Ngân hàng" : "Bank Name"} value={company.bankName} onChange={value => updateCompany("bankName", value)} />
+            <SettingField label={vi ? "Chi nhánh" : "Bank Branch"} value={company.bankBranch} onChange={value => updateCompany("bankBranch", value)} />
+          </div>
           <label className="block text-[11px] font-medium text-slate-600">
             {vi ? "Phương pháp tính giá vốn" : "Inventory costing method"}
             <select
@@ -2674,6 +2817,31 @@ export function Settings() {
           ) : (
             <div className="text-xs text-slate-400">{vi ? "Bạn chỉ có quyền xem cài đặt." : "You have read-only access to settings."}</div>
           )}
+        </section>
+        <section className="mt-4 space-y-4 rounded-2xl border bg-white p-5" style={{ borderColor: "var(--border)" }}>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">{vi ? "Mặc định báo giá" : "Quotation defaults"}</h2>
+            <p className="mt-1 text-xs text-slate-500">{vi ? "Các giá trị được chụp lại trên báo giá mới và vẫn có thể sửa riêng từng báo giá." : "These values are snapshotted on new quotations and remain editable per quotation."}</p>
+          </div>
+          <SettingField label={vi ? "Tiêu đề mặc định" : "Default title"} value={quotationSettings.defaultTitle} onChange={value => updateQuotationSetting("defaultTitle", value)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-[11px] font-medium text-slate-500">{vi ? "Điều khoản thanh toán" : "Payment terms"}<textarea rows={4} value={quotationSettings.defaultPaymentTerms} onChange={event => updateQuotationSetting("defaultPaymentTerms", event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-xs font-normal text-slate-900 outline-none" style={{ borderColor: "var(--border)" }} /></label>
+            <label className="text-[11px] font-medium text-slate-500">{vi ? "Điều khoản giao hàng" : "Delivery terms"}<textarea rows={4} value={quotationSettings.defaultDeliveryTerms} onChange={event => updateQuotationSetting("defaultDeliveryTerms", event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-xs font-normal text-slate-900 outline-none" style={{ borderColor: "var(--border)" }} /></label>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <SettingField label={vi ? "Số ngày hiệu lực mặc định" : "Default validity days"} value={String(quotationSettings.defaultValidityDays)} onChange={value => updateQuotationSetting("defaultValidityDays", Number(value))} type="number" />
+            <label className="mt-5 flex h-9 items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={quotationSettings.defaultIncludeShipping} onChange={event => updateQuotationSetting("defaultIncludeShipping", event.target.checked)} />{vi ? "Mặc định đã gồm phí vận chuyển" : "Shipping included by default"}</label>
+          </div>
+          <label className="text-[11px] font-medium text-slate-500">{vi ? "Ghi chú cuối báo giá" : "Default footer notes"}<textarea rows={2} value={quotationSettings.defaultFooterNotes} onChange={event => updateQuotationSetting("defaultFooterNotes", event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2 text-xs font-normal text-slate-900 outline-none" style={{ borderColor: "var(--border)" }} /></label>
+          <div className="rounded-xl border bg-slate-50 p-3 text-[11px] text-slate-500" style={{ borderColor: "var(--border)" }}>
+            {vi ? "Hệ thống hiện xuất theo template .xlsx chuẩn 12 cột và dùng cùng dữ liệu với bản PDF. File .xls/.xlsm cũ không được tải lên vì không đáp ứng yêu cầu an toàn." : "Exports use the controlled 12-column .xlsx layout and the same render data as PDF. Legacy .xls/.xlsm uploads are rejected for safety."}
+          </div>
+          {can("Administration", "update") && <SaveBtn label={vi ? "Lưu mặc định báo giá" : "Save quotation defaults"} onSave={async () => {
+            if (!quotationSettings.defaultTitle.trim()) throw new Error(vi ? "Tiêu đề báo giá là bắt buộc" : "Quotation title is required")
+            if (quotationSettings.defaultValidityDays < 1 || quotationSettings.defaultValidityDays > 365) throw new Error(vi ? "Số ngày hiệu lực phải từ 1 đến 365" : "Validity days must be between 1 and 365")
+            const result = await upsertQuotationSettings(quotationSettings, { isDemo, orgId: profile?.org_id })
+            if (result.error) throw new Error(result.error.message ?? String(result.error))
+          }} />}
         </section>
         <section className="mt-4 rounded-2xl border bg-white p-5" style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center justify-between gap-4">

@@ -4,7 +4,12 @@
  */
 import { supabase } from "./supabase"
 import * as mock from "../data/mockData"
-import { defaultCompanySettings, type CompanySettings } from "./companySettings"
+import {
+  defaultCompanySettings,
+  defaultQuotationSettings,
+  type CompanySettings,
+  type QuotationSettings,
+} from "./companySettings"
 import { formatDateKeyUtc7 } from "./dateUtils"
 import { formatVnd } from "./numberFormat"
 
@@ -33,6 +38,11 @@ export type LookupItem = {
   onHand?: number
   reserved?: number
   available?: number
+  defaultUnit?: string | null
+  defaultPurchasePrice?: number
+  defaultSalePrice?: number
+  hasVat?: boolean
+  defaultVatRate?: number
   [key: string]: unknown
 }
 
@@ -84,7 +94,7 @@ export type ProductPricing = {
 }
 
 export type QuotationReferenceRecord = {
-  referenceType: "SALE" | "IMPORT" | "MANUAL"
+  referenceType: "SALE" | "IMPORT" | "CATEGORY_DEFAULT" | "MANUAL"
   quotationItemId?: string | null
   quotationId?: string | null
   quotationLabel?: string | null
@@ -106,6 +116,7 @@ export type QuotationReferenceRecord = {
   importPrice?: number | null
   importUnit?: string | null
   vatPct?: number | null
+  hasVat?: boolean | null
   marginPct?: number | null
   referenceDate?: string | null
   warehouseId?: string | null
@@ -119,10 +130,11 @@ export type QuotationReferenceRecord = {
 
 export type QuotationReferenceContext = {
   primary: QuotationReferenceRecord | null
-  matchType: "CUSTOMER_AND_CATEGORY" | "CATEGORY_ONLY" | "NONE"
+  matchType: "CUSTOMER_AND_CATEGORY" | "CATEGORY_ONLY" | "CATEGORY_DEFAULT" | "NONE"
   sameCustomer: QuotationReferenceRecord[]
   recentSales: QuotationReferenceRecord[]
   recentImports: QuotationReferenceRecord[]
+  categoryDefault: QuotationReferenceRecord | null
 }
 
 export type QuotationAllocationContext = {
@@ -164,13 +176,19 @@ export type QuotationAllocationContext = {
 export async function fetchCompanySettings({ isDemo, orgId }: Ctx) {
   if (isDemo || !orgId) return { data: defaultCompanySettings, error: null }
   const { data, error } = await safeSelect("company_settings", "*", query => query.eq("org_id", orgId).maybeSingle())
-  const row = (data as any[])[0] ?? data as any
+  const row = (Array.isArray(data) ? data[0] : data) as any
   return {
     data: row
       ? {
           ...defaultCompanySettings,
           ...row,
           taxId: row.tax_id ?? defaultCompanySettings.taxId,
+          englishName: row.english_name ?? defaultCompanySettings.englishName,
+          bankAccountName: row.bank_account_name ?? defaultCompanySettings.bankAccountName,
+          bankAccountNumber: row.bank_account_number ?? defaultCompanySettings.bankAccountNumber,
+          bankName: row.bank_name ?? defaultCompanySettings.bankName,
+          bankBranch: row.bank_branch ?? defaultCompanySettings.bankBranch,
+          logoUrl: row.logo_url ?? defaultCompanySettings.logoUrl,
           costingMethod: row.costing_method ?? defaultCompanySettings.costingMethod,
         }
       : defaultCompanySettings,
@@ -183,6 +201,7 @@ export async function upsertCompanySettings(settings: CompanySettings, { isDemo,
   const { error } = await (supabase as any).from("company_settings").upsert({
     org_id: orgId,
     name: settings.name,
+    english_name: settings.englishName,
     representative: settings.representative,
     tax_id: settings.taxId,
     address: settings.address,
@@ -190,8 +209,61 @@ export async function upsertCompanySettings(settings: CompanySettings, { isDemo,
     website: settings.website,
     email: settings.email,
     logo_url: settings.logoUrl ?? null,
+    bank_account_name: settings.bankAccountName,
+    bank_account_number: settings.bankAccountNumber,
+    bank_name: settings.bankName,
+    bank_branch: settings.bankBranch,
     costing_method: settings.costingMethod,
     updated_at: new Date().toISOString(),
+  })
+  return { error }
+}
+
+export async function fetchQuotationSettings({ isDemo, orgId }: Ctx) {
+  if (isDemo || !orgId) return { data: defaultQuotationSettings, error: null }
+  const { data, error } = await safeSelect("quotation_settings", "*", query =>
+    query.eq("org_id", orgId).maybeSingle(),
+  )
+  const row = (Array.isArray(data) ? data[0] : data) as any
+  return {
+    data: row ? {
+      defaultTitle: row.default_title ?? defaultQuotationSettings.defaultTitle,
+      defaultPaymentTerms: row.default_payment_terms ?? defaultQuotationSettings.defaultPaymentTerms,
+      defaultDeliveryTerms: row.default_delivery_terms ?? defaultQuotationSettings.defaultDeliveryTerms,
+      defaultValidityDays: toNumber(row.default_validity_days, defaultQuotationSettings.defaultValidityDays),
+      defaultIncludeShipping: row.default_include_shipping ?? defaultQuotationSettings.defaultIncludeShipping,
+      defaultFooterNotes: row.default_footer_notes ?? defaultQuotationSettings.defaultFooterNotes,
+    } satisfies QuotationSettings : defaultQuotationSettings,
+    error,
+  }
+}
+
+export async function fetchQuotationCustomerSnapshot(customerId: string, { isDemo, orgId }: Ctx) {
+  if (!customerId) return { data: null, error: new Error("Customer is required") }
+  if (isDemo) {
+    const row = (mock.customers as any[]).find(customer => String(customer.id) === String(customerId))
+    return { data: row ?? null, error: row ? null : new Error("Customer was not found") }
+  }
+  if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
+  const { data, error } = await safeSelect("customers", "id, name, representative, address, phone, email, tax_code", query =>
+    query.eq("org_id", orgId).eq("id", customerId).maybeSingle(),
+  )
+  return { data: (Array.isArray(data) ? data[0] : data) as Record<string, any> | null, error }
+}
+
+export async function upsertQuotationSettings(settings: QuotationSettings, { isDemo }: Ctx) {
+  if (isDemo) return { error: null }
+  const { error } = await (supabase as any).rpc("save_quotation_settings", {
+    p_settings: settings,
+  })
+  return { error }
+}
+
+export async function assertQuotationVersion(id: string, version: number, { isDemo }: Ctx) {
+  if (isDemo || !id) return { error: null }
+  const { error } = await (supabase as any).rpc("assert_quotation_version", {
+    p_quotation_id: id,
+    p_version: version,
   })
   return { error }
 }
@@ -199,6 +271,15 @@ export async function upsertCompanySettings(settings: CompanySettings, { isDemo,
 function toNumber(value: unknown, fallback = 0) {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+function normalizeBooleanInput(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return value !== 0
+  const normalized = String(value ?? "").trim().toLocaleLowerCase("vi")
+  if (["true", "1", "yes", "có", "co"].includes(normalized)) return true
+  if (["false", "0", "no", "không", "khong", ""].includes(normalized)) return false
+  return fallback
 }
 
 function normalizeNameField(row: Record<string, any>) {
@@ -315,6 +396,11 @@ export async function fetchLookup(
         phone: row.phone ?? "",
         email: row.email ?? "",
         taxCode: row.tax_code ?? "",
+        defaultUnit: row.default_unit ?? row.unit ?? null,
+        defaultPurchasePrice: toNumber(row.default_purchase_price),
+        defaultSalePrice: toNumber(row.default_sale_price),
+        hasVat: normalizeBooleanInput(row.has_vat),
+        defaultVatRate: toNumber(row.default_vat_rate),
       })) satisfies LookupItem[]
     return { data: rows, error: null }
   }
@@ -999,12 +1085,25 @@ export async function fetchInventoryLedger({ isDemo, orgId }: Ctx) {
 
 // ─── Categories, Brands, Units ──────────────────────────────
 export async function fetchCategories({ isDemo, orgId }: Ctx) {
-  if (isDemo) return { data: mock.categories, error: null }
+  if (isDemo) return { data: mock.categories.map((row: any) => ({
+    ...row,
+    name: row.name ?? row.name_vi ?? row.name_en ?? "",
+    default_unit: row.default_unit ?? "",
+    default_purchase_price: toNumber(row.default_purchase_price),
+    default_sale_price: toNumber(row.default_sale_price),
+    has_vat: normalizeBooleanInput(row.has_vat),
+    default_vat_rate: toNumber(row.default_vat_rate),
+  })), error: null }
   const { data, error } = await safeSelect("categories", "*", query => orgId ? query.eq("org_id", orgId) : query)
   return {
     data: (data as any[] ?? []).map((row: any) => ({
       ...row,
       name: row.name ?? row.name_vi ?? row.name_en ?? "",
+      default_unit: row.default_unit ?? "",
+      default_purchase_price: toNumber(row.default_purchase_price),
+      default_sale_price: toNumber(row.default_sale_price),
+      has_vat: normalizeBooleanInput(row.has_vat),
+      default_vat_rate: toNumber(row.default_vat_rate),
     })),
     error,
   }
@@ -1130,37 +1229,44 @@ export async function createOrganizationInvitation(email: string, role: string, 
 }
 
 export async function upsertCategory(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
-  if (isDemo) { demoUpsert(mock.categories, payload); return { error: null } }
-  const normalized: Record<string, any> = { ...payload, org_id: orgId }
-  const name = String(normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "")
-  if (normalized.name_vi == null && normalized.name == null && normalized.name_en == null) {
-    normalized.name_vi = name
-    normalized.name_en = name
-  } else {
-    if (normalized.name_vi == null) normalized.name_vi = String(normalized.name_vi ?? name)
-    if (normalized.name_en == null) normalized.name_en = String(normalized.name_en ?? name)
-  }
-  delete normalized.name
-  const { error } = await supabase.from("categories").upsert([normalized] as any)
+  const normalized: Record<string, any> = { ...payload }
+  normalized.has_vat = normalizeBooleanInput(normalized.has_vat)
+  normalized.default_vat_rate = normalized.has_vat ? toNumber(normalized.default_vat_rate) : 0
+  normalized.default_purchase_price = toNumber(normalized.default_purchase_price)
+  normalized.default_sale_price = toNumber(normalized.default_sale_price)
+  if (isDemo) { demoUpsert(mock.categories, normalized); return { error: null } }
+  if (!orgId) return { error: new Error("Authenticated organization is required") }
+  const { error } = await (supabase as any).rpc("save_category_defaults", {
+    p_id: normalized.id ?? null,
+    p_code: normalized.code ?? "",
+    p_name: normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "",
+    p_status: normalized.status ?? "Active",
+    p_default_unit: normalized.default_unit || null,
+    p_default_purchase_price: normalized.default_purchase_price,
+    p_default_sale_price: normalized.default_sale_price,
+    p_has_vat: normalized.has_vat,
+    p_default_vat_rate: normalized.default_vat_rate,
+  })
   return { error }
 }
 
 export async function bulkUpsertCategories(payloads: Record<string, unknown>[], { isDemo, orgId }: Ctx) {
   if (isDemo) return { error: null }
-  const rows = payloads.map(p => {
-    const normalized: Record<string, any> = { ...p, org_id: orgId }
-    const name = String(normalized.name ?? normalized.name_vi ?? normalized.name_en ?? "")
-    if (normalized.name_vi == null && normalized.name == null && normalized.name_en == null) {
-      normalized.name_vi = name
-      normalized.name_en = name
-    } else {
-      if (normalized.name_vi == null) normalized.name_vi = String(normalized.name_vi ?? name)
-      if (normalized.name_en == null) normalized.name_en = String(normalized.name_en ?? name)
+  if (!orgId) return { error: new Error("Authenticated organization is required") }
+  const rows = payloads.map(payload => {
+    const hasVat = normalizeBooleanInput(payload.has_vat)
+    return {
+      code: payload.code,
+      name: payload.name ?? payload.name_vi ?? payload.name_en,
+      status: payload.status ?? "Active",
+      default_unit: payload.default_unit ?? "",
+      default_purchase_price: toNumber(payload.default_purchase_price),
+      default_sale_price: toNumber(payload.default_sale_price),
+      has_vat: hasVat,
+      default_vat_rate: hasVat ? toNumber(payload.default_vat_rate) : 0,
     }
-    delete normalized.name
-    return normalized
   })
-  const { error } = await supabase.from("categories").upsert(rows as any)
+  const { error } = await (supabase as any).rpc("import_category_defaults", { p_rows: rows })
   return { error }
 }
 
@@ -1565,7 +1671,7 @@ export async function fetchQuotationReference(
 ) {
   if (!categoryId) {
     return {
-      data: { primary: null, matchType: "NONE", sameCustomer: [], recentSales: [], recentImports: [] } as QuotationReferenceContext,
+      data: { primary: null, matchType: "NONE", sameCustomer: [], recentSales: [], recentImports: [], categoryDefault: null } as QuotationReferenceContext,
       error: null,
     }
   }
@@ -1646,20 +1752,35 @@ export async function fetchQuotationReference(
       } satisfies QuotationReferenceRecord]
     }).sort((a, b) => referenceRecordTime(b) - referenceRecordTime(a))
       .slice(0, Math.max(1, Math.min(limit, 20)))
-    const primary = sameCustomer[0] ?? recentSales[0] ?? null
+    const category = (mock.categories as any[]).find(row => String(row.id) === String(categoryId))
+    const categoryDefault = category ? {
+      referenceType: "CATEGORY_DEFAULT" as const,
+      categoryId,
+      categoryName: category.name_vi ?? category.name_en ?? category.code,
+      importUnit: category.default_unit ?? null,
+      importPrice: toNumber(category.default_purchase_price),
+      salePrice: toNumber(category.default_sale_price),
+      vatPct: toNumber(category.default_vat_rate),
+      hasVat: normalizeBooleanInput(category.has_vat),
+      referenceDate: null,
+    } satisfies QuotationReferenceRecord : null
+    const primary = sameCustomer[0] ?? recentSales[0] ?? categoryDefault
     return {
       data: {
         primary,
-        matchType: primary ? (sameCustomer.length ? "CUSTOMER_AND_CATEGORY" : "CATEGORY_ONLY") : "NONE",
+        matchType: sameCustomer.length ? "CUSTOMER_AND_CATEGORY"
+          : recentSales.length ? "CATEGORY_ONLY"
+          : categoryDefault ? "CATEGORY_DEFAULT" : "NONE",
         sameCustomer,
         recentSales,
         recentImports,
+        categoryDefault,
       } as QuotationReferenceContext,
       error: productResult.error ?? quotationsResult.error,
     }
   }
   if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
-  const { data, error } = await (supabase as any).rpc("get_quotation_reference", {
+  const { data, error } = await (supabase as any).rpc("get_quotation_reference_v2", {
     p_category_id: categoryId,
     p_customer_id: customerId || null,
     p_limit: Math.max(1, Math.min(limit, 20)),
@@ -1897,8 +2018,14 @@ export async function fetchDashboardData({ isDemo, orgId }: Ctx) {
 
 export async function upsertQuotation(payload: Record<string, unknown>, { isDemo, orgId }: Ctx) {
   if (isDemo) {
+    const existingVersion = payload.id
+      ? toNumber((mock.quotations as any[]).find(item => String(item.id) === String(payload.id))?.version)
+      : 0
     const row = demoUpsert(mock.quotations, payload as Record<string, any>) as any
     if (Array.isArray(payload.items)) row.items = payload.items
+    row.version = existingVersion + 1
+    row.quotation_number ||= `QT-${String(row.date || formatDateKeyUtc7()).replace(/-/g, "")}-${String(row.id).slice(-8).toUpperCase()}`
+    row.title ||= defaultQuotationSettings.defaultTitle
     return { error: null }
   }
   const source = payload as Record<string, any>
@@ -1925,9 +2052,13 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
       selling_price: item.selling_price ?? 0,
       vat_pct: item.vat_pct ?? 0,
       total: item.total ?? 0,
+      offered_description: item.offered_description ?? item.offeredDescription ?? item.category_name ?? "",
+      specification_brand: item.specification_brand ?? item.specificationBrand ?? null,
+      has_vat: item.has_vat ?? Number(item.vat_pct ?? 0) > 0,
+      note: item.note ?? null,
       reference: item.reference ?? null,
   }))
-  const { error } = await (supabase as any).rpc("save_quotation", {
+  const { error } = await (supabase as any).rpc("save_quotation_v2", {
     p_id: source.id ?? null,
     p_customer_id: source.customer_id ?? null,
     p_customer_name: source.customer_name ?? source.customer ?? source.customerName ?? "",
@@ -1940,6 +2071,17 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     p_notes: source.notes ?? null,
     p_items: items,
     p_created_by: source.created_by ?? null,
+    p_metadata: {
+      quotationNumber: source.quotation_number ?? null,
+      title: source.title ?? null,
+      project: source.project ?? null,
+      salespersonPhone: source.salesperson_phone ?? null,
+      paymentTerms: source.payment_terms ?? null,
+      deliveryTerms: source.delivery_terms ?? null,
+      footerNotes: source.footer_notes ?? null,
+      includeShipping: source.include_shipping ?? true,
+      templateVersionId: source.template_version_id ?? null,
+    },
   })
   return { error }
 }
