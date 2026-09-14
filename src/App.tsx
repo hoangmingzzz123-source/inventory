@@ -122,6 +122,7 @@ function AppInner() {
   const { isDemo, setDemo } = useDemo()
   const initialScreen = new URLSearchParams(window.location.search).get("screen") || "dashboard"
   const [active, setActive] = useState(initialScreen)
+  const [visitedScreens, setVisitedScreens] = useState<string[]>([initialScreen])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
   const [toast, setToast] = useState<ToastPayload | null>(null)
   const [confirmation, setConfirmation] = useState<AppConfirmRequest | null>(null)
@@ -224,6 +225,10 @@ function AppInner() {
     }
   }, [active, user, role, lang, profile, can, showSystemDemo])
 
+  useEffect(() => {
+    setVisitedScreens(previous => previous.includes(active) ? previous : [...previous, active])
+  }, [active])
+
   // Sync demo mode with auth state
   useEffect(() => {
     setDemo(!user)
@@ -250,8 +255,8 @@ function AppInner() {
     setConfirmation(null)
   }
 
-  function renderScreen() {
-    switch (active) {
+  function renderScreen(screen: string) {
+    switch (screen) {
       case "dashboard":        return <Dashboard />
       case "user-guide":       return canAccess("user-guide") ? <UserGuide /> : null
       case "quotations":       return canAccess("quotations") ? <Quotations /> : null
@@ -326,9 +331,13 @@ function AppInner() {
             }
           />
           <main className="flex-1 overflow-auto">
-            <AppErrorBoundary key={active} scope="page">
+            <AppErrorBoundary scope="page">
               <Suspense fallback={<ScreenLoading />}>
-                {renderScreen()}
+                {visitedScreens.map(screen => (
+                  <div key={screen} className={active === screen ? "contents" : "hidden"}>
+                    {renderScreen(screen)}
+                  </div>
+                ))}
               </Suspense>
             </AppErrorBoundary>
           </main>

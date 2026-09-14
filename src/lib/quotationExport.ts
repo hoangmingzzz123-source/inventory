@@ -155,19 +155,19 @@ function htmlLines(value: unknown) {
 }
 
 export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
-  const renderItemRows = (items: QuotationRenderItem[]) => items.map(item => `<tr>
-    <td class="center">${item.index}</td>
-    <td>${escapeHtml(item.proposedGoods)}</td>
-    <td>${escapeHtml(item.offeredGoods)}</td>
-    <td>${escapeHtml(item.specificationBrand)}</td>
-    <td class="center">${escapeHtml(item.unit)}</td>
-    <td class="number">${item.quantity.toLocaleString("vi-VN")}</td>
-    <td class="number">${formatVnd(item.unitPrice)}</td>
-    <td class="number">${formatVnd(item.subtotal)}</td>
-    <td class="number">${item.vatRate ? `${item.vatRate}%` : "0%"}</td>
-    <td class="number">${formatVnd(item.vatAmount)}</td>
-    <td class="number strong">${formatVnd(item.total)}</td>
-    <td>${escapeHtml(item.note)}</td>
+  const renderItemRows = (items: QuotationRenderItem[]) => items.map(item => `<tr class="quotation-row">
+    <td class="center"><div class="cell-value">${item.index}</div></td>
+    <td><div class="cell-value">${escapeHtml(item.proposedGoods)}</div></td>
+    <td><div class="cell-value">${escapeHtml(item.offeredGoods)}</div></td>
+    <td><div class="cell-value">${escapeHtml(item.specificationBrand)}</div></td>
+    <td class="center"><div class="cell-value">${escapeHtml(item.unit)}</div></td>
+    <td class="number"><div class="cell-value">${item.quantity.toLocaleString("vi-VN")}</div></td>
+    <td class="number"><div class="cell-value">${formatVnd(item.unitPrice)}</div></td>
+    <td class="number"><div class="cell-value">${formatVnd(item.subtotal)}</div></td>
+    <td class="number"><div class="cell-value">${item.vatRate ? `${item.vatRate}%` : "0%"}</div></td>
+    <td class="number"><div class="cell-value">${formatVnd(item.vatAmount)}</div></td>
+    <td class="number strong"><div class="cell-value">${formatVnd(item.total)}</div></td>
+    <td><div class="cell-value">${escapeHtml(item.note)}</div></td>
   </tr>`).join("")
   const shipping = model.terms.includeShipping
     ? "Báo giá đã bao gồm chi phí vận chuyển."
@@ -211,9 +211,13 @@ export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
 
   return `<div class="quotation-render">
     <style>
+      .quotation-document .quotation-row td{padding:0 3px}.quotation-document .cell-value{overflow-wrap:anywhere}.quotation-document .center .cell-value{text-align:center}.quotation-document .number .cell-value{text-align:right;white-space:nowrap}
       .quotation-render{display:flex;flex-direction:column;gap:20px;background:transparent}.quotation-document{width:1120px;min-height:794px;padding:26px 32px;background:#fff;color:#111827;font-family:Arial,sans-serif;font-size:11px;line-height:1.32;box-sizing:border-box;page-break-after:always}.quotation-document:last-child{page-break-after:auto}
-      .quotation-document *{box-sizing:border-box}.quotation-document .company{display:grid;grid-template-columns:90px 1fr 305px;gap:14px;align-items:start;min-height:58px}.quotation-document .company.compact{min-height:48px;border-bottom:1px solid #cbd5e1;margin-bottom:12px;padding-bottom:8px}.quotation-document .logo{width:84px;height:56px;object-fit:contain}.quotation-document h1{margin:10px 0 9px;text-align:center;font-size:20px;color:#b91c1c;line-height:1.15}.quotation-document h2{margin:0;font-size:15px;color:#1d4ed8}.quotation-document .english{font-size:10px;font-weight:700;color:#475569}.quotation-document .meta{display:grid;grid-template-columns:1fr 1fr;gap:3px 24px;margin:7px 0 10px;padding:8px 10px;border:1px solid #94a3b8;font-size:10.5px}.quotation-document .meta b{display:inline-block;min-width:105px}.quotation-document table{width:100%;border-collapse:collapse;table-layout:fixed}.quotation-document th,.quotation-document td{border:1px solid #475569;padding:4px 3px;vertical-align:middle;overflow-wrap:anywhere}.quotation-document th{background:#dbeafe;text-align:center;font-size:9px;line-height:1.2}.quotation-document td{font-size:9.5px;min-height:27px}.quotation-document .center{text-align:center}.quotation-document .number{text-align:right;white-space:nowrap}.quotation-document .strong{font-weight:700}.quotation-document .totals{margin:9px 0 0 auto;width:390px}.quotation-document .total-row{display:flex;justify-content:space-between;padding:3px 8px;border-bottom:1px solid #cbd5e1;min-height:20px}.quotation-document .grand{font-size:14px;font-weight:700;color:#b91c1c;border-top:2px solid #b91c1c}.quotation-document .terms{margin-top:10px;border:1px solid #94a3b8;padding:7px 9px;font-size:10px}.quotation-document .signatures{display:grid;grid-template-columns:1fr 1fr;gap:110px;margin-top:16px;text-align:center;min-height:118px}.quotation-document .signatures>div{display:flex;flex-direction:column;justify-content:space-between;align-items:center}.quotation-document .signatures span{font-style:italic;font-weight:400;color:#64748b}.quotation-document .muted{color:#64748b}.quotation-document .continuation{text-align:right;margin:-5px 0 8px;font-size:10px;color:#64748b}.quotation-document .page-note{margin-top:10px;text-align:right;font-size:10px;color:#64748b}.quotation-document.summary-page .totals{margin-top:30px}.quotation-document.summary-page .terms{margin-top:20px}.quotation-document.summary-page .signatures{margin-top:34px;min-height:190px}.quotation-document .summary-reference{margin:14px 0 20px;border:1px solid #94a3b8;padding:9px 12px}
-    </style>
+      .quotation-document *{box-sizing:border-box}.quotation-document .company{display:grid;grid-template-columns:90px 1fr 305px;gap:14px;align-items:start;min-height:58px}.quotation-document .company.compact{min-height:48px;border-bottom:1px solid #cbd5e1;margin-bottom:12px;padding-bottom:8px}.quotation-document .logo{width:84px;height:56px;object-fit:contain}.quotation-document h1{margin:10px 0 9px;text-align:center;font-size:20px;color:#b91c1c;line-height:1.15}.quotation-document h2{margin:0;font-size:15px;color:#1d4ed8}.quotation-document .english{font-size:10px;font-weight:700;color:#475569}.quotation-document .meta{display:grid;grid-template-columns:1fr 1fr;gap:3px 24px;margin:7px 0 10px;padding:8px 10px;border:1px solid #94a3b8;font-size:10.5px}.quotation-document .meta b{display:inline-block;min-width:105px}.quotation-document table{width:100%;border-collapse:collapse;table-layout:fixed}.quotation-document th,.quotation-document td{border:1px solid #475569;padding:4px 3px;vertical-align:middle;overflow-wrap:anywhere}.quotation-document th{background:#dbeafe;text-align:center;font-size:9px;line-height:1.2}.quotation-document .quotation-row{height:27px}.quotation-document .quotation-row td{height:27px;vertical-align:middle;font-size:9.5px;line-height:1.32}.quotation-document .center{text-align:center}.quotation-document .number{text-align:right;white-space:nowrap}.quotation-document .strong{font-weight:700}.quotation-document .totals{margin:9px 0 0 auto;width:390px}.quotation-document .total-row{display:flex;justify-content:space-between;padding:3px 8px;border-bottom:1px solid #cbd5e1;min-height:20px}.quotation-document .grand{font-size:14px;font-weight:700;color:#b91c1c;border-top:2px solid #b91c1c}.quotation-document .terms{margin-top:10px;border:1px solid #94a3b8;padding:7px 9px;font-size:10px}.quotation-document .signatures{display:grid;grid-template-columns:1fr 1fr;gap:110px;margin-top:16px;text-align:center;min-height:118px}.quotation-document .signatures>div{display:flex;flex-direction:column;justify-content:space-between;align-items:center}.quotation-document .signatures span{font-style:italic;font-weight:400;color:#64748b}.quotation-document .muted{color:#64748b}.quotation-document .continuation{text-align:right;margin:-5px 0 8px;font-size:10px;color:#64748b}.quotation-document .page-note{margin-top:10px;text-align:right;font-size:10px;color:#64748b}.quotation-document.summary-page .totals{margin-top:30px}.quotation-document.summary-page .terms{margin-top:20px}.quotation-document.summary-page .signatures{margin-top:34px;min-height:190px}.quotation-document .summary-reference{margin:14px 0 20px;border:1px solid #94a3b8;padding:9px 12px}
+      .quotation-document {display:flex}
+      .quotation-document {flex-direction:column}
+      .quotation-document {justify-content:center}
+      </style>
     ${detailPages.join("")}
   </div>`
 }
@@ -232,7 +236,7 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
     orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
     margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 },
   } })
-  sheet.columns = [10, 22, 28, 24, 10, 9, 15, 18, 10, 15, 18, 22].map(width => ({ width }))
+  sheet.columns = [18, 22, 28, 24, 10, 9, 18, 18, 10, 15, 18, 22].map(width => ({ width }))
   const border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } } as const
   const logo = model.company.logoUrl || fallbackLogoUrl
   if (logo) {
@@ -303,11 +307,29 @@ export async function exportQuotationPdf(model: QuotationRenderModel, fallbackLo
   const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")])
   const container = window.document.createElement("div")
   container.innerHTML = renderQuotationHtml(model, model.company.logoUrl || fallbackLogoUrl)
+  const exportStyle = window.document.createElement("style")
+  exportStyle.textContent = `.quotation-export-canvas .quotation-row td{position:relative}.quotation-export-canvas .quotation-row .cell-value{position:absolute;left:3px;right:3px;min-height:0;height:auto}`
+  container.classList.add("quotation-export-canvas")
+  container.appendChild(exportStyle)
   container.style.position = "fixed"; container.style.left = "-12000px"; container.style.top = "0"
   window.document.body.appendChild(container)
   try {
     const pages = Array.from(container.querySelectorAll<HTMLElement>(".quotation-document"))
     if (!pages.length) throw new Error("Quotation preview did not produce any pages")
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+    container.querySelectorAll<HTMLTableCellElement>(".quotation-row td").forEach(cell => {
+      const value = cell.querySelector<HTMLElement>(".cell-value")
+      if (!value) return
+      const cellHeight = cell.getBoundingClientRect().height
+      const valueHeight = value.getBoundingClientRect().height
+      const fontSize = Number.parseFloat(window.getComputedStyle(value).fontSize)
+      if (valueHeight <= fontSize * 1.6) {
+        value.style.top = "0px"
+        value.style.lineHeight = `${cellHeight}px`
+      } else {
+        value.style.top = `${Math.max(0, (cellHeight - valueHeight) / 2)}px`
+      }
+    })
     const document = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" })
     const pageWidth = document.internal.pageSize.getWidth()
     const pageHeight = document.internal.pageSize.getHeight()
