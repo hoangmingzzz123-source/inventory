@@ -11,6 +11,7 @@ import { DemoProvider, useDemo } from "./contexts/DemoContext"
 import { Check, AlertCircle, Info, LogOut, User } from "lucide-react"
 import { APP_CONFIRM_EVENT, APP_TOAST_EVENT, type AppConfirmRequest } from "./lib/appEvents"
 import { ThemeProvider } from "./contexts/ThemeContext"
+import { isScreenFeatureEnabled } from "./lib/features"
 import {
   DEMO_VISIBILITY_EVENT,
   demoFeatureEnabled,
@@ -137,7 +138,8 @@ function AppInner() {
     }
   }, [user?.id])
 
-  const showSystemDemo = Boolean(user && demoFeatureEnabled && !demoFeatureHidden)
+  const role = String(profile?.role ?? "staff").toLowerCase()
+  const showSystemDemo = Boolean(user && role === "admin" && demoFeatureEnabled && !demoFeatureHidden)
 
   useEffect(() => {
     const handleToast = (event: Event) => {
@@ -168,7 +170,6 @@ function AppInner() {
     return () => window.removeEventListener("resize", handleViewportChange)
   }, [])
 
-  const role = String(profile?.role ?? "staff").toLowerCase()
   const screenToModule: Record<string, string> = {
     dashboard: "Dashboard",
     "user-guide": "Dashboard",
@@ -204,6 +205,7 @@ function AppInner() {
     "system-demo": "Dashboard",
   }
   const canAccess = (screen: string) => {
+    if (!isScreenFeatureEnabled(screen)) return false
     if (!user) return true
     if (screen === "system-demo") return showSystemDemo
     if (role === "admin") return true
@@ -216,9 +218,9 @@ function AppInner() {
 
   useEffect(() => {
     const allowed = canAccess(active)
-    if (user && !allowed) {
+    if (!allowed) {
       setActive("dashboard")
-      setToast({ msg: lang === "vi" ? "Bạn không có quyền truy cập màn hình này." : "You do not have access to this screen.", type: "error" })
+      setToast({ msg: lang === "vi" ? "Chức năng đang tắt hoặc bạn không có quyền truy cập." : "This feature is disabled or you do not have access.", type: "error" })
     }
   }, [active, user, role, lang, profile, can, showSystemDemo])
 

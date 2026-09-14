@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import {
   Plus, Search, Download, Upload, Printer, RefreshCw, MoreHorizontal,
   Eye, Edit, Copy, Archive, Trash2, X, ChevronLeft, ChevronRight,
@@ -9,13 +9,14 @@ import StatusBadge from "../components/StatusBadge"
 import { products as initialProducts } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchProducts, upsertProduct, deleteProduct, fetchCategories, fetchBrands, fetchUnits, fetchWarehouses } from "../lib/dataService"
+import { upsertProduct, deleteProduct, fetchLookup, fetchMasterDataPage, type LookupKind, type MasterDataEntity } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportCsv, exportXlsx, printTable } from "./GenericList"
 import { exportRowsToExcel, importFromExcel } from "../lib/excelUtils"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
 import { confirmAppAction } from "../lib/appEvents"
 import { formatVnd } from "../lib/numberFormat"
+import AsyncPaginatedSelect, { type AsyncSelectPage } from "../components/AsyncPaginatedSelect"
 
 const fmt = formatVnd
 
@@ -34,7 +35,9 @@ async function downloadXlsxTemplate(filename: string, cols: string[]) {
 
 const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","qty","min_stock","max_stock","description","status"]
 
-function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehouseId, onWarehouseChange }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void>; warehouseOptions: MasterOption[]; warehouseId: string; onWarehouseChange: (value: string) => void }) {
+type MasterOptionLoader = (search: string, offset: number, limit: number) => Promise<AsyncSelectPage<MasterOption>>
+
+function ProductImportModal({ onClose, lang, onImport, loadWarehouses, warehouseId, warehouseOption, onWarehouseChange }: { onClose: () => void; lang: string; onImport: (file: File) => Promise<void>; loadWarehouses: MasterOptionLoader; warehouseId: string; warehouseOption: MasterOption | null; onWarehouseChange: (value: string, option: MasterOption | null) => void }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -48,10 +51,12 @@ function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehou
         <div className="p-5 space-y-4">
           <div>
             <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho nhập đầu kỳ *" : "Opening warehouse *"}</label>
-            <select value={warehouseId} onChange={e => onWarehouseChange(e.target.value)} className="w-full h-8 px-3 rounded-lg border text-xs bg-white" style={{ borderColor: "var(--border)" }}>
-              <option value="">{lang === "vi" ? "Chọn kho" : "Select warehouse"}</option>
-              {warehouseOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            <AsyncPaginatedSelect value={warehouseId} selectedOption={warehouseOption} onChange={onWarehouseChange}
+              loadPage={loadWarehouses} pageSize={20} buttonClassName="h-8 text-xs"
+              placeholder={lang === "vi" ? "Chọn kho" : "Select warehouse"}
+              searchPlaceholder={lang === "vi" ? "Tìm kho trên máy chủ..." : "Search warehouses on the server..."}
+              emptyText={lang === "vi" ? "Không có kho phù hợp" : "No matching warehouse"}
+              loadingText={lang === "vi" ? "Đang tải..." : "Loading..."} loadMoreText={lang === "vi" ? "Tải thêm" : "Load more"} retryText={lang === "vi" ? "Thử lại" : "Retry"} />
           </div>
           <div className="rounded-xl border p-4" style={{ borderColor: "var(--border)" }}>
             <div className="flex items-start gap-3">
@@ -107,9 +112,6 @@ function ProductImportModal({ onClose, lang, onImport, warehouseOptions, warehou
   )
 }
 
-const PAGE_SIZE_LIST = 10
-const PAGE_SIZE_GRID = 12
-
 const productImages: Record<string, string> = {
   Laptop:   "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=400&q=80",
   Phone:    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&q=80",
@@ -131,7 +133,7 @@ type FormState = {
   unit: string; purchasePrice: string; sellingPrice: string; tax: string
   qty: string; minStock: string; maxStock: string; description: string; status: string
   trackInventory: boolean; trackSerial: boolean; trackBatch: boolean; allowNegative: boolean
-  warehouseId: string
+  warehouseId: string; warehouseName: string
 }
 
 const emptyForm: FormState = {
@@ -139,7 +141,7 @@ const emptyForm: FormState = {
   purchasePrice: "", sellingPrice: "", tax: "", qty: "0", minStock: "", maxStock: "",
   description: "", status: "Active",
   trackInventory: true, trackSerial: false, trackBatch: false, allowNegative: false,
-  warehouseId: "",
+  warehouseId: "", warehouseName: "",
 }
 
 function productToForm(p: Product): FormState {
@@ -152,7 +154,7 @@ function productToForm(p: Product): FormState {
     description: row.description ?? "", status: p.status,
     trackInventory: row.track_inventory ?? true, trackSerial: row.track_serial ?? false,
     trackBatch: row.track_batch ?? false, allowNegative: row.allow_negative ?? false,
-    warehouseId: "",
+    warehouseId: "", warehouseName: "",
   }
 }
 
@@ -163,15 +165,15 @@ interface ProductFormModalProps {
   editingProduct: Product | null
   form: FormState
   setForm: React.Dispatch<React.SetStateAction<FormState>>
-  categoryOptions: MasterOption[]
-  brandOptions: MasterOption[]
-  unitOptions: MasterOption[]
-  warehouseOptions: MasterOption[]
+  loadCategories: MasterOptionLoader
+  loadBrands: MasterOptionLoader
+  loadUnits: MasterOptionLoader
+  loadWarehouses: MasterOptionLoader
   onSave: () => void
   onClose: () => void
 }
 
-function ProductFormModal({ editingProduct, form, setForm, categoryOptions, brandOptions, unitOptions, warehouseOptions, onSave, onClose }: ProductFormModalProps) {
+function ProductFormModal({ editingProduct, form, setForm, loadCategories, loadBrands, loadUnits, loadWarehouses, onSave, onClose }: ProductFormModalProps) {
   const { t, lang } = useLang()
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -197,10 +199,13 @@ function ProductFormModal({ editingProduct, form, setForm, categoryOptions, bran
             {!editingProduct && Number(form.qty) > 0 && (
               <div className="mt-3">
                 <label className="block text-[11px] font-medium text-slate-600 mb-1">{lang === "vi" ? "Kho nhập đầu kỳ *" : "Opening warehouse *"}</label>
-                <select value={form.warehouseId} onChange={e => setForm(f => ({ ...f, warehouseId: e.target.value }))} className="w-full h-8 px-3 rounded-lg border text-xs bg-white" style={{ borderColor: "var(--border)" }}>
-                  <option value="">{lang === "vi" ? "Chọn kho" : "Select warehouse"}</option>
-                  {warehouseOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <AsyncPaginatedSelect value={form.warehouseId} selectedOption={form.warehouseId ? { value: form.warehouseId, label: form.warehouseName || form.warehouseId } : null}
+                  onChange={(value, option) => setForm(current => ({ ...current, warehouseId: value, warehouseName: option?.label ?? "" }))}
+                  loadPage={loadWarehouses} pageSize={20} buttonClassName="h-8 text-xs"
+                  placeholder={lang === "vi" ? "Chọn kho" : "Select warehouse"}
+                  searchPlaceholder={lang === "vi" ? "Tìm kho trên máy chủ..." : "Search warehouses on the server..."}
+                  emptyText={lang === "vi" ? "Không có kho phù hợp" : "No matching warehouse"}
+                  loadingText={lang === "vi" ? "Đang tải..." : "Loading..."} loadMoreText={lang === "vi" ? "Tải thêm" : "Load more"} retryText={lang === "vi" ? "Thử lại" : "Retry"} />
               </div>
             )}
             <p className="text-xs text-slate-400">{lang === "vi" ? "JPG, PNG, WebP tối đa 5MB" : "JPG, PNG, WebP up to 5MB"}</p>
@@ -223,20 +228,29 @@ function ProductFormModal({ editingProduct, form, setForm, categoryOptions, bran
                 </div>
               ))}
               {([
-                [t("category"), "category", categoryOptions],
-                [t("brand"), "brand", brandOptions],
-                [t("unit"), "unit", unitOptions],
-                [t("status"), "status", [{ value: "Active", label: lang === "vi" ? "Hoạt động" : "Active" }, { value: "Draft", label: lang === "vi" ? "Nháp" : "Draft" }, { value: "Inactive", label: lang === "vi" ? "Ngừng" : "Inactive" }]],
-              ] as [string, string, MasterOption[]][]).map(([label, key, opts]) => (
+                [t("category"), "category", loadCategories],
+                [t("brand"), "brand", loadBrands],
+                [t("unit"), "unit", loadUnits],
+              ] as [string, "category" | "brand" | "unit", MasterOptionLoader][]).map(([label, key, loader]) => (
                 <div key={key}>
                   <label className="block text-[11px] font-medium text-slate-600 mb-1">{label}</label>
-                  <select value={(form as any)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                    className="w-full h-8 px-3 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" style={{ borderColor: "var(--border)" }}>
-                    <option value="">{lang === "vi" ? "Chọn..." : "Select..."}</option>
-                    {opts.map(o => <option key={o.value || o.label} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <AsyncPaginatedSelect value={form[key]} selectedOption={form[key] ? { value: form[key], label: form[key] } : null}
+                    onChange={value => setForm(current => ({ ...current, [key]: value }))} loadPage={loader}
+                    pageSize={20} buttonClassName="h-8 text-xs" placeholder={lang === "vi" ? "Chọn..." : "Select..."}
+                    searchPlaceholder={lang === "vi" ? "Nhập để tìm trên máy chủ..." : "Type to search on the server..."}
+                    emptyText={lang === "vi" ? "Không có dữ liệu phù hợp" : "No matching data"}
+                    loadingText={lang === "vi" ? "Đang tải..." : "Loading..."} loadMoreText={lang === "vi" ? "Tải thêm" : "Load more"} retryText={lang === "vi" ? "Thử lại" : "Retry"} />
                 </div>
               ))}
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">{t("status")}</label>
+                <select value={form.status} onChange={event => setForm(current => ({ ...current, status: event.target.value }))}
+                  className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white" style={{ borderColor: "var(--border)" }}>
+                  <option value="Active">{lang === "vi" ? "Hoạt động" : "Active"}</option>
+                  <option value="Draft">{lang === "vi" ? "Nháp" : "Draft"}</option>
+                  <option value="Inactive">{lang === "vi" ? "Ngừng" : "Inactive"}</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -409,30 +423,6 @@ export default function Products() {
   const { isDemo } = useDemo()
   const [products, setProducts] = useState<any[]>([])
   const { profile, can } = useAuth()
-  const [categoryOptions, setCategoryOptions] = useState<MasterOption[]>([])
-  const [brandOptions, setBrandOptions] = useState<MasterOption[]>([])
-  const [unitOptions, setUnitOptions] = useState<MasterOption[]>([])
-  const [warehouseOptions, setWarehouseOptions] = useState<MasterOption[]>([])
-
-  useEffect(() => {
-    fetchProducts({ isDemo, orgId: profile?.org_id }).then(res => {
-      if (res.data) setProducts(res.data)
-    })
-  }, [isDemo, profile])
-
-  useEffect(() => {
-    Promise.all([
-      fetchCategories({ isDemo, orgId: profile?.org_id }),
-      fetchBrands({ isDemo, orgId: profile?.org_id }),
-      fetchUnits({ isDemo, orgId: profile?.org_id }),
-      fetchWarehouses({ isDemo, orgId: profile?.org_id }),
-    ]).then(([catRes, brandRes, unitRes, warehouseRes]) => {
-      setCategoryOptions((catRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
-      setBrandOptions((brandRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
-      setUnitOptions((unitRes.data ?? []).map((row: any) => ({ value: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? row.id ?? ""), label: row.name ?? row.name_vi ?? row.name_en ?? row.code ?? "" })))
-      setWarehouseOptions((warehouseRes.data ?? []).map((row: any) => ({ value: String(row.id ?? row.code ?? ""), label: row.name ?? row.code ?? "" })))
-    })
-  }, [isDemo, profile])
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "")
   const [selected, setSelected] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
@@ -440,7 +430,7 @@ export default function Products() {
   const [actionRow, setActionRow] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [filterStatus, setFilterStatus] = useState("all")
-  const [filterCategory, setFilterCategory] = useState("all")
+  const [filterCategory, setFilterCategory] = useState("")
   const [viewMode, setViewMode] = useState<"list" | "grid">("list")
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
   const [detailProduct, setDetailProduct] = useState<Product | null>(null)
@@ -448,7 +438,34 @@ export default function Products() {
   const [form, setForm] = useState<FormState>(emptyForm)
   const [showImportModal, setShowImportModal] = useState(false)
   const [importWarehouseId, setImportWarehouseId] = useState("")
+  const [importWarehouseOption, setImportWarehouseOption] = useState<MasterOption | null>(null)
+  const [totalProducts, setTotalProducts] = useState(0)
+  const [loadingProducts, setLoadingProducts] = useState(false)
   const actionMenuRef = useRef<HTMLDivElement>(null)
+
+  const loadMasterOptions = useCallback(async (entity: MasterDataEntity, searchText: string, offset: number, limit: number, useId = false) => {
+    if (entity === "brands") {
+      const result = await fetchMasterDataPage(entity, { isDemo, orgId: profile?.org_id, search: searchText, offset, limit })
+      if (result.error) throw result.error
+      return {
+        options: (result.data?.items ?? []).map(row => ({
+          value: String(useId ? row.id : row.name ?? row.name_vi ?? row.name_en ?? row.code ?? ""),
+          label: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? ""),
+        })).filter(option => option.value && option.label),
+        hasMore: result.data?.hasMore ?? false,
+      }
+    }
+    const result = await fetchLookup(entity as LookupKind, { isDemo, orgId: profile?.org_id, search: searchText, offset, limit })
+    if (result.error) throw result.error
+    return {
+      options: (result.data ?? []).map(row => ({ value: useId ? row.id : row.label, label: row.label })),
+      hasMore: result.hasMore,
+    }
+  }, [isDemo, profile?.org_id])
+  const loadCategories = useCallback<MasterOptionLoader>((searchText, offset, limit) => loadMasterOptions("categories", searchText, offset, limit), [loadMasterOptions])
+  const loadBrands = useCallback<MasterOptionLoader>((searchText, offset, limit) => loadMasterOptions("brands", searchText, offset, limit), [loadMasterOptions])
+  const loadUnits = useCallback<MasterOptionLoader>((searchText, offset, limit) => loadMasterOptions("units", searchText, offset, limit), [loadMasterOptions])
+  const loadWarehouses = useCallback<MasterOptionLoader>((searchText, offset, limit) => loadMasterOptions("warehouses", searchText, offset, limit, true), [loadMasterOptions])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -458,18 +475,12 @@ export default function Products() {
     return () => document.removeEventListener("mousedown", handler)
   }, [])
 
-  const categories = ["all", ...Array.from(new Set(products.map(p => p.category)))]
-
-  const filtered = products.filter(p =>
-    (filterStatus === "all" || p.status === filterStatus) &&
-    (filterCategory === "all" || p.category === filterCategory) &&
-    (search === "" || String(p.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      String(p.sku ?? "").toLowerCase().includes(search.toLowerCase()) || String(p.barcode ?? "").includes(search))
-  )
-
-  const pageSize = viewMode === "grid" ? PAGE_SIZE_GRID : PAGE_SIZE_LIST
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
+  // Products are searched and paged on the server. Keeping a single 20-row
+  // page in memory avoids downloading the entire product master.
+  const filtered = products
+  const pageSize = 20
+  const totalPages = Math.max(1, Math.ceil(totalProducts / pageSize))
+  const paged = products
 
   const allSelected = paged.length > 0 && paged.every(p => selected.includes(p.id))
   const toggleAll = () =>
@@ -484,11 +495,32 @@ export default function Products() {
     setTimeout(() => setToast(null), 2500)
   }
 
-  const refreshProducts = async () => {
-    const result = await fetchProducts({ isDemo, orgId: profile?.org_id })
-    if (result.error) showToast(result.error.message ?? String(result.error), false)
-    setProducts(result.data ?? [])
-  }
+  const refreshProducts = useCallback(async () => {
+    setLoadingProducts(true)
+    try {
+      const result = await fetchMasterDataPage("products", {
+        isDemo,
+        orgId: profile?.org_id,
+        search,
+        status: filterStatus === "all" ? null : filterStatus,
+        category: filterCategory || null,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      })
+      if (result.error) throw result.error
+      setProducts(result.data?.items ?? [])
+      setTotalProducts(result.data?.total ?? 0)
+    } catch (error: any) {
+      showToast(error?.message ?? String(error), false)
+    } finally {
+      setLoadingProducts(false)
+    }
+  }, [filterCategory, filterStatus, isDemo, page, profile?.org_id, search])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refreshProducts(), search ? 300 : 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshProducts, search])
 
   const openCreate = () => { setForm(emptyForm); setShowCreate(true) }
   const openEdit = (p: Product) => { setEditingProduct(p); setForm(productToForm(p)); setActionRow(null); setDetailProduct(null) }
@@ -508,7 +540,7 @@ export default function Products() {
       price: Number(form.sellingPrice) || 0,
       qty: Number(form.qty) || 0,
       warehouse_id: form.warehouseId || undefined,
-      warehouse_name: warehouseOptions.find(option => option.value === form.warehouseId)?.label || undefined,
+      warehouse_name: form.warehouseName || undefined,
       status: form.status,
       updated_by: profile?.full_name || profile?.email || "system",
       tax_pct: Number(form.tax) || 0,
@@ -530,8 +562,7 @@ export default function Products() {
       showToast(res.error.message ?? String(res.error), false)
     } else {
       // refresh
-      const r = await fetchProducts({ isDemo, orgId: profile?.org_id })
-      if (r.data) setProducts(r.data as any[])
+      await refreshProducts()
       closeForm()
       showToast(lang === "vi" ? (editingProduct ? "Cập nhật sản phẩm thành công!" : "Tạo sản phẩm thành công!") : (editingProduct ? "Product updated!" : "Product created!"))
     }
@@ -542,7 +573,7 @@ export default function Products() {
       showToast(lang === "vi" ? "Vui lòng chọn kho nhập đầu kỳ" : "Please select an opening warehouse", false)
       return
     }
-    const importWarehouse = warehouseOptions.find(option => option.value === importWarehouseId)
+    const importWarehouse = importWarehouseOption
     try {
       const rows = await importFromExcel(file)
       let imported = 0
@@ -569,8 +600,7 @@ export default function Products() {
         const result = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })
         if (!result.error) imported++
       }
-      const refreshed = await fetchProducts({ isDemo, orgId: profile?.org_id })
-      if (refreshed.data) setProducts(refreshed.data as any[])
+      await refreshProducts()
       setShowImportModal(false)
       showToast(lang === "vi" ? `Đã nhập ${imported} sản phẩm` : `Imported ${imported} products`)
     } catch (error) {
@@ -584,7 +614,7 @@ export default function Products() {
     const res = await deleteProduct(deleteTarget.id, { isDemo, orgId: profile?.org_id })
     if (res && res.error) showToast(res.error.message ?? String(res.error), false)
     else {
-      const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+      await refreshProducts()
       setDetailProduct(null)
       setDeleteTarget(null)
       showToast(lang === "vi" ? "Đã xóa sản phẩm" : "Product deleted")
@@ -597,7 +627,7 @@ export default function Products() {
     const res = await upsertProduct(payload as any, { isDemo, orgId: profile?.org_id })
     if (res && res.error) showToast(lang === "vi" ? "Lỗi khi sao chép" : "Duplicate failed", false)
     else {
-      const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+      await refreshProducts()
       setActionRow(null)
       showToast(lang === "vi" ? "Đã sao chép sản phẩm" : "Product duplicated")
     }
@@ -667,12 +697,13 @@ export default function Products() {
           <Printer size={13} /> {t("print")}
         </button>}
         <div className="flex-1" />
-        <div className="relative">
-          <Tag size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-          <select value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setPage(1) }}
-            className="h-8 pl-7 pr-6 rounded-lg border text-xs outline-none bg-white appearance-none" style={{ borderColor: "var(--border)" }}>
-            {categories.map(c => <option key={c} value={c}>{c === "all" ? (lang === "vi" ? "Tất cả danh mục" : "All Categories") : c}</option>)}
-          </select>
+        <div className="w-48">
+          <AsyncPaginatedSelect value={filterCategory} selectedOption={filterCategory ? { value: filterCategory, label: filterCategory } : null}
+            onChange={value => { setFilterCategory(value); setPage(1) }} loadPage={loadCategories} pageSize={20}
+            buttonClassName="h-8 text-xs" placeholder={lang === "vi" ? "Tất cả danh mục" : "All categories"}
+            searchPlaceholder={lang === "vi" ? "Tìm danh mục..." : "Search categories..."}
+            emptyText={lang === "vi" ? "Không có danh mục" : "No categories"}
+            loadingText={lang === "vi" ? "Đang tải..." : "Loading..."} loadMoreText={lang === "vi" ? "Tải thêm" : "Load more"} retryText={lang === "vi" ? "Thử lại" : "Retry"} />
         </div>
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -712,7 +743,7 @@ export default function Products() {
           {can("Master Data", "delete") && <button onClick={async () => {
               if (!await confirmAppAction(lang === "vi" ? `Xóa ${selected.length} sản phẩm đã chọn?` : `Delete ${selected.length} selected products?`, { destructive: true })) return
               for (const id of selected) { await deleteProduct(id, { isDemo, orgId: profile?.org_id }) }
-              const r = await fetchProducts({ isDemo, orgId: profile?.org_id }); if (r.data) setProducts(r.data as any[])
+              await refreshProducts()
               setSelected([])
               showToast(lang === "vi" ? "Đã xóa" : "Deleted")
             }} className="text-red-600 hover:underline">{t("delete")}</button>}
@@ -847,7 +878,7 @@ export default function Products() {
       {/* Pagination */}
       <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 flex-wrap gap-2" style={{ borderColor: "var(--border)" }}>
         <span className="text-xs text-slate-500">
-          {t("showing")} {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} {t("of")} {filtered.length} {lang === "vi" ? "sản phẩm" : "products"}
+          {t("showing")} {totalProducts === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min((page - 1) * pageSize + products.length, totalProducts)} {t("of")} {totalProducts} {lang === "vi" ? "sản phẩm" : "products"}
         </span>
         <div className="flex items-center gap-1">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
@@ -869,12 +900,7 @@ export default function Products() {
             <ChevronRight size={13} />
           </button>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          {t("rowsPerPage")}:
-          <select className="border rounded px-1.5 h-6 text-xs outline-none" style={{ borderColor: "var(--border)" }}>
-            <option>10</option><option>25</option><option>50</option>
-          </select>
-        </div>
+        <div className="text-xs text-slate-500">{loadingProducts ? (lang === "vi" ? "Đang tải..." : "Loading...") : `${pageSize} ${lang === "vi" ? "dòng/trang" : "rows/page"}`}</div>
       </div>
 
       {/* Modals — all top-level components, stable references */}
@@ -891,16 +917,16 @@ export default function Products() {
       {deleteTarget && (
         <DeleteConfirmDialog product={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
       )}
-      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImport} lang={lang} warehouseOptions={warehouseOptions} warehouseId={importWarehouseId} onWarehouseChange={setImportWarehouseId} />}
+      {showImportModal && <ProductImportModal onClose={() => setShowImportModal(false)} onImport={handleImport} lang={lang} loadWarehouses={loadWarehouses} warehouseId={importWarehouseId} warehouseOption={importWarehouseOption} onWarehouseChange={(value, option) => { setImportWarehouseId(value); setImportWarehouseOption(option) }} />}
       {(showCreate || editingProduct) && (
         <ProductFormModal
           editingProduct={editingProduct}
           form={form}
           setForm={setForm}
-          categoryOptions={categoryOptions}
-          brandOptions={brandOptions}
-          unitOptions={unitOptions}
-          warehouseOptions={warehouseOptions}
+          loadCategories={loadCategories}
+          loadBrands={loadBrands}
+          loadUnits={loadUnits}
+          loadWarehouses={loadWarehouses}
           onSave={handleSave}
           onClose={closeForm}
         />

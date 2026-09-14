@@ -1,10 +1,10 @@
 import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchQuotationSettings, fetchUsers, fetchPurchaseReturns, upsertCompanySettings, upsertQuotationSettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchQuotationSettings, fetchUsers, fetchPurchaseReturns, fetchLookup, fetchMasterDataPage, upsertCompanySettings, upsertQuotationSettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn, type LookupKind, type MasterDataEntity } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportRowsToExcel, importFromExcel, sanitizeSpreadsheetCell, saveExcelWorkbook } from "../lib/excelUtils"
 import { defaultQuotationSettings, loadCompanySettings, saveCompanySettings, type CompanySettings, type QuotationSettings } from "../lib/companySettings"
@@ -22,6 +22,7 @@ import {
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
+import AsyncPaginatedSelect, { type AsyncSelectOption } from "../components/AsyncPaginatedSelect"
 
 const fmt = formatQuantity
 const money = formatVnd
@@ -428,12 +429,80 @@ function Pager({ count, total, label }: { count: number; total: number; label: s
   return (
     <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
       <span>{t("showing")} {count} {t("of")} {total} {label}</span>
-      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
+      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">
+        {count < total ? (t("scrollToLoadMore") || "Cuộn để tải thêm") : (t("allLoaded") || "Đã tải hết")}
+      </span>
     </div>
   )
 }
 
 // --- Customers ---
+
+const pagedMasterEntities = new Set<MasterDataEntity>([
+  "customers", "suppliers", "warehouses", "categories", "brands", "units",
+])
+
+const relatedEntityByKey: Record<string, MasterDataEntity> = {
+  customer: "customers",
+  supplier: "suppliers",
+  warehouse: "warehouses",
+  category: "categories",
+  brand: "brands",
+  unit: "units",
+}
+
+function LazyMasterField({ name, optionKey, value, label, lang, isDemo, orgId }: {
+  name: string
+  optionKey: string
+  value: string
+  label: string
+  lang: string
+  isDemo: boolean
+  orgId?: string
+}) {
+  const [selectedValue, setSelectedValue] = useState(value)
+  const [selectedOption, setSelectedOption] = useState<AsyncSelectOption | null>(value
+    ? { value, label: value }
+    : null)
+  const entity = relatedEntityByKey[optionKey]
+  const loadPage = useCallback(async (search: string, offset: number, limit: number) => {
+    if (entity === "brands") {
+      const result = await fetchMasterDataPage(entity, { isDemo, orgId, search, offset, limit })
+      if (result.error) throw result.error
+      const options = (result.data?.items ?? []).map(row => ({
+        value: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? ""),
+        label: String(row.name ?? row.name_vi ?? row.name_en ?? row.code ?? ""),
+      })).filter(option => option.value)
+      return { options, hasMore: result.data?.hasMore ?? false }
+    }
+    const lookupEntity = entity as LookupKind
+    const result = await fetchLookup(lookupEntity, { isDemo, orgId, search, offset, limit })
+    if (result.error) throw result.error
+    return {
+      options: (result.data ?? []).map(row => ({ value: row.label, label: row.label })),
+      hasMore: result.hasMore,
+    }
+  }, [entity, isDemo, orgId])
+
+  return <>
+    <input type="hidden" name={name} value={selectedValue} />
+    <AsyncPaginatedSelect
+      value={selectedValue}
+      selectedOption={selectedOption}
+      onChange={(nextValue, option) => { setSelectedValue(nextValue); setSelectedOption(option) }}
+      loadPage={loadPage}
+      pageSize={20}
+      placeholder={lang === "vi" ? `Chọn ${label.toLowerCase()}` : `Select ${label.toLowerCase()}`}
+      searchPlaceholder={lang === "vi" ? "Nhập để tìm trên máy chủ..." : "Type to search on the server..."}
+      emptyText={lang === "vi" ? "Không có dữ liệu phù hợp" : "No matching data"}
+      loadingText={lang === "vi" ? "Đang tải..." : "Loading..."}
+      loadMoreText={lang === "vi" ? "Tải thêm" : "Load more"}
+      retryText={lang === "vi" ? "Thử lại" : "Retry"}
+      clearLabel={lang === "vi" ? "Bỏ chọn" : "Clear"}
+      buttonClassName="h-8 text-xs"
+    />
+  </>
+}
 
 
 export function GenericCrudList({ title, data, setData, columns, templateCols, templateFile, readOnly = false, moduleName = "Master Data", onRefresh, importAliases, templateHeaders, normalizeImportRow, validateImportRow }: any) {
@@ -441,65 +510,56 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search") ?? "");
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
-  const [relatedOptions, setRelatedOptions] = useState<Record<string, string[]>>({
-    customer: [], supplier: [], warehouse: [], category: [], brand: [], unit: [], status: getStatusOptions(lang)
-  });
   const { isDemo } = useDemo();
   const { profile, can } = useAuth();
+  const isPagedMaster = pagedMasterEntities.has(templateFile as MasterDataEntity)
+  const [masterTotal, setMasterTotal] = useState(0)
+  const [masterHasMore, setMasterHasMore] = useState(false)
+  const [masterLoading, setMasterLoading] = useState(false)
+  const masterLoadingRef = useRef(false)
+  const dataRef = useRef<any[]>(data)
+  useEffect(() => { dataRef.current = data }, [data])
   const importKeyField = getImportKeyField(templateCols);
   const existingKeys = data.map((item: any) => item[importKeyField]).filter(Boolean).map(String);
 
+  const loadMasterPage = useCallback(async (reset: boolean) => {
+    if (!isPagedMaster || masterLoadingRef.current) return
+    masterLoadingRef.current = true
+    setMasterLoading(true)
+    try {
+      const offset = reset ? 0 : dataRef.current.length
+      const result = await fetchMasterDataPage(templateFile as MasterDataEntity, {
+        isDemo,
+        orgId: profile?.org_id,
+        search,
+        limit: 20,
+        offset,
+      })
+      if (result.error) throw result.error
+      const page = result.data
+      setData((current: any[]) => reset ? (page?.items ?? []) : [
+        ...current,
+        ...(page?.items ?? []).filter(row => !current.some(item => String(item.id ?? item.code) === String(row.id ?? row.code))),
+      ])
+      setMasterTotal(page?.total ?? 0)
+      setMasterHasMore(page?.hasMore ?? false)
+    } catch (error: any) {
+      showAppToast(error?.message ?? String(error))
+    } finally {
+      masterLoadingRef.current = false
+      setMasterLoading(false)
+    }
+  }, [isDemo, isPagedMaster, profile?.org_id, search, setData, templateFile])
+
   useEffect(() => {
-    const extractList = (key: string): string[] => Array.from(new Set<string>(
-      data
-        .map((item: any) => item[key])
-        .filter((value: any) => value != null && value !== "")
-        .map((value: any) => String(value))
-    )).sort()
-
-    const nextOptions: Record<string, string[]> = {
-      customer: extractList("customer"),
-      supplier: extractList("supplier"),
-      warehouse: extractList("warehouse"),
-      category: extractList("category"),
-      brand: extractList("brand"),
-      unit: extractList("unit"),
-      status: Array.from(new Set<string>([...getStatusOptions(lang), ...extractList("status")]))
-    }
-
-    if (!isDemo) {
-      Promise.all([
-        fetchCustomers({ isDemo, orgId: profile?.org_id }),
-        fetchSuppliers({ isDemo, orgId: profile?.org_id }),
-        fetchWarehouses({ isDemo, orgId: profile?.org_id }),
-        fetchCategories({ isDemo, orgId: profile?.org_id }),
-        fetchBrands({ isDemo, orgId: profile?.org_id }),
-        fetchUnits({ isDemo, orgId: profile?.org_id }),
-      ]).then(([customersRes, suppliersRes, warehousesRes, categoriesRes, brandsRes, unitsRes]) => {
-        const customerNames = [...(customersRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
-        const supplierNames = [...(suppliersRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
-        const warehouseNames = [...(warehousesRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
-        const categoryNames = [...(categoriesRes.data ?? []).map((x: any) => x.name ?? x.name_vi ?? x.name_en).filter(Boolean)]
-        const brandNames = [...(brandsRes.data ?? []).map((x: any) => x.name).filter(Boolean)]
-        const unitNames = [...(unitsRes.data ?? []).flatMap((x: any) => [x.code, x.name, x.name_vi, x.name_en]).filter(Boolean)]
-
-        setRelatedOptions({
-          customer: Array.from(new Set<string>([...nextOptions.customer, ...customerNames])).sort(),
-          supplier: Array.from(new Set<string>([...nextOptions.supplier, ...supplierNames])).sort(),
-          warehouse: Array.from(new Set<string>([...nextOptions.warehouse, ...warehouseNames])).sort(),
-          category: Array.from(new Set<string>([...nextOptions.category, ...categoryNames])).sort(),
-          brand: Array.from(new Set<string>([...nextOptions.brand, ...brandNames])).sort(),
-          unit: Array.from(new Set<string>([...nextOptions.unit, ...unitNames])).sort(),
-          status: Array.from(new Set<string>([...getStatusOptions(lang), ...extractList("status")]))
-        })
-      }).catch(() => setRelatedOptions(nextOptions))
-      return
-    }
-
-    setRelatedOptions(nextOptions)
-  }, [data, lang, isDemo, profile])
+    if (!isPagedMaster) return
+    const timer = window.setTimeout(() => void loadMasterPage(true), search ? 300 : 0)
+    return () => window.clearTimeout(timer)
+  }, [isPagedMaster, loadMasterPage, search])
   
-  const filtered = data.filter((item: any) => search === "" || Object.values(item).some((v: any) => String(v).toLowerCase().includes(search.toLowerCase())));
+  const filtered = isPagedMaster
+    ? data
+    : data.filter((item: any) => search === "" || Object.values(item).some((v: any) => String(v).toLowerCase().includes(search.toLowerCase())));
   
   const heads = columns.map((c: any) => c.label);
   
@@ -508,6 +568,10 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
     if (res?.error) {
       showAppToast(res.error.message ?? String(res.error))
       return false
+    }
+    if (!isDemo && isPagedMaster) {
+      await loadMasterPage(true)
+      return true
     }
     if (!isDemo) {
       if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return true }
@@ -583,7 +647,9 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
     }
 
     // refresh list for live tables
-    if (!isDemo) {
+    if (!isDemo && isPagedMaster) {
+      await loadMasterPage(true)
+    } else if (!isDemo) {
       if (templateFile === 'customers') { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
       else if (templateFile === 'suppliers') { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
       else if (templateFile === 'warehouses') { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data) }
@@ -607,6 +673,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
       showAppToast(result.error.message ?? String(result.error))
       return
     }
+    if (isPagedMaster) { await loadMasterPage(true); return }
     if (templateFile === "customers") { const r = await fetchCustomers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "suppliers") { const r = await fetchSuppliers({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
     if (templateFile === "warehouses") { const r = await fetchWarehouses({ isDemo, orgId: profile?.org_id }); if (r.data) setData(r.data); return }
@@ -625,9 +692,14 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
         importAliases={importAliases} templateHeaders={templateHeaders} normalizeImportRow={normalizeImportRow} validateImportRow={validateImportRow}
         onExportCsv={can(moduleName, "export") ? () => exportCsv(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
         onExportXlsx={can(moduleName, "export") ? () => exportXlsx(templateFile, heads, filtered.map((item: any) => columns.map((c: any) => item[c.key]))) : undefined}
-        onRefresh={onRefresh}
+        onRefresh={isPagedMaster ? () => void loadMasterPage(true) : onRefresh}
       />
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" onScroll={event => {
+        const target = event.currentTarget
+        if (isPagedMaster && masterHasMore && !masterLoading && target.scrollHeight - target.scrollTop - target.clientHeight < 80) {
+          void loadMasterPage(false)
+        }
+      }}>
         <table className="w-full text-xs border-collapse min-w-[900px]">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50 border-b" style={{ borderColor: "var(--border)" }}>
@@ -675,7 +747,6 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
               <div className="p-5 grid grid-cols-2 gap-3 max-h-[70vh] overflow-y-auto">
                 {columns.filter((c: any) => !c.readOnly).map((c: any) => {
                   const fkKeyNames = ["customer", "supplier", "warehouse", "category", "brand", "unit"]
-                  const options = relatedOptions[c.optionsKey ?? c.key] || []
                   const isFkSelector = fkKeyNames.includes(c.key) || Boolean(c.optionsKey)
                   const inputType = c.type || (/(amount|price|cost|total|debt|credit|capacity|qty|quantity)/i.test(c.key) ? "number" : (/(email)/i.test(c.key) ? "email" : "text"))
                   const defaultValue = editingItem ? editingItem[c.key] ?? "" : ""
@@ -692,18 +763,28 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
                           <option value="false">{lang === "vi" ? "Không" : "No"}</option>
                           <option value="true">{lang === "vi" ? "Có" : "Yes"}</option>
                         </select>
-                      ) : isFkSelector || options.length > 0 ? (
+                      ) : c.isStatus ? (
                         <select
                           name={c.key}
                           defaultValue={defaultValue}
                           className="w-full h-8 px-3 rounded-lg border text-xs outline-none bg-white"
                           style={{ borderColor: "var(--border)" }}
                         >
-                          <option value="">{lang === "vi" ? "Chọn " + c.label.toLowerCase() : "Select " + c.label.toLowerCase()}</option>
-                          {options.map(opt => (
+                          {Array.from(new Set([defaultValue, ...getStatusOptions(lang)].filter(Boolean))).map(opt => (
                             <option key={opt} value={opt}>{opt}</option>
                           ))}
                         </select>
+                      ) : isFkSelector ? (
+                        <LazyMasterField
+                          key={`${c.key}:${editingItem?.id ?? editingItem?.code ?? "new"}`}
+                          name={c.key}
+                          optionKey={c.optionsKey ?? c.key}
+                          value={String(defaultValue)}
+                          label={c.label}
+                          lang={lang}
+                          isDemo={isDemo}
+                          orgId={profile?.org_id}
+                        />
                       ) : (
                         <input
                           name={c.key}
@@ -726,6 +807,7 @@ export function GenericCrudList({ title, data, setData, columns, templateCols, t
           </div>
         </div>
       )}
+      {isPagedMaster && <Pager count={data.length} total={masterTotal} label={title} />}
     </div>
   )
 }
@@ -776,11 +858,6 @@ async function handleDeleteFor(templateFile: string, id: string, isDemo: boolean
 export function Customers() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchCustomers({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
-  }, [isDemo, profile]);
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã KH" }, { key: "name", label: "Tên khách hàng" }, { key: "representative", label: "Người liên hệ" }, { key: "phone", label: "Điện thoại" },
@@ -800,11 +877,6 @@ export function Customers() {
 export function Suppliers() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchSuppliers({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
-  }, [isDemo, profile]);
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã NCC" }, { key: "name", label: "Tên nhà cung cấp" }, { key: "phone", label: "Điện thoại" },
@@ -824,11 +896,6 @@ export function Suppliers() {
 export function Warehouses() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchWarehouses({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) });
-  }, [isDemo, profile]);
 
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã kho" }, { key: "name", label: "Tên kho" }, { key: "address", label: "Địa điểm" },
@@ -998,19 +1065,6 @@ function normalizeCategoryImportRow(row: Record<string, any>) {
 export function Categories() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  const [validUnits, setValidUnits] = useState<string[]>([])
-  useEffect(() => {
-    Promise.all([
-      fetchCategories({ isDemo, orgId: profile?.org_id }),
-      fetchUnits({ isDemo, orgId: profile?.org_id }),
-    ]).then(([categoryResult, unitResult]) => {
-      if (categoryResult.data) setData(categoryResult.data)
-      setValidUnits((unitResult.data ?? []).flatMap((unit: any) => [unit.code, unit.name, unit.name_vi, unit.name_en])
-        .filter(Boolean).map((value: unknown) => normalizeImportHeader(value)))
-    })
-  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "code", label: "Mã" }, { key: "name", label: "Tên danh mục" },
     { key: "default_unit", label: "ĐVT", optionsKey: "unit" },
@@ -1039,8 +1093,8 @@ export function Categories() {
     if (hasVat && (!Number.isFinite(Number(row.default_vat_rate)) || Number(row.default_vat_rate) <= 0 || Number(row.default_vat_rate) > 100)) {
       issues.push(lang === "vi" ? "VAT phải lớn hơn 0 và không quá 100" : "VAT must be greater than 0 and at most 100")
     }
-    const unit = normalizeImportHeader(row.default_unit)
-    if (unit && !validUnits.includes(unit)) issues.push(lang === "vi" ? `Đơn vị "${row.default_unit}" không tồn tại` : `Unit "${row.default_unit}" does not exist`)
+    // Unit existence is validated transactionally by save_category_defaults;
+    // the UI intentionally does not download the entire unit master here.
     return issues
   }
   return <GenericCrudList
@@ -1061,11 +1115,6 @@ export function Categories() {
 export function Brands() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchBrands({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) })
-  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [
@@ -2872,11 +2921,6 @@ export function Settings() {
 export function Units() {
   const { lang } = useLang();
   const [data, setData] = useState<any[]>([]);
-  const { isDemo } = useDemo();
-  const { profile } = useAuth();
-  useEffect(() => {
-    fetchUnits({ isDemo, orgId: profile?.org_id }).then(res => { if (res.data) setData(res.data) })
-  }, [isDemo, profile]);
   const columns = lang === "vi" ? [
     { key: "code", label: "CODE", isStatus: false }, { key: "name", label: "NAME", isStatus: false }, { key: "status", label: "STATUS", isStatus: true }
   ] : [

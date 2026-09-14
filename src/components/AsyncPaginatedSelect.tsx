@@ -52,7 +52,7 @@ export default function AsyncPaginatedSelect<T extends AsyncSelectOption>({
   clearLabel = "Clear selection",
   disabled = false,
   allowClear = true,
-  pageSize = 30,
+  pageSize = 20,
   className = "",
   buttonClassName = "h-9 text-sm",
 }: AsyncPaginatedSelectProps<T>) {

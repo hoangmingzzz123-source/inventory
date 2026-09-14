@@ -134,7 +134,30 @@ export type QuotationReferenceContext = {
   sameCustomer: QuotationReferenceRecord[]
   recentSales: QuotationReferenceRecord[]
   recentImports: QuotationReferenceRecord[]
+  sameCustomerTotal: number
+  recentSalesTotal: number
+  recentImportsTotal: number
   categoryDefault: QuotationReferenceRecord | null
+}
+
+export type QuotationReferenceSection = "sameCustomer" | "recentSales" | "recentImports"
+
+export type QuotationReferencePage = {
+  items: QuotationReferenceRecord[]
+  total: number
+  limit: number
+  offset: number
+  hasMore: boolean
+}
+
+export type MasterDataEntity = "products" | "categories" | "customers" | "suppliers" | "warehouses" | "brands" | "units"
+
+export type MasterDataPage = {
+  items: Record<string, any>[]
+  total: number
+  limit: number
+  offset: number
+  hasMore: boolean
 }
 
 export type QuotationAllocationContext = {
@@ -360,7 +383,7 @@ export async function fetchLookup(
     isDemo,
     orgId,
     search = "",
-    limit = 50,
+    limit = 20,
     offset = 0,
     categoryId = null,
     warehouseId = null,
@@ -372,11 +395,12 @@ export async function fetchLookup(
     const productRows = kind === "products"
       ? ((await fetchProducts({ isDemo: true, orgId })).data as any[])
       : demoLookupRows(kind)
-    const rows = (productRows as any[])
+    const matchingRows = (productRows as any[])
       .filter(row => String(row.status ?? "Active").toLowerCase() === "active")
       .filter(row => kind !== "products" || !categoryId || String(row.category_id) === categoryId)
       .filter(row => !normalizedSearch || [row.code, row.sku, row.name, row.name_vi, row.name_en]
         .some(value => String(value ?? "").toLocaleLowerCase("vi").includes(normalizedSearch)))
+    const rows = matchingRows
       .slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, Math.min(limit, 200)))
       .map(row => ({
         id: String(row.id ?? row.code),
@@ -402,10 +426,10 @@ export async function fetchLookup(
         hasVat: normalizeBooleanInput(row.has_vat),
         defaultVatRate: toNumber(row.default_vat_rate),
       })) satisfies LookupItem[]
-    return { data: rows, error: null }
+    return { data: rows, total: matchingRows.length, limit, offset, hasMore: offset + rows.length < matchingRows.length, error: null }
   }
-  if (!orgId) return { data: [] as LookupItem[], error: new Error("Authenticated organization is required") }
-  const { data, error } = await (supabase as any).rpc("get_lookup_items", {
+  if (!orgId) return { data: [] as LookupItem[], total: 0, limit, offset, hasMore: false, error: new Error("Authenticated organization is required") }
+  const lookupParams = {
     p_entity: kind,
     p_search: search || null,
     p_limit: limit,
@@ -414,8 +438,91 @@ export async function fetchLookup(
     p_warehouse_id: warehouseId,
     p_include_stock: includeStock,
     p_include_demo: includeDemo,
+  }
+  let { data, error } = await (supabase as any).rpc("get_lookup_items_v2", lookupParams)
+  // Keep rolling deployments usable while the new count-enriched RPC is still
+  // propagating through PostgREST's schema cache. The legacy RPC has the same
+  // paging contract, except that it may omit `total`.
+  if (error && /get_lookup_items_v2|schema cache|function .* does not exist/i.test(String(error.message ?? error))) {
+    ;({ data, error } = await (supabase as any).rpc("get_lookup_items", lookupParams))
+  }
+  const result = (data ?? {}) as any
+  const rows = (result.items ?? []) as LookupItem[]
+  return {
+    data: rows,
+    total: toNumber(result.total, rows.length),
+    limit: toNumber(result.limit, limit),
+    offset: toNumber(result.offset, offset),
+    hasMore: Boolean(result.hasMore ?? offset + rows.length < toNumber(result.total, rows.length)),
+    error,
+  }
+}
+
+function normalizeMasterRows(entity: MasterDataEntity, rows: Record<string, any>[]): Record<string, any>[] {
+  if (entity === "categories") return rows.map(row => ({
+    ...row,
+    name: row.name ?? row.name_vi ?? row.name_en ?? "",
+    default_unit: row.default_unit ?? "",
+    default_purchase_price: toNumber(row.default_purchase_price),
+    default_sale_price: toNumber(row.default_sale_price),
+    has_vat: normalizeBooleanInput(row.has_vat),
+    default_vat_rate: toNumber(row.default_vat_rate),
+  }))
+  if (entity === "units") return rows.map(row => ({ ...row, name: row.name ?? row.name_vi ?? row.name_en ?? "" }))
+  if (entity === "products") return rows.map(row => ({
+    ...row,
+    qty: toNumber(row.qty),
+    reserved: toNumber(row.reserved),
+    available: toNumber(row.available),
+    average_cost: toNumber(row.average_cost ?? row.cost),
+    updated: row.updated_at,
+    updatedBy: row.updated_by,
+  }))
+  return rows
+}
+
+export async function fetchMasterDataPage(
+  entity: MasterDataEntity,
+  options: Ctx & { search?: string; limit?: number; offset?: number; status?: string | null; category?: string | null },
+) {
+  const { isDemo, orgId, search = "", limit = 20, offset = 0, status = null, category = null } = options
+  if (isDemo) {
+    const rawRows = entity === "products"
+      ? ((await fetchProducts({ isDemo: true, orgId })).data ?? [])
+      : entity === "categories" ? mock.categories
+      : entity === "customers" ? mock.customers
+      : entity === "suppliers" ? mock.suppliers
+      : entity === "warehouses" ? mock.warehouses
+      : entity === "brands" ? mock.brands
+      : mock.units
+    const keyword = search.trim().toLocaleLowerCase("vi")
+    const matchingRows = (rawRows as Record<string, any>[])
+      .filter(row => !status || String(row.status ?? "").toLowerCase() === status.toLowerCase())
+      .filter(row => !category || String(row.category ?? "") === category)
+      .filter(row => !keyword || [row.code, row.sku, row.name, row.name_vi, row.name_en, row.phone, row.email, row.barcode]
+        .some(value => String(value ?? "").toLocaleLowerCase("vi").includes(keyword)))
+    const items = normalizeMasterRows(entity, matchingRows.slice(offset, offset + limit))
+    return { data: { items, total: matchingRows.length, limit, offset, hasMore: offset + items.length < matchingRows.length } satisfies MasterDataPage, error: null }
+  }
+  if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
+  const { data, error } = await (supabase as any).rpc("get_master_data_page", {
+    p_entity: entity,
+    p_search: search || null,
+    p_limit: limit,
+    p_offset: offset,
+    p_status: status || null,
+    p_category: category || null,
   })
-  return { data: ((data as any)?.items ?? []) as LookupItem[], error }
+  if (error) return { data: null, error }
+  const result = (data ?? {}) as any
+  const items = normalizeMasterRows(entity, (result.items ?? []) as Record<string, any>[])
+  return { data: {
+    items,
+    total: toNumber(result.total, items.length),
+    limit: toNumber(result.limit, limit),
+    offset: toNumber(result.offset, offset),
+    hasMore: Boolean(result.hasMore ?? offset + items.length < toNumber(result.total, items.length)),
+  } satisfies MasterDataPage, error: null }
 }
 
 export async function fetchDemoScenarios({ isDemo, orgId }: Ctx) {
@@ -438,7 +545,7 @@ export async function runDemoScenario(
   { isDemo, orgId }: Ctx,
 ) {
   if (isDemo || !orgId) return { data: null, error: new Error("Authentication is required") }
-  const { data, error } = await (supabase as any).rpc("run_demo_scenario", {
+  const { data, error } = await (supabase as any).rpc("run_demo_scenario_v2", {
     p_scenario: scenario,
     p_idempotency_key: idempotencyKey,
   })
@@ -1661,17 +1768,36 @@ function referenceRecordTime(record: QuotationReferenceRecord) {
   return new Date(record.referenceDate ?? 0).getTime()
 }
 
+function quotationDateToken(value: unknown) {
+  const dateKey = formatDateKeyUtc7(value as string | Date | undefined)
+  const [year, month, day] = dateKey.split("-")
+  return `${day}${month}${year}`
+}
+
+function nextDemoQuotationLabel(dateValue: unknown, excludeId?: unknown) {
+  const prefix = `H2T-${quotationDateToken(dateValue)}-`
+  const maxSequence = (mock.quotations as any[]).reduce((maximum, quotation) => {
+    if (excludeId != null && String(quotation.id) === String(excludeId)) return maximum
+    const label = String(quotation.quotation_number ?? "")
+    if (!label.startsWith(prefix)) return maximum
+    const sequence = Number(label.slice(prefix.length))
+    return Number.isInteger(sequence) ? Math.max(maximum, sequence) : maximum
+  }, 0)
+  return `${prefix}${maxSequence + 1}`
+}
+
 export async function fetchQuotationReference(
   {
     categoryId,
     customerId,
-    limit = 10,
-  }: { categoryId: string; customerId?: string; limit?: number },
+    limit = 5,
+    excludeQuotationId,
+  }: { categoryId: string; customerId?: string; limit?: number; excludeQuotationId?: string },
   { isDemo, orgId }: Ctx,
-) {
+): Promise<{ data: QuotationReferenceContext | null; error: any }> {
   if (!categoryId) {
     return {
-      data: { primary: null, matchType: "NONE", sameCustomer: [], recentSales: [], recentImports: [], categoryDefault: null } as QuotationReferenceContext,
+      data: { primary: null, matchType: "NONE", sameCustomer: [], recentSales: [], recentImports: [], sameCustomerTotal: 0, recentSalesTotal: 0, recentImportsTotal: 0, categoryDefault: null } as QuotationReferenceContext,
       error: null,
     }
   }
@@ -1681,8 +1807,9 @@ export async function fetchQuotationReference(
     const productById = new Map(products.map(product => [normalizeDemoId(product.id), product]))
     const quotationsResult = await fetchQuotations({ isDemo: true, orgId })
     const validStatuses = new Set(["sent", "accepted", "converted", "awaiting delivery", "delivered"])
-    const recentSales = ((quotationsResult.data ?? []) as any[]).flatMap(quotation => {
+    const allRecentSales = ((quotationsResult.data ?? []) as any[]).flatMap(quotation => {
       if (!validStatuses.has(String(quotation.status).toLowerCase())) return []
+      if (excludeQuotationId && String(quotation.id) === String(excludeQuotationId)) return []
       return (quotation.items ?? []).flatMap((item: any) => {
         const product = productById.get(normalizeDemoId(item.product_id))
         const itemCategoryId = item.category_id ?? product?.category_id
@@ -1696,7 +1823,7 @@ export async function fetchQuotationReference(
           referenceType: "SALE" as const,
           quotationItemId: String(item.id),
           quotationId: String(quotation.id),
-          quotationLabel: String(quotation.id),
+          quotationLabel: String(quotation.quotation_number ?? quotation.id),
           quotationStatus: quotation.status,
           productId: product?.id ?? null,
           productName: product?.name ?? item.product_name ?? item.name ?? item.category_name,
@@ -1724,11 +1851,11 @@ export async function fetchQuotationReference(
       const priorityA = ["accepted", "converted", "awaiting delivery", "delivered"].includes(String(a.quotationStatus).toLowerCase()) ? 0 : 1
       const priorityB = ["accepted", "converted", "awaiting delivery", "delivered"].includes(String(b.quotationStatus).toLowerCase()) ? 0 : 1
       return priorityA - priorityB || referenceRecordTime(b) - referenceRecordTime(a)
-    }).slice(0, Math.max(1, Math.min(limit, 20)))
-    const sameCustomer = recentSales.filter(record =>
+    })
+    const allSameCustomer = allRecentSales.filter(record =>
       customerId && normalizeDemoId(record.customerId) === normalizeDemoId(customerId),
     )
-    const recentImports = (mock.importRecords as any[]).flatMap(row => {
+    const allRecentImports = (mock.importRecords as any[]).flatMap(row => {
       const product = productById.get(normalizeDemoId(row.product_id))
       if (String(product?.category_id) !== String(categoryId)) return []
       return [{
@@ -1751,7 +1878,10 @@ export async function fetchQuotationReference(
         warehouseName: row.warehouse_name ?? null,
       } satisfies QuotationReferenceRecord]
     }).sort((a, b) => referenceRecordTime(b) - referenceRecordTime(a))
-      .slice(0, Math.max(1, Math.min(limit, 20)))
+    const pageLimit = Math.max(1, Math.min(limit, 20))
+    const sameCustomer = allSameCustomer.slice(0, pageLimit)
+    const recentSales = allRecentSales.slice(0, pageLimit)
+    const recentImports = allRecentImports.slice(0, pageLimit)
     const category = (mock.categories as any[]).find(row => String(row.id) === String(categoryId))
     const categoryDefault = category ? {
       referenceType: "CATEGORY_DEFAULT" as const,
@@ -1764,7 +1894,7 @@ export async function fetchQuotationReference(
       hasVat: normalizeBooleanInput(category.has_vat),
       referenceDate: null,
     } satisfies QuotationReferenceRecord : null
-    const primary = sameCustomer[0] ?? recentSales[0] ?? categoryDefault
+    const primary = allSameCustomer[0] ?? allRecentSales[0] ?? categoryDefault
     return {
       data: {
         primary,
@@ -1774,25 +1904,118 @@ export async function fetchQuotationReference(
         sameCustomer,
         recentSales,
         recentImports,
+        sameCustomerTotal: allSameCustomer.length,
+        recentSalesTotal: allRecentSales.length,
+        recentImportsTotal: allRecentImports.length,
         categoryDefault,
       } as QuotationReferenceContext,
       error: productResult.error ?? quotationsResult.error,
     }
   }
   if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
-  const { data, error } = await (supabase as any).rpc("get_quotation_reference_v2", {
+  const pageLimit = Math.max(1, Math.min(limit, 20))
+  const [baseResult, sameResult, recentResult, importResult] = await Promise.all([
+    (supabase as any).rpc("get_quotation_reference_v2", {
+      p_category_id: categoryId,
+      p_customer_id: customerId || null,
+      p_limit: 1,
+    }),
+    fetchQuotationReferencePage({ categoryId, customerId, section: "sameCustomer", limit: pageLimit, offset: 0, excludeQuotationId }, { isDemo: false, orgId }),
+    fetchQuotationReferencePage({ categoryId, customerId, section: "recentSales", limit: pageLimit, offset: 0, excludeQuotationId }, { isDemo: false, orgId }),
+    fetchQuotationReferencePage({ categoryId, customerId, section: "recentImports", limit: pageLimit, offset: 0, excludeQuotationId }, { isDemo: false, orgId }),
+  ])
+  const error = baseResult.error ?? sameResult.error ?? recentResult.error ?? importResult.error
+  if (error) return { data: null, error }
+  const base = (baseResult.data ?? {}) as Partial<QuotationReferenceContext>
+  const sameCustomer = sameResult.data?.items ?? []
+  const recentSales = recentResult.data?.items ?? []
+  const recentImports = importResult.data?.items ?? []
+  const categoryDefault = base.categoryDefault ?? null
+  return { data: {
+    primary: sameCustomer[0] ?? recentSales[0] ?? categoryDefault,
+    matchType: sameCustomer.length ? "CUSTOMER_AND_CATEGORY"
+      : recentSales.length ? "CATEGORY_ONLY"
+      : categoryDefault ? "CATEGORY_DEFAULT" : "NONE",
+    sameCustomer,
+    recentSales,
+    recentImports,
+    sameCustomerTotal: sameResult.data?.total ?? sameCustomer.length,
+    recentSalesTotal: recentResult.data?.total ?? recentSales.length,
+    recentImportsTotal: importResult.data?.total ?? recentImports.length,
+    categoryDefault,
+  } satisfies QuotationReferenceContext, error: null }
+}
+
+export async function fetchQuotationReferencePage(
+  {
+    categoryId,
+    customerId,
+    section,
+    limit = 5,
+    offset = 0,
+    excludeQuotationId,
+  }: {
+    categoryId: string
+    customerId?: string
+    section: QuotationReferenceSection
+    limit?: number
+    offset?: number
+    excludeQuotationId?: string
+  },
+  { isDemo, orgId }: Ctx,
+): Promise<{ data: QuotationReferencePage | null; error: any }> {
+  const pageLimit = Math.max(1, Math.min(limit, 20))
+  if (isDemo) {
+    const result = await fetchQuotationReference({
+      categoryId,
+      customerId,
+      limit: 20,
+      excludeQuotationId,
+    }, { isDemo: true, orgId })
+    if (result.error || !result.data) return { data: null, error: result.error }
+    const allItems = section === "sameCustomer" ? result.data.sameCustomer
+      : section === "recentSales" ? result.data.recentSales : result.data.recentImports
+    const total = section === "sameCustomer" ? result.data.sameCustomerTotal
+      : section === "recentSales" ? result.data.recentSalesTotal : result.data.recentImportsTotal
+    const items = allItems.slice(offset, offset + pageLimit)
+    return { data: { items, total, limit: pageLimit, offset, hasMore: offset + items.length < total } satisfies QuotationReferencePage, error: null }
+  }
+  if (!orgId) return { data: null, error: new Error("Authenticated organization is required") }
+  const sectionName = section === "sameCustomer" ? "SAME_CUSTOMER"
+    : section === "recentSales" ? "RECENT_SALES" : "RECENT_IMPORTS"
+  const { data, error } = await (supabase as any).rpc("get_quotation_reference_page", {
     p_category_id: categoryId,
     p_customer_id: customerId || null,
-    p_limit: Math.max(1, Math.min(limit, 20)),
+    p_section: sectionName,
+    p_limit: pageLimit,
+    p_offset: Math.max(0, offset),
+    p_exclude_quotation_id: excludeQuotationId || null,
   })
-  return { data: data as QuotationReferenceContext | null, error }
+  if (error) return { data: null, error }
+  const result = (data ?? {}) as any
+  const items = (result.items ?? []) as QuotationReferenceRecord[]
+  const total = toNumber(result.total, items.length)
+  return { data: {
+    items,
+    total,
+    limit: toNumber(result.limit, pageLimit),
+    offset: toNumber(result.offset, offset),
+    hasMore: Boolean(result.hasMore ?? offset + items.length < total),
+  } satisfies QuotationReferencePage, error: null }
 }
 
 // --- Quotations ---
 export async function fetchQuotations({ isDemo, orgId }: Ctx) {
-  if (isDemo) return {
-    data: (mock.quotations as any[]).map(quotation => ({
+  if (isDemo) {
+    const fallbackSequenceByDate = new Map<string, number>()
+    return {
+    data: (mock.quotations as any[]).map(quotation => {
+      const dateToken = quotationDateToken(quotation.date)
+      const nextSequence = (fallbackSequenceByDate.get(dateToken) ?? 0) + 1
+      fallbackSequenceByDate.set(dateToken, nextSequence)
+      return ({
       ...quotation,
+      quotation_number: quotation.quotation_number ?? `H2T-${dateToken}-${nextSequence}`,
       customer_id: quotation.customer_id ?? "",
       customer_name: quotation.customer_name ?? quotation.customer ?? "",
       warehouse_id: quotation.warehouse_id ?? mock.warehouses[0]?.code ?? "",
@@ -1823,8 +2046,9 @@ export async function fetchQuotations({ isDemo, orgId }: Ctx) {
         }
       }),
       allocations: quotation.allocations ?? [],
-    })),
+    })}),
     error: null,
+  }
   }
   const { data, error } = await safeSelect("quotations", "*", query => orgId ? query.eq("org_id", orgId).order("date", { ascending: false }) : query)
   const quotationRows = data as any[] ?? []
@@ -2024,7 +2248,7 @@ export async function upsertQuotation(payload: Record<string, unknown>, { isDemo
     const row = demoUpsert(mock.quotations, payload as Record<string, any>) as any
     if (Array.isArray(payload.items)) row.items = payload.items
     row.version = existingVersion + 1
-    row.quotation_number ||= `QT-${String(row.date || formatDateKeyUtc7()).replace(/-/g, "")}-${String(row.id).slice(-8).toUpperCase()}`
+    row.quotation_number ||= nextDemoQuotationLabel(row.date || formatDateKeyUtc7(), row.id)
     row.title ||= defaultQuotationSettings.defaultTitle
     return { error: null }
   }

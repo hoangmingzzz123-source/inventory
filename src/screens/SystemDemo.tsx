@@ -31,6 +31,7 @@ type ResultSummary = {
   demoRunId: string
   created?: Record<string, number>
   links?: Record<string, string | null>
+  verification?: Record<string, string | number | boolean | null>
 }
 
 export default function SystemDemo({
@@ -195,6 +196,12 @@ export default function SystemDemo({
             <div className="mt-3 flex flex-wrap gap-2">
               {Object.entries(lastResult.created ?? {}).map(([key, value]) => <span key={key} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[10px] text-emerald-800">{key}: <b>{value}</b></span>)}
             </div>
+            {lastResult.verification && <div className="mt-3 rounded-xl border border-emerald-200 bg-white p-3">
+              <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-emerald-700">{vi ? "Kết quả kiểm chứng" : "Verification"}</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(lastResult.verification).map(([key, value]) => <span key={key} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] text-emerald-800">{key}: <b>{String(value ?? "—")}</b></span>)}
+              </div>
+            </div>}
             <div className="mt-3 flex gap-2">
               {lastResult.links?.quotationId && <button onClick={() => openQuotation(lastResult.links!.quotationId!)} className="flex h-8 items-center gap-1 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white"><FileText size={12} />{vi ? "Xem báo giá" : "View quotation"}</button>}
               {lastResult.links?.warehouseId && <button onClick={() => onNavigate("stock-balance")} className="flex h-8 items-center gap-1 rounded-lg border border-emerald-300 bg-white px-3 text-xs font-semibold text-emerald-800"><Warehouse size={12} />{vi ? "Xem tồn kho" : "View inventory"}</button>}

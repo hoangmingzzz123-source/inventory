@@ -155,7 +155,7 @@ function htmlLines(value: unknown) {
 }
 
 export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
-  const itemRows = model.items.map(item => `<tr>
+  const renderItemRows = (items: QuotationRenderItem[]) => items.map(item => `<tr>
     <td class="center">${item.index}</td>
     <td>${escapeHtml(item.proposedGoods)}</td>
     <td>${escapeHtml(item.offeredGoods)}</td>
@@ -172,30 +172,25 @@ export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
   const shipping = model.terms.includeShipping
     ? "Báo giá đã bao gồm chi phí vận chuyển."
     : "Báo giá chưa bao gồm chi phí vận chuyển."
-  return `<article class="quotation-document">
-    <style>
-      .quotation-document{width:1120px;min-height:794px;padding:34px;background:#fff;color:#111827;font-family:Arial,sans-serif;font-size:12px;line-height:1.4;box-sizing:border-box}
-      .quotation-document *{box-sizing:border-box}.quotation-document .company{display:grid;grid-template-columns:100px 1fr 320px;gap:16px;align-items:start}.quotation-document .logo{width:94px;height:64px;object-fit:contain}.quotation-document h1{margin:20px 0 14px;text-align:center;font-size:22px;color:#b91c1c}.quotation-document h2{margin:0;font-size:16px;color:#1d4ed8}.quotation-document .english{font-size:11px;font-weight:700;color:#475569}.quotation-document .meta{display:grid;grid-template-columns:1fr 1fr;gap:5px 28px;margin:12px 0 16px;padding:11px;border:1px solid #94a3b8}.quotation-document .meta b{display:inline-block;min-width:116px}.quotation-document table{width:100%;border-collapse:collapse;table-layout:fixed}.quotation-document th,.quotation-document td{border:1px solid #475569;padding:5px 4px;vertical-align:middle;overflow-wrap:anywhere}.quotation-document th{background:#dbeafe;text-align:center;font-size:10px}.quotation-document td{font-size:10px}.quotation-document .center{text-align:center}.quotation-document .number{text-align:right;white-space:nowrap}.quotation-document .strong{font-weight:700}.quotation-document .totals{margin:14px 0 0 auto;width:390px}.quotation-document .total-row{display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #cbd5e1}.quotation-document .grand{font-size:15px;font-weight:700;color:#b91c1c;border-top:2px solid #b91c1c}.quotation-document .terms{margin-top:18px;border:1px solid #94a3b8;padding:10px}.quotation-document .signatures{display:grid;grid-template-columns:1fr 1fr;gap:100px;margin-top:22px;text-align:center;font-weight:700}.quotation-document .muted{color:#64748b}
-    </style>
-    <header class="company">
+  const header = (compact = false) => `<header class="company${compact ? " compact" : ""}">
       <div>${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo" />` : ""}</div>
       <div><h2>${escapeHtml(model.company.name)}</h2><div class="english">${escapeHtml(model.company.englishName)}</div><div>${escapeHtml(model.company.address)}</div><div>${escapeHtml(model.company.email)}${model.company.phone ? ` · ${escapeHtml(model.company.phone)}` : ""}</div></div>
       <div><b>Tài khoản:</b> ${escapeHtml(model.company.bankAccountName)}<br/><b>Số TK:</b> ${escapeHtml(model.company.bankAccountNumber)}<br/><b>Ngân hàng:</b> ${escapeHtml(model.company.bankName)}<br/><b>Chi nhánh:</b> ${escapeHtml(model.company.bankBranch)}</div>
-    </header>
-    <h1>${escapeHtml(model.title)}</h1>
-    <section class="meta">
+    </header>`
+  const title = `<h1>${escapeHtml(model.title)}</h1>`
+  const meta = `<section class="meta">
       <div><b>Khách hàng:</b> ${escapeHtml(model.customer.name)}</div><div><b>Báo giá số:</b> ${escapeHtml(model.quotationNumber)}</div>
       <div><b>Người liên hệ:</b> ${escapeHtml(model.customer.representative)}</div><div><b>Ngày:</b> ${escapeHtml(model.date)}</div>
       <div><b>Địa chỉ:</b> ${escapeHtml(model.customer.address)}</div><div><b>Hiệu lực đến:</b> ${escapeHtml(model.validUntil)}</div>
       <div><b>Điện thoại:</b> ${escapeHtml(model.customer.phone)}</div><div><b>Nhân viên báo giá:</b> ${escapeHtml(model.salesperson)}</div>
       <div><b>Email:</b> ${escapeHtml(model.customer.email)}</div><div><b>SĐT nhân viên:</b> ${escapeHtml(model.salespersonPhone)}</div>
       <div><b>Dự án:</b> ${escapeHtml(model.project)}</div><div><b>MST:</b> ${escapeHtml(model.customer.taxCode)}</div>
-    </section>
-    <table><colgroup><col style="width:3%"/><col style="width:12%"/><col style="width:15%"/><col style="width:13%"/><col style="width:6%"/><col style="width:5%"/><col style="width:9%"/><col style="width:10%"/><col style="width:6%"/><col style="width:8%"/><col style="width:9%"/><col style="width:9%"/></colgroup>
+    </section>`
+  const table = (items: QuotationRenderItem[]) => `<table><colgroup><col style="width:3%"/><col style="width:12%"/><col style="width:15%"/><col style="width:13%"/><col style="width:5%"/><col style="width:5%"/><col style="width:8%"/><col style="width:11%"/><col style="width:5%"/><col style="width:8%"/><col style="width:10%"/><col style="width:5%"/></colgroup>
       <thead><tr><th>STT</th><th>Hàng hóa đề xuất</th><th>Hàng hóa cung cấp</th><th>Quy cách / Nhãn hiệu</th><th>Đơn vị</th><th>KL</th><th>Đơn giá</th><th>Thành tiền trước thuế</th><th>VAT (%)</th><th>Tiền thuế</th><th>Thành tiền sau thuế</th><th>Ghi chú</th></tr></thead>
-      <tbody>${itemRows || '<tr><td colspan="12" class="center muted">Chưa có hàng hóa</td></tr>'}</tbody>
-    </table>
-    <section class="totals">
+      <tbody>${renderItemRows(items) || '<tr><td colspan="12" class="center muted">Chưa có hàng hóa</td></tr>'}</tbody>
+    </table>`
+  const summary = `<section class="totals">
       <div class="total-row"><span>Cộng tiền hàng</span><b>${formatVnd(model.totals.subtotal)}</b></div>
       <div class="total-row"><span>Chiết khấu</span><b>${formatVnd(model.totals.discount)}</b></div>
       <div class="total-row"><span>Tiền trước VAT</span><b>${formatVnd(model.totals.beforeVat)}</b></div>
@@ -203,8 +198,24 @@ export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
       <div class="total-row grand"><span>TỔNG THANH TOÁN</span><span>${formatVnd(model.totals.grandTotal)}</span></div>
     </section>
     <section class="terms"><b>Điều khoản:</b><br/>• ${shipping}<br/>• ${htmlLines(model.terms.payment)}<br/>• ${htmlLines(model.terms.delivery)}<br/>• Báo giá có hiệu lực đến ${escapeHtml(model.validUntil)}.${model.terms.footerNotes ? `<br/>• ${htmlLines(model.terms.footerNotes)}` : ""}${model.terms.quotationNotes ? `<br/><b>Ghi chú báo giá:</b> ${htmlLines(model.terms.quotationNotes)}` : ""}</section>
-    <section class="signatures"><div>ĐẠI DIỆN KHÁCH HÀNG<br/><span class="muted">(Ký, ghi rõ họ tên)</span></div><div>ĐẠI DIỆN NHÀ CUNG CẤP<br/><span class="muted">(Ký, ghi rõ họ tên)</span></div></section>
-  </article>`
+    <section class="signatures"><div><b>ĐẠI DIỆN KHÁCH HÀNG</b><span>(Ký, ghi rõ họ tên)</span></div><div><b>ĐẠI DIỆN CÔNG TY</b><span>(Ký, ghi rõ họ tên, đóng dấu)</span></div></section>`
+
+  const singlePage = model.items.length <= 4
+  const detailPages = singlePage
+    ? [`<article class="quotation-document">${header()}${title}${meta}${table(model.items)}${summary}</article>`]
+    : Array.from({ length: Math.ceil(model.items.length / 9) }, (_, pageIndex) => {
+        const items = model.items.slice(pageIndex * 9, pageIndex * 9 + 9)
+        return `<article class="quotation-document">${pageIndex === 0 ? `${header()}${title}${meta}` : `${header(true)}<div class="continuation">${escapeHtml(model.quotationNumber)} · Trang chi tiết ${pageIndex + 1}</div>`}${table(items)}<div class="page-note">Tiếp theo / Continued</div></article>`
+      })
+  if (!singlePage) detailPages.push(`<article class="quotation-document summary-page">${header(true)}${title}<div class="summary-reference"><b>Báo giá số:</b> ${escapeHtml(model.quotationNumber)} &nbsp; · &nbsp; <b>Khách hàng:</b> ${escapeHtml(model.customer.name)}</div>${summary}</article>`)
+
+  return `<div class="quotation-render">
+    <style>
+      .quotation-render{display:flex;flex-direction:column;gap:20px;background:transparent}.quotation-document{width:1120px;min-height:794px;padding:26px 32px;background:#fff;color:#111827;font-family:Arial,sans-serif;font-size:11px;line-height:1.32;box-sizing:border-box;page-break-after:always}.quotation-document:last-child{page-break-after:auto}
+      .quotation-document *{box-sizing:border-box}.quotation-document .company{display:grid;grid-template-columns:90px 1fr 305px;gap:14px;align-items:start;min-height:58px}.quotation-document .company.compact{min-height:48px;border-bottom:1px solid #cbd5e1;margin-bottom:12px;padding-bottom:8px}.quotation-document .logo{width:84px;height:56px;object-fit:contain}.quotation-document h1{margin:10px 0 9px;text-align:center;font-size:20px;color:#b91c1c;line-height:1.15}.quotation-document h2{margin:0;font-size:15px;color:#1d4ed8}.quotation-document .english{font-size:10px;font-weight:700;color:#475569}.quotation-document .meta{display:grid;grid-template-columns:1fr 1fr;gap:3px 24px;margin:7px 0 10px;padding:8px 10px;border:1px solid #94a3b8;font-size:10.5px}.quotation-document .meta b{display:inline-block;min-width:105px}.quotation-document table{width:100%;border-collapse:collapse;table-layout:fixed}.quotation-document th,.quotation-document td{border:1px solid #475569;padding:4px 3px;vertical-align:middle;overflow-wrap:anywhere}.quotation-document th{background:#dbeafe;text-align:center;font-size:9px;line-height:1.2}.quotation-document td{font-size:9.5px;min-height:27px}.quotation-document .center{text-align:center}.quotation-document .number{text-align:right;white-space:nowrap}.quotation-document .strong{font-weight:700}.quotation-document .totals{margin:9px 0 0 auto;width:390px}.quotation-document .total-row{display:flex;justify-content:space-between;padding:3px 8px;border-bottom:1px solid #cbd5e1;min-height:20px}.quotation-document .grand{font-size:14px;font-weight:700;color:#b91c1c;border-top:2px solid #b91c1c}.quotation-document .terms{margin-top:10px;border:1px solid #94a3b8;padding:7px 9px;font-size:10px}.quotation-document .signatures{display:grid;grid-template-columns:1fr 1fr;gap:110px;margin-top:16px;text-align:center;min-height:118px}.quotation-document .signatures>div{display:flex;flex-direction:column;justify-content:space-between;align-items:center}.quotation-document .signatures span{font-style:italic;font-weight:400;color:#64748b}.quotation-document .muted{color:#64748b}.quotation-document .continuation{text-align:right;margin:-5px 0 8px;font-size:10px;color:#64748b}.quotation-document .page-note{margin-top:10px;text-align:right;font-size:10px;color:#64748b}.quotation-document.summary-page .totals{margin-top:30px}.quotation-document.summary-page .terms{margin-top:20px}.quotation-document.summary-page .signatures{margin-top:34px;min-height:190px}.quotation-document .summary-reference{margin:14px 0 20px;border:1px solid #94a3b8;padding:9px 12px}
+    </style>
+    ${detailPages.join("")}
+  </div>`
 }
 
 function quotationFileName(model: QuotationRenderModel, extension: string) {
@@ -217,8 +228,11 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
   const workbook = new ExcelJS.Workbook()
   workbook.creator = model.company.name
   workbook.created = new Date()
-  const sheet = workbook.addWorksheet("Báo giá", { pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 } })
-  sheet.columns = [5, 22, 28, 24, 10, 9, 15, 18, 10, 15, 18, 22].map(width => ({ width }))
+  const sheet = workbook.addWorksheet("Báo giá", { pageSetup: {
+    orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+    margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 },
+  } })
+  sheet.columns = [10, 22, 28, 24, 10, 9, 15, 18, 10, 15, 18, 22].map(width => ({ width }))
   const border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } } as const
   const logo = model.company.logoUrl || fallbackLogoUrl
   if (logo) {
@@ -266,6 +280,21 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
   })
   const termsRow = sheet.addRow([`Điều khoản:\n• ${model.terms.includeShipping ? "Báo giá đã bao gồm" : "Báo giá chưa bao gồm"} chi phí vận chuyển.\n• ${model.terms.payment}\n• ${model.terms.delivery}\n• Báo giá có hiệu lực đến ${model.validUntil}.\n${model.terms.footerNotes}\n${model.terms.quotationNotes}`])
   sheet.mergeCells(termsRow.number, 1, termsRow.number, 12); termsRow.height = 82; termsRow.getCell(1).alignment = { wrapText: true, vertical: "top" }
+  const signatureTitleRow = sheet.addRow([])
+  sheet.mergeCells(signatureTitleRow.number, 1, signatureTitleRow.number, 6)
+  sheet.mergeCells(signatureTitleRow.number, 7, signatureTitleRow.number, 12)
+  signatureTitleRow.getCell(1).value = "ĐẠI DIỆN KHÁCH HÀNG"
+  signatureTitleRow.getCell(7).value = "ĐẠI DIỆN CÔNG TY"
+  signatureTitleRow.getCell(1).alignment = signatureTitleRow.getCell(7).alignment = { horizontal: "center" }
+  signatureTitleRow.getCell(1).font = signatureTitleRow.getCell(7).font = { bold: true }
+  const signatureSpaceRow = sheet.addRow([]); signatureSpaceRow.height = 86
+  const signatureCaptionRow = sheet.addRow([])
+  sheet.mergeCells(signatureCaptionRow.number, 1, signatureCaptionRow.number, 6)
+  sheet.mergeCells(signatureCaptionRow.number, 7, signatureCaptionRow.number, 12)
+  signatureCaptionRow.getCell(1).value = "(Ký, ghi rõ họ tên)"
+  signatureCaptionRow.getCell(7).value = "(Ký, ghi rõ họ tên, đóng dấu)"
+  signatureCaptionRow.getCell(1).alignment = signatureCaptionRow.getCell(7).alignment = { horizontal: "center" }
+  signatureCaptionRow.getCell(1).font = signatureCaptionRow.getCell(7).font = { italic: true, color: { argb: "FF64748B" } }
   sheet.views = [{ state: "frozen", ySplit: 12 }]
   await saveExcelWorkbook(workbook, quotationFileName(model, "xlsx"))
 }
@@ -277,13 +306,18 @@ export async function exportQuotationPdf(model: QuotationRenderModel, fallbackLo
   container.style.position = "fixed"; container.style.left = "-12000px"; container.style.top = "0"
   window.document.body.appendChild(container)
   try {
-    const canvas = await html2canvas(container.firstElementChild as HTMLElement, { scale: 2, backgroundColor: "#ffffff", useCORS: true })
+    const pages = Array.from(container.querySelectorAll<HTMLElement>(".quotation-document"))
+    if (!pages.length) throw new Error("Quotation preview did not produce any pages")
     const document = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" })
-    const pageWidth = document.internal.pageSize.getWidth(); const pageHeight = document.internal.pageSize.getHeight()
-    const imageHeight = canvas.height * pageWidth / canvas.width
-    for (let offset = 0; offset < imageHeight; offset += pageHeight) {
-      if (offset > 0) document.addPage()
-      document.addImage(canvas, "PNG", 0, -offset, pageWidth, imageHeight)
+    const pageWidth = document.internal.pageSize.getWidth()
+    const pageHeight = document.internal.pageSize.getHeight()
+    for (let index = 0; index < pages.length; index += 1) {
+      const canvas = await html2canvas(pages[index], { scale: 2, backgroundColor: "#ffffff", useCORS: true })
+      if (index > 0) document.addPage()
+      const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height)
+      const imageWidth = canvas.width * scale
+      const imageHeight = canvas.height * scale
+      document.addImage(canvas, "PNG", (pageWidth - imageWidth) / 2, 0, imageWidth, imageHeight)
     }
     document.save(quotationFileName(model, "pdf"))
   } finally { container.remove() }

@@ -8,6 +8,7 @@ import {
 import { useState } from "react"
 import { useAuth } from "../contexts/AuthContext"
 import { useLang } from "../i18n/LangContext"
+import { isScreenFeatureEnabled } from "../lib/features"
 
 type NavChild = { id: string; labelKey: string; icon: React.ReactNode }
 type NavItem = { id: string; labelKey: string; icon: React.ReactNode; children?: NavChild[] }
@@ -123,6 +124,7 @@ export default function Sidebar({ active, onNavigate, collapsed, showSystemDemo 
     "system-demo": "Dashboard",
   }
   const canAccess = (screen: string) => {
+    if (!isScreenFeatureEnabled(screen)) return false
     if (!profile) return true
     if (screen === "system-demo") return showSystemDemo
     if (role === "admin") return true

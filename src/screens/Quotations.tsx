@@ -4,7 +4,7 @@ import { useLang } from "../i18n/LangContext"
 import { exportXlsx, Toolbar } from "./GenericList"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { assertQuotationVersion, cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchCompanySettings, fetchLookup, fetchQuotationAllocationContext, fetchQuotationCustomerSnapshot, fetchQuotationReference, fetchQuotationSettings, fetchQuotations, upsertQuotation, deleteQuotation, type QuotationAllocationContext, type QuotationReferenceContext, type QuotationReferenceRecord } from "../lib/dataService"
+import { assertQuotationVersion, cancelQuotationAllocation, convertQuotationAllocations, deliverQuotationAllocation, fetchCompanySettings, fetchLookup, fetchQuotationAllocationContext, fetchQuotationCustomerSnapshot, fetchQuotationReference, fetchQuotationReferencePage, fetchQuotationSettings, fetchQuotations, upsertQuotation, deleteQuotation, type QuotationAllocationContext, type QuotationReferenceContext, type QuotationReferencePage, type QuotationReferenceRecord, type QuotationReferenceSection } from "../lib/dataService"
 import { defaultQuotationSettings } from "../lib/companySettings"
 import logoUrl from "../data/logo.png"
 import { formatDateKeyUtc7 } from "../lib/dateUtils"
@@ -62,6 +62,20 @@ type QuotationLookupLoader = (
   offset: number,
   limit: number,
 ) => Promise<AsyncSelectPage<QuotationLookupOption>>
+
+type QuotationReferenceLoader = (
+  categoryId: string,
+  customerId: string,
+  excludeQuotationId?: string,
+) => Promise<QuotationReferenceContext>
+
+type QuotationReferencePageLoader = (
+  categoryId: string,
+  customerId: string,
+  section: QuotationReferenceSection,
+  offset: number,
+  excludeQuotationId?: string,
+) => Promise<QuotationReferencePage>
 
 function toProductOptions(products: any[]): ProductOption[] {
   return products.map(product => ({
@@ -172,7 +186,9 @@ function QuotationReferencePanel({
   loading,
   error,
   isView,
+  loadingMore,
   onRetry,
+  onLoadMore,
   onUseReference,
   onApplyPrice,
 }: {
@@ -182,7 +198,9 @@ function QuotationReferencePanel({
   loading: boolean
   error: string
   isView: boolean
+  loadingMore: QuotationReferenceSection | null
   onRetry: () => void
+  onLoadMore: (section: QuotationReferenceSection) => void
   onUseReference: (record: QuotationReferenceRecord) => void
   onApplyPrice: (record: QuotationReferenceRecord) => void
 }) {
@@ -191,6 +209,11 @@ function QuotationReferencePanel({
   const recentSales = context?.recentSales ?? []
   const recentImports = context?.recentImports ?? []
   const records = tab === "same" ? sameCustomer : tab === "recent" ? recentSales : recentImports
+  const section = tab === "same" ? "sameCustomer" : tab === "recent" ? "recentSales" : "recentImports"
+  const total = section === "sameCustomer" ? context?.sameCustomerTotal ?? sameCustomer.length
+    : section === "recentSales" ? context?.recentSalesTotal ?? recentSales.length
+    : context?.recentImportsTotal ?? recentImports.length
+  const hasMore = records.length < total
   const selectedIdentity = referenceIdentity(item?.reference)
   const featuredRecord = item?.reference ?? context?.primary ?? null
 
@@ -239,8 +262,7 @@ function QuotationReferencePanel({
           <span className="text-slate-500">{vi ? "Lãi tham chiếu" : "Reference margin"}</span><b>{record.marginPct == null ? "—" : `${fmt(Number(record.marginPct))}%`}</b>
           <span className="text-slate-500">VAT</span><b>{fmt(Number(record.vatPct ?? 0))}%</b>
           <span className="text-slate-500">{vi ? "Báo giá" : "Quotation"}</span>
-          <ReferenceLink screen="quotations" value={record.quotationId} label={record.quotationLabel || record.quotationId} exactId />
-          {record.invoiceRef && <><span className="text-slate-500">{vi ? "Hóa đơn" : "Invoice"}</span><ReferenceLink screen="invoices" value={record.invoiceRef} label={record.invoiceRef} /></>}
+          <ReferenceLink screen="quotations" value={record.quotationId} label={record.quotationLabel || (vi ? "Mở báo giá" : "Open quotation")} exactId />
         </> : <>
           <span className="text-slate-500">{vi ? "Nhà cung cấp" : "Supplier"}</span>
           <ReferenceLink screen="suppliers" value={record.supplierName || record.supplierId} label={record.supplierName || record.supplierId} />
@@ -251,7 +273,6 @@ function QuotationReferencePanel({
           <ReferenceLink screen="goods-receipt" value={record.receiptRef} label={record.receiptRef} />
         </>}
         {!isDefault && <><span className="text-slate-500">{vi ? "Ngày" : "Date"}</span><b>{formatReferenceDate(record.referenceDate, vi)}</b></>}
-        {record.warehouseName && <><span className="text-slate-500">{vi ? "Kho" : "Warehouse"}</span><ReferenceLink screen="warehouses" value={record.warehouseName} label={record.warehouseName} /></>}
       </div>
       {!isView && <div className="mt-3 flex gap-1.5 border-t pt-2">
         <button type="button" onClick={() => onUseReference(record)} className="flex-1 rounded-md border border-blue-200 px-2 py-1.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50">
@@ -276,18 +297,22 @@ function QuotationReferencePanel({
         {!loading && !error && context && <>
           {context.matchType === "CATEGORY_ONLY" && <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-800">{vi ? "Chưa có lịch sử cùng khách hàng. Đang dùng báo giá gần nhất của danh mục." : "No history for this customer. Using the latest category quotation."}</div>}
           {context.matchType === "CATEGORY_DEFAULT" && <div className="rounded-lg border border-violet-200 bg-violet-50 p-2 text-[10px] text-violet-800">{vi ? "Không có báo giá trước đó. Hệ thống đang dùng ĐVT, giá và VAT mặc định của danh mục." : "No previous quotation. Category unit, prices, and VAT defaults are being used."}</div>}
-          {item.reference && <div className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-[10px] text-blue-800">{vi ? "Tham chiếu đã chọn sẽ được lưu snapshot cùng dòng báo giá." : "The selected reference will be snapshotted with this quotation line."}</div>}
           {featuredRecord && <div className="space-y-1.5"><div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{item.reference ? (vi ? "Tham chiếu đã chọn" : "Selected reference") : (vi ? "★ Gợi ý ưu tiên" : "★ Primary suggestion")}</div>{renderRecord(featuredRecord)}</div>}
           <div className="grid grid-cols-3 rounded-lg bg-slate-100 p-1">
             {([
-              ["same", vi ? "Cùng khách" : "Same customer", sameCustomer.length],
-              ["recent", vi ? "Gần đây" : "Recent", recentSales.length],
-              ["imports", vi ? "Giá nhập" : "Import prices", recentImports.length],
+              ["same", vi ? "Cùng khách" : "Same customer", context?.sameCustomerTotal ?? sameCustomer.length],
+              ["recent", vi ? "Gần đây" : "Recent", context?.recentSalesTotal ?? recentSales.length],
+              ["imports", vi ? "Giá nhập" : "Import prices", context?.recentImportsTotal ?? recentImports.length],
             ] as const).map(([key, label, count]) => <button type="button" key={key} onClick={() => setTab(key)} className={`rounded-md px-1 py-1.5 text-[9px] font-semibold ${tab === key ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{label} ({count})</button>)}
           </div>
-          <div className="max-h-[360px] space-y-2 overflow-auto pr-1">
-            {records.filter(record => referenceIdentity(record) !== referenceIdentity(featuredRecord)).map(renderRecord)}
-            {records.filter(record => referenceIdentity(record) !== referenceIdentity(featuredRecord)).length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{tab === "imports" ? (vi ? "Chưa có thêm lịch sử giá nhập của danh mục này." : "No additional category import history.") : (vi ? "Chưa có thêm lịch sử bán hàng phù hợp." : "No additional matching sales history.")}</div>}
+          <div className="max-h-[360px] space-y-2 overflow-auto pr-1" onScroll={event => {
+            const target = event.currentTarget
+            if (hasMore && target.scrollHeight - target.scrollTop - target.clientHeight < 56) onLoadMore(section)
+          }}>
+            {records.map(renderRecord)}
+            {records.length === 0 && <div className="rounded-lg border border-dashed p-4 text-center text-xs text-slate-400">{tab === "imports" ? (vi ? "Chưa có lịch sử giá nhập của danh mục này." : "No category import history.") : (vi ? "Chưa có lịch sử bán hàng phù hợp." : "No matching sales history.")}</div>}
+            {loadingMore === section && <div className="py-2 text-center text-[10px] text-slate-500">{vi ? "Đang tải thêm..." : "Loading more..."}</div>}
+            {!loadingMore && hasMore && <button type="button" onClick={() => onLoadMore(section)} className="w-full rounded-md py-2 text-[10px] font-semibold text-blue-600 hover:bg-blue-50">{vi ? `Tải thêm (${records.length}/${total})` : `Load more (${records.length}/${total})`}</button>}
           </div>
         </>}
       </>}
@@ -326,7 +351,7 @@ function QuotationPreviewModal({ model, logo, vi, canExport, onClose, onExport }
   </div>
 }
 
-function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, canExport = true, onLoadLookup, onLookupProducts, onLoadReference }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, canExport?: boolean; onLoadLookup: QuotationLookupLoader; onLookupProducts?: (categoryId: string, warehouseId: string) => Promise<ProductOption[]>; onLoadReference?: (categoryId: string, customerId: string) => Promise<QuotationReferenceContext> }) {
+function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSave, canExport = true, onLoadLookup, onLookupProducts, onLoadReference, onLoadReferencePage }: { onClose: () => void; vi: boolean, mode?: "create" | "edit" | "view", initialData?: any, onSave?: (data: any) => void, canExport?: boolean; onLoadLookup: QuotationLookupLoader; onLookupProducts?: (categoryId: string, warehouseId: string) => Promise<ProductOption[]>; onLoadReference?: QuotationReferenceLoader; onLoadReferencePage?: QuotationReferencePageLoader }) {
   const { profile } = useAuth()
   const { isDemo } = useDemo()
   const [customerId, setCustomerId] = useState(initialData?.customer_id || "")
@@ -345,7 +370,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const [globalDiscount, setGlobalDiscount] = useState(initialData?.discount_val || 0)
   const [discountType, setDiscountType] = useState<"pct" | "amount">(initialData?.discount_type || "pct")
   const [notes, setNotes] = useState(initialData?.notes || "")
-  const [quotationNumber, setQuotationNumber] = useState(initialData?.quotation_number || "")
+  const quotationNumber = initialData?.quotation_number || ""
   const [title, setTitle] = useState(initialData?.title || defaultQuotationSettings.defaultTitle)
   const [project, setProject] = useState(initialData?.project || "")
   const [salespersonPhone, setSalespersonPhone] = useState(initialData?.salesperson_phone || "")
@@ -381,6 +406,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
   const [referenceLoading, setReferenceLoading] = useState(false)
   const [referenceError, setReferenceError] = useState("")
   const [referenceScope, setReferenceScope] = useState("")
+  const [referencePageLoading, setReferencePageLoading] = useState<QuotationReferenceSection | null>(null)
   const referenceRequestRef = useRef(0)
 
   useEffect(() => {
@@ -445,10 +471,10 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
     setReferenceContext(null)
     setReferenceScope("")
     try {
-      const result = await onLoadReference(categoryId, customerId)
+      const result = await onLoadReference(categoryId, customerId, initialData?.id)
       if (referenceRequestRef.current === requestId) {
-        const sameCustomer = result.sameCustomer.filter(record => record.quotationId !== initialData?.id)
-        const recentSales = result.recentSales.filter(record => record.quotationId !== initialData?.id)
+        const sameCustomer = result.sameCustomer
+        const recentSales = result.recentSales
         const primary = sameCustomer[0] ?? recentSales[0] ?? result.categoryDefault ?? null
         setReferenceContext({
           ...result,
@@ -470,6 +496,43 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
       if (referenceRequestRef.current === requestId) setReferenceLoading(false)
     }
   }, [activeItem?.category_id, customerId, initialData?.id, onLoadReference, vi])
+
+  const loadMoreReferences = useCallback(async (section: QuotationReferenceSection) => {
+    if (!referenceContext || !activeItem?.category_id || !onLoadReferencePage || referencePageLoading) return
+    const currentItems = section === "sameCustomer" ? referenceContext.sameCustomer
+      : section === "recentSales" ? referenceContext.recentSales : referenceContext.recentImports
+    const total = section === "sameCustomer" ? referenceContext.sameCustomerTotal
+      : section === "recentSales" ? referenceContext.recentSalesTotal : referenceContext.recentImportsTotal
+    if (currentItems.length >= total) return
+    const scope = `${customerId}:${activeItem.category_id}`
+    setReferencePageLoading(section)
+    try {
+      const page = await onLoadReferencePage(
+        activeItem.category_id,
+        customerId,
+        section,
+        currentItems.length,
+        initialData?.id,
+      )
+      if (scope !== `${customerId}:${activeItem.category_id}`) return
+      setReferenceContext(current => {
+        if (!current) return current
+        const existing = section === "sameCustomer" ? current.sameCustomer
+          : section === "recentSales" ? current.recentSales : current.recentImports
+        const identities = new Set(existing.map(referenceIdentity))
+        const combined = [...existing, ...page.items.filter(record => !identities.has(referenceIdentity(record)))]
+        return section === "sameCustomer"
+          ? { ...current, sameCustomer: combined, sameCustomerTotal: page.total }
+          : section === "recentSales"
+            ? { ...current, recentSales: combined, recentSalesTotal: page.total }
+            : { ...current, recentImports: combined, recentImportsTotal: page.total }
+      })
+    } catch (error: any) {
+      setReferenceError(error?.message ?? (vi ? "Không tải được trang tham chiếu tiếp theo" : "Could not load the next reference page"))
+    } finally {
+      setReferencePageLoading(null)
+    }
+  }, [activeItem?.category_id, customerId, initialData?.id, onLoadReferencePage, referenceContext, referencePageLoading, vi])
 
   useEffect(() => {
     void loadActiveReference()
@@ -739,7 +802,9 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
         discount_val: globalDiscount,
         discount_type: discountType,
         notes,
-        quotation_number: quotationNumber || null,
+        // The database owns the immutable, concurrency-safe public label.
+        // Existing labels are retained by the update trigger; new labels are
+        // allocated only after the quotation has actually been inserted.
         title,
         project,
         salesperson_phone: salespersonPhone,
@@ -791,7 +856,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Số báo giá" : "Quotation number"}</label>
-                <input disabled={isView} value={quotationNumber} onChange={event => setQuotationNumber(event.target.value)} placeholder={vi ? "Tự sinh khi lưu" : "Generated on save"} className="h-9 w-full rounded-lg border px-3 text-sm outline-none disabled:bg-slate-50" style={{ borderColor: "var(--border)" }} />
+                <input disabled value={quotationNumber} placeholder={vi ? "Tự sinh khi lưu" : "Generated on save"} className="h-9 w-full rounded-lg border bg-slate-50 px-3 text-sm text-slate-600 outline-none" style={{ borderColor: "var(--border)" }} />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-500 mb-1">{vi ? "Dự án" : "Project"}</label>
@@ -988,7 +1053,9 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
             loading={referenceLoading}
             error={referenceError}
             isView={isView}
+            loadingMore={referencePageLoading}
             onRetry={() => void loadActiveReference()}
+            onLoadMore={section => void loadMoreReferences(section)}
             onUseReference={useReference}
             onApplyPrice={applyReferencePrice}
           />
@@ -1320,7 +1387,7 @@ export default function Quotations() {
           email: String(option.email ?? ""),
           tax_code: String(option.taxCode ?? ""),
         })),
-        hasMore: rows.length === limit,
+        hasMore: result.hasMore,
       }
     })()
     lookupPageCacheRef.current.set(cacheKey, request)
@@ -1341,9 +1408,9 @@ export default function Quotations() {
     return toProductOptions(result.data ?? [])
   }, [isDemo, profile?.org_id])
 
-  const loadQuotationReference = useCallback(async (categoryId: string, customerId: string) => {
+  const loadQuotationReference = useCallback<QuotationReferenceLoader>(async (categoryId, customerId, excludeQuotationId) => {
     const result = await fetchQuotationReference(
-      { categoryId, customerId: customerId || undefined, limit: 10 },
+      { categoryId, customerId: customerId || undefined, limit: 5, excludeQuotationId },
       { isDemo, orgId: profile?.org_id },
     )
     if (result.error) throw result.error
@@ -1353,8 +1420,30 @@ export default function Quotations() {
       sameCustomer: [],
       recentSales: [],
       recentImports: [],
+      sameCustomerTotal: 0,
+      recentSalesTotal: 0,
+      recentImportsTotal: 0,
       categoryDefault: null,
     }
+  }, [isDemo, profile?.org_id])
+
+  const loadQuotationReferencePage = useCallback<QuotationReferencePageLoader>(async (
+    categoryId,
+    customerId,
+    section,
+    offset,
+    excludeQuotationId,
+  ) => {
+    const result = await fetchQuotationReferencePage({
+      categoryId,
+      customerId: customerId || undefined,
+      section,
+      limit: 5,
+      offset,
+      excludeQuotationId,
+    }, { isDemo, orgId: profile?.org_id })
+    if (result.error) throw result.error
+    return result.data ?? { items: [], total: 0, limit: 5, offset, hasMore: false }
   }, [isDemo, profile?.org_id])
   
   const [search, setSearch] = useState("")
@@ -1372,12 +1461,19 @@ export default function Quotations() {
     }
   }, [data])
 
+  const normalizedSearch = search.trim().toLocaleLowerCase("vi")
+  const filteredData = useMemo(() => data.filter(quotation => [
+    quotation.quotation_number,
+    quotation.customer_name,
+    quotation.project,
+  ].some(value => String(value ?? "").toLocaleLowerCase("vi").includes(normalizedSearch))), [data, normalizedSearch])
+
   const heads = vi
-    ? ["Mã Báo Giá", "Khách hàng", "Ngày lập", "Hiệu lực đến", "Tổng tiền", "Trạng thái"]
-    : ["Quotation ID", "Customer", "Date", "Valid Until", "Total", "Status"]
+    ? ["Số báo giá", "Khách hàng", "Ngày lập", "Hiệu lực đến", "Tổng tiền", "Trạng thái"]
+    : ["Quotation number", "Customer", "Date", "Valid Until", "Total", "Status"]
 
   const exportData = () => {
-    const rows = data.map(q => [q.id, q.customer_name, q.date, q.valid_until, q.total, q.status])
+    const rows = filteredData.map(q => [q.quotation_number, q.customer_name, q.date, q.valid_until, q.total, q.status])
     exportXlsx("Quotations", heads, rows)
   }
 
@@ -1509,9 +1605,9 @@ export default function Quotations() {
             </tr>
           </thead>
           <tbody>
-            {data.filter(q => q.id.toLowerCase().includes(search.toLowerCase()) || q.customer_name?.toLowerCase().includes(search.toLowerCase())).map(q => (
+            {filteredData.map(q => (
               <tr key={q.id} className="group hover:bg-slate-50 transition-colors border-b" style={{ borderColor: "var(--border)" }}>
-                <td className="py-3 text-sm font-medium text-blue-600 cursor-pointer" onClick={() => setViewingItem(q)}><span className="hover:underline">{q.id}</span>{q.source === "dataDemo" && <span className="ml-2 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-700">DEMO</span>}</td>
+                <td className="py-3 text-sm font-medium text-blue-600 cursor-pointer" onClick={() => setViewingItem(q)}><span className="hover:underline">{q.quotation_number || (vi ? "Chưa cấp số" : "Number pending")}</span>{q.source === "dataDemo" && <span className="ml-2 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-700">DEMO</span>}</td>
                 <td className="py-3 text-sm text-slate-700">{q.customer_name}</td>
                 <td className="py-3 text-sm text-slate-500">{q.date}</td>
                 <td className="py-3 text-sm text-slate-500">{q.valid_until}</td>
@@ -1560,7 +1656,7 @@ export default function Quotations() {
                 </td>
               </tr>
             ))}
-            {data.length === 0 && (
+            {filteredData.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-sm text-slate-500">
                   {vi ? "Không có dữ liệu" : "No data"}
@@ -1572,13 +1668,13 @@ export default function Quotations() {
       </div>
 
       <div className="flex items-center justify-between px-5 py-2.5 bg-white border-t flex-shrink-0 text-xs text-slate-500" style={{ borderColor: "var(--border)" }}>
-        <span>{vi ? "Đang hiển thị" : "Showing"} {data.length} {vi ? "báo giá" : "quotations"}</span>
+        <span>{vi ? "Đang hiển thị" : "Showing"} {filteredData.length}/{data.length} {vi ? "báo giá" : "quotations"}</span>
         <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px]">1 / 1</span>
       </div>
 
-      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
-      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
-      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} />}
+      {showCreate && <QuotationForm canExport={can("Sales", "export")} onClose={() => setShowCreate(false)} vi={vi} mode="create" onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} onLoadReferencePage={loadQuotationReferencePage} />}
+      {editingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setEditingItem(null)} vi={vi} mode="edit" initialData={editingItem} onSave={handleSave} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} onLoadReferencePage={loadQuotationReferencePage} />}
+      {viewingItem && <QuotationForm canExport={can("Sales", "export")} onClose={() => setViewingItem(null)} vi={vi} mode="view" initialData={viewingItem} onLoadLookup={loadLookupPage} onLookupProducts={lookupProductsForCategory} onLoadReference={loadQuotationReference} onLoadReferencePage={loadQuotationReferencePage} />}
       {allocationQuotationId && <QuotationAllocationModal quotationId={allocationQuotationId} onLoadLookup={loadLookupPage} vi={vi} isDemo={isDemo} orgId={profile?.org_id} onClose={() => setAllocationQuotationId(null)} onComplete={() => { setAllocationQuotationId(null); void refreshQuotations() }} />}
     </div>
   )
