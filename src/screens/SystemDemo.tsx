@@ -34,6 +34,13 @@ type ResultSummary = {
   verification?: Record<string, string | number | boolean | null>
 }
 
+function readableOperationError(error: any, fallback: string) {
+  const values = [error?.message, error?.details, error?.hint, error?.code]
+    .map(value => String(value ?? "").trim())
+    .filter(Boolean)
+  return Array.from(new Set(values)).join(" · ") || fallback
+}
+
 export default function SystemDemo({
   onNavigate,
   onHide,
@@ -52,6 +59,7 @@ export default function SystemDemo({
   const [runningCode, setRunningCode] = useState<string | null>(null)
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<ResultSummary | null>(null)
+  const [operationError, setOperationError] = useState("")
   const runLocked = useRef(false)
   const isAdmin = String(profile?.role ?? "").toLowerCase() === "admin"
 
@@ -79,6 +87,7 @@ export default function SystemDemo({
     runLocked.current = true
     setRunningCode(scenario.code)
     setLastResult(null)
+    setOperationError("")
     try {
       const idempotencyKey = crypto.randomUUID()
       const result = await runDemoScenario(scenario.code, idempotencyKey, {
@@ -93,7 +102,9 @@ export default function SystemDemo({
       )
       await load()
     } catch (runError: any) {
-      showAppToast(runError?.message ?? (vi ? "Không thể chạy scenario" : "Scenario failed"))
+      const message = readableOperationError(runError, vi ? "Không thể chạy scenario" : "Scenario failed")
+      setOperationError(message)
+      showAppToast(message)
       await load()
     } finally {
       runLocked.current = false
@@ -114,6 +125,7 @@ export default function SystemDemo({
     )
     if (!confirmed) return
     setDeletingRunId(runId ?? "all")
+    setOperationError("")
     try {
       const result = await cleanupDemoData(runId, { isDemo, orgId: profile?.org_id })
       if (result.error) throw result.error
@@ -126,7 +138,9 @@ export default function SystemDemo({
       )
       await load()
     } catch (cleanupError: any) {
-      showAppToast(cleanupError?.message ?? (vi ? "Không thể xóa dữ liệu Demo" : "Could not delete Demo data"))
+      const message = readableOperationError(cleanupError, vi ? "Không thể xóa dữ liệu Demo" : "Could not delete Demo data")
+      setOperationError(message)
+      showAppToast(message)
     } finally {
       setDeletingRunId(null)
     }
@@ -169,6 +183,13 @@ export default function SystemDemo({
         {error && (
           <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
             <span>{error}</span><button onClick={() => void load()} className="font-semibold underline">{vi ? "Thử lại" : "Retry"}</button>
+          </div>
+        )}
+
+        {operationError && (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs leading-5 text-red-700">
+            <div className="font-semibold">{vi ? "Thao tác Demo chưa hoàn tất" : "Demo operation did not complete"}</div>
+            <div className="mt-1 break-words font-mono text-[10px]">{operationError}</div>
           </div>
         )}
 

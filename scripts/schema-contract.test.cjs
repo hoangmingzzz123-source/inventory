@@ -31,7 +31,16 @@ const quotationCategoryExportMigration = fs.readFileSync(
   "supabase/migrations/20260923000000_quotation_category_defaults_export.sql",
   "utf8",
 )
+const quotationCompletionMigration = fs.readFileSync(
+  "supabase/migrations/20260924000000_spec_14092026_completion.sql",
+  "utf8",
+)
+const demoCleanupMigration = fs.readFileSync(
+  "supabase/migrations/20260925000000_demo_cleanup_reference_fix.sql",
+  "utf8",
+)
 const quotationExport = fs.readFileSync("src/lib/quotationExport.ts", "utf8")
+const appSource = fs.readFileSync("src/App.tsx", "utf8")
 const dataService = fs.readFileSync("src/lib/dataService.ts", "utf8")
 const authContext = fs.readFileSync("src/contexts/AuthContext.tsx", "utf8")
 const genericScreens = fs.readFileSync("src/screens/GenericList.tsx", "utf8")
@@ -465,6 +474,17 @@ test("category defaults and quotation export follow the controlled quotation spe
   assert.match(genericScreens, /Mặc định báo giá/)
 })
 
+test("quotation tabs retain mounted state and all output formats share one render contract", () => {
+  assert.match(appSource, /visitedScreens\.map/)
+  assert.match(appSource, /active === screen \? "contents" : "hidden"/)
+  assert.match(quotationScreen, /tabByScopeRef/)
+  assert.match(quotationScreen, /scopeKey=/)
+  assert.match(quotationExport, /const quotationColumns/)
+  assert.match(quotationExport, /quotationMetaRows\(model\)/)
+  assert.match(quotationExport, /quotationTermLines\(model\)/)
+  assert.match(quotationExport, /quotationSignatures/)
+})
+
 test("production migration protects ledger, cash balance, and helper functions", () => {
   assert.match(
     productionMigration,
@@ -717,4 +737,23 @@ test("Demo UI supports feature visibility, run history, links, and confirmed cle
   assert.match(systemDemoScreen, /cleanupDemoData/)
   assert.match(systemDemoScreen, /demo_run_id/)
   assert.match(systemDemoScreen, /Xem báo giá/)
+})
+
+test("extended Demo scenarios retain failures and cleanup respects reference ownership", () => {
+  assert.match(quotationCompletionMigration, /create or replace function run_demo_scenario_v2/)
+  assert.match(demoCleanupMigration, /create or replace function run_demo_scenario_v3/)
+  assert.match(demoCleanupMigration, /exception when others/)
+  assert.match(demoCleanupMigration, /status, created_by, idempotency_key/)
+  assert.ok(
+    demoCleanupMigration.indexOf("delete from quotation_item_references") <
+      demoCleanupMigration.indexOf("delete from quotation_items"),
+    "Demo cleanup must remove reference snapshots before quotation items",
+  )
+  assert.ok(
+    demoCleanupMigration.indexOf("delete from categories") <
+      demoCleanupMigration.indexOf("delete from units"),
+    "Demo cleanup must remove categories before their default units",
+  )
+  assert.match(dataService, /rpc\("run_demo_scenario_v3"/)
+  assert.match(systemDemoScreen, /readableOperationError/)
 })

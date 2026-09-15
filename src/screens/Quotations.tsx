@@ -182,6 +182,7 @@ function formatReferenceDate(value?: string | null, vi = true) {
 function QuotationReferencePanel({
   vi,
   item,
+  scopeKey,
   context,
   loading,
   error,
@@ -194,6 +195,7 @@ function QuotationReferencePanel({
 }: {
   vi: boolean
   item: any
+  scopeKey: string
   context: QuotationReferenceContext | null
   loading: boolean
   error: string
@@ -204,7 +206,9 @@ function QuotationReferencePanel({
   onUseReference: (record: QuotationReferenceRecord) => void
   onApplyPrice: (record: QuotationReferenceRecord) => void
 }) {
-  const [tab, setTab] = useState<"same" | "recent" | "imports">("same")
+  type ReferenceTab = "same" | "recent" | "imports"
+  const [tab, setTab] = useState<ReferenceTab>("same")
+  const tabByScopeRef = useRef<Record<string, ReferenceTab>>({})
   const sameCustomer = context?.sameCustomer ?? []
   const recentSales = context?.recentSales ?? []
   const recentImports = context?.recentImports ?? []
@@ -219,10 +223,24 @@ function QuotationReferencePanel({
 
   useEffect(() => {
     if (!context) return
-    if (context.sameCustomer.length) setTab("same")
-    else if (context.recentSales.length) setTab("recent")
-    else setTab("imports")
-  }, [item?.category_id, context])
+    const rememberedTab = tabByScopeRef.current[scopeKey]
+    if (rememberedTab) {
+      setTab(rememberedTab)
+      return
+    }
+    const initialTab: ReferenceTab = context.sameCustomer.length
+      ? "same"
+      : context.recentSales.length
+        ? "recent"
+        : "imports"
+    tabByScopeRef.current[scopeKey] = initialTab
+    setTab(initialTab)
+  }, [context, scopeKey])
+
+  const selectTab = (nextTab: ReferenceTab) => {
+    tabByScopeRef.current[scopeKey] = nextTab
+    setTab(nextTab)
+  }
 
   const renderRecord = (record: QuotationReferenceRecord) => {
     const isSale = record.referenceType === "SALE"
@@ -303,7 +321,7 @@ function QuotationReferencePanel({
               ["same", vi ? "Cùng khách" : "Same customer", context?.sameCustomerTotal ?? sameCustomer.length],
               ["recent", vi ? "Gần đây" : "Recent", context?.recentSalesTotal ?? recentSales.length],
               ["imports", vi ? "Giá nhập" : "Import prices", context?.recentImportsTotal ?? recentImports.length],
-            ] as const).map(([key, label, count]) => <button type="button" key={key} onClick={() => setTab(key)} className={`rounded-md px-1 py-1.5 text-[9px] font-semibold ${tab === key ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{label} ({count})</button>)}
+            ] as const).map(([key, label, count]) => <button type="button" key={key} onClick={() => selectTab(key)} className={`rounded-md px-1 py-1.5 text-[9px] font-semibold ${tab === key ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>{label} ({count})</button>)}
           </div>
           <div className="max-h-[360px] space-y-2 overflow-auto pr-1" onScroll={event => {
             const target = event.currentTarget
@@ -1049,6 +1067,7 @@ function QuotationForm({ onClose, vi, mode = "create", initialData = null, onSav
           <QuotationReferencePanel
             vi={vi}
             item={activeItem}
+            scopeKey={`${customerId}:${activeItem?.id ?? "none"}:${activeItem?.category_id ?? ""}`}
             context={referenceContext}
             loading={referenceLoading}
             error={referenceError}

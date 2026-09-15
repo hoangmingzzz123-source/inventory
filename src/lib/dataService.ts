@@ -545,10 +545,16 @@ export async function runDemoScenario(
   { isDemo, orgId }: Ctx,
 ) {
   if (isDemo || !orgId) return { data: null, error: new Error("Authentication is required") }
-  const { data, error } = await (supabase as any).rpc("run_demo_scenario_v2", {
+  const params = {
     p_scenario: scenario,
     p_idempotency_key: idempotencyKey,
-  })
+  }
+  let { data, error } = await (supabase as any).rpc("run_demo_scenario_v3", params)
+  // Keep the UI usable during a rolling deployment while the newest migration
+  // is still reaching the API schema cache.
+  if (error && /run_demo_scenario_v3|schema cache|function .* does not exist/i.test(String(error.message ?? error))) {
+    ;({ data, error } = await (supabase as any).rpc("run_demo_scenario_v2", params))
+  }
   const businessError = data?.status === "FAILED"
     ? new Error(data.error ?? "Demo scenario failed")
     : null

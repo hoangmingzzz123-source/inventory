@@ -154,7 +154,69 @@ function htmlLines(value: unknown) {
   return escapeHtml(value).replace(/\n/g, "<br />")
 }
 
+const quotationColumns = [
+  { label: "STT", width: "3%", excelWidth: 18 },
+  { label: "Hàng hóa đề xuất", width: "12%", excelWidth: 22 },
+  { label: "Hàng hóa cung cấp", width: "15%", excelWidth: 28 },
+  { label: "Quy cách / Nhãn hiệu", width: "13%", excelWidth: 24 },
+  { label: "Đơn vị", width: "5%", excelWidth: 10 },
+  { label: "KL", width: "5%", excelWidth: 9 },
+  { label: "Đơn giá", width: "8%", excelWidth: 18 },
+  { label: "Thành tiền trước thuế", width: "11%", excelWidth: 18 },
+  { label: "VAT (%)", width: "5%", excelWidth: 10 },
+  { label: "Tiền thuế", width: "8%", excelWidth: 15 },
+  { label: "Thành tiền sau thuế", width: "10%", excelWidth: 18 },
+  { label: "Ghi chú", width: "5%", excelWidth: 22 },
+] as const
+
+const quotationSignatures = [
+  { title: "ĐẠI DIỆN KHÁCH HÀNG", caption: "(Ký, ghi rõ họ tên)" },
+  { title: "ĐẠI DIỆN CÔNG TY", caption: "(Ký, ghi rõ họ tên, đóng dấu)" },
+] as const
+
+function quotationMetaRows(model: QuotationRenderModel) {
+  return [
+    ["Khách hàng", model.customer.name, "Báo giá số", model.quotationNumber],
+    ["Người liên hệ", model.customer.representative, "Ngày", model.date],
+    ["Địa chỉ", model.customer.address, "Hiệu lực đến", model.validUntil],
+    ["Điện thoại", model.customer.phone, "Nhân viên báo giá", model.salesperson],
+    ["Email", model.customer.email, "SĐT nhân viên", model.salespersonPhone],
+    ["Dự án", model.project, "MST", model.customer.taxCode],
+  ] as const
+}
+
+function quotationCompanyDetails(model: QuotationRenderModel) {
+  return {
+    identity: [
+      model.company.name,
+      model.company.englishName,
+      model.company.address,
+      [model.company.email, model.company.phone].filter(Boolean).join(" · "),
+    ],
+    banking: [
+      ["Tài khoản", model.company.bankAccountName],
+      ["Số TK", model.company.bankAccountNumber],
+      ["Ngân hàng", model.company.bankName],
+      ["Chi nhánh", model.company.bankBranch],
+    ],
+  } as const
+}
+
+function quotationTermLines(model: QuotationRenderModel) {
+  return [
+    model.terms.includeShipping
+      ? "Báo giá đã bao gồm chi phí vận chuyển."
+      : "Báo giá chưa bao gồm chi phí vận chuyển.",
+    model.terms.payment,
+    model.terms.delivery,
+    `Báo giá có hiệu lực đến ${model.validUntil}.`,
+    model.terms.footerNotes,
+    model.terms.quotationNotes ? `Ghi chú báo giá: ${model.terms.quotationNotes}` : "",
+  ].filter(line => line.trim().length > 0)
+}
+
 export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
+  const companyDetails = quotationCompanyDetails(model)
   const renderItemRows = (items: QuotationRenderItem[]) => items.map(item => `<tr class="quotation-row">
     <td class="center"><div class="cell-value">${item.index}</div></td>
     <td><div class="cell-value">${escapeHtml(item.proposedGoods)}</div></td>
@@ -169,25 +231,17 @@ export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
     <td class="number strong"><div class="cell-value">${formatVnd(item.total)}</div></td>
     <td><div class="cell-value">${escapeHtml(item.note)}</div></td>
   </tr>`).join("")
-  const shipping = model.terms.includeShipping
-    ? "Báo giá đã bao gồm chi phí vận chuyển."
-    : "Báo giá chưa bao gồm chi phí vận chuyển."
   const header = (compact = false) => `<header class="company${compact ? " compact" : ""}">
       <div>${logoUrl ? `<img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo" />` : ""}</div>
-      <div><h2>${escapeHtml(model.company.name)}</h2><div class="english">${escapeHtml(model.company.englishName)}</div><div>${escapeHtml(model.company.address)}</div><div>${escapeHtml(model.company.email)}${model.company.phone ? ` · ${escapeHtml(model.company.phone)}` : ""}</div></div>
-      <div><b>Tài khoản:</b> ${escapeHtml(model.company.bankAccountName)}<br/><b>Số TK:</b> ${escapeHtml(model.company.bankAccountNumber)}<br/><b>Ngân hàng:</b> ${escapeHtml(model.company.bankName)}<br/><b>Chi nhánh:</b> ${escapeHtml(model.company.bankBranch)}</div>
+      <div><h2>${escapeHtml(companyDetails.identity[0])}</h2><div class="english">${escapeHtml(companyDetails.identity[1])}</div><div>${escapeHtml(companyDetails.identity[2])}</div><div>${escapeHtml(companyDetails.identity[3])}</div></div>
+      <div>${companyDetails.banking.map(([label, value]) => `<b>${escapeHtml(label)}:</b> ${escapeHtml(value)}`).join("<br/>")}</div>
     </header>`
   const title = `<h1>${escapeHtml(model.title)}</h1>`
-  const meta = `<section class="meta">
-      <div><b>Khách hàng:</b> ${escapeHtml(model.customer.name)}</div><div><b>Báo giá số:</b> ${escapeHtml(model.quotationNumber)}</div>
-      <div><b>Người liên hệ:</b> ${escapeHtml(model.customer.representative)}</div><div><b>Ngày:</b> ${escapeHtml(model.date)}</div>
-      <div><b>Địa chỉ:</b> ${escapeHtml(model.customer.address)}</div><div><b>Hiệu lực đến:</b> ${escapeHtml(model.validUntil)}</div>
-      <div><b>Điện thoại:</b> ${escapeHtml(model.customer.phone)}</div><div><b>Nhân viên báo giá:</b> ${escapeHtml(model.salesperson)}</div>
-      <div><b>Email:</b> ${escapeHtml(model.customer.email)}</div><div><b>SĐT nhân viên:</b> ${escapeHtml(model.salespersonPhone)}</div>
-      <div><b>Dự án:</b> ${escapeHtml(model.project)}</div><div><b>MST:</b> ${escapeHtml(model.customer.taxCode)}</div>
-    </section>`
-  const table = (items: QuotationRenderItem[]) => `<table><colgroup><col style="width:3%"/><col style="width:12%"/><col style="width:15%"/><col style="width:13%"/><col style="width:5%"/><col style="width:5%"/><col style="width:8%"/><col style="width:11%"/><col style="width:5%"/><col style="width:8%"/><col style="width:10%"/><col style="width:5%"/></colgroup>
-      <thead><tr><th>STT</th><th>Hàng hóa đề xuất</th><th>Hàng hóa cung cấp</th><th>Quy cách / Nhãn hiệu</th><th>Đơn vị</th><th>KL</th><th>Đơn giá</th><th>Thành tiền trước thuế</th><th>VAT (%)</th><th>Tiền thuế</th><th>Thành tiền sau thuế</th><th>Ghi chú</th></tr></thead>
+  const meta = `<section class="meta">${quotationMetaRows(model).map(([leftLabel, leftValue, rightLabel, rightValue]) =>
+    `<div><b>${escapeHtml(leftLabel)}:</b> ${escapeHtml(leftValue)}</div><div><b>${escapeHtml(rightLabel)}:</b> ${escapeHtml(rightValue)}</div>`,
+  ).join("")}</section>`
+  const table = (items: QuotationRenderItem[]) => `<table><colgroup>${quotationColumns.map(column => `<col style="width:${column.width}"/>`).join("")}</colgroup>
+      <thead><tr>${quotationColumns.map(column => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
       <tbody>${renderItemRows(items) || '<tr><td colspan="12" class="center muted">Chưa có hàng hóa</td></tr>'}</tbody>
     </table>`
   const summary = `<section class="totals">
@@ -197,8 +251,8 @@ export function renderQuotationHtml(model: QuotationRenderModel, logoUrl = "") {
       <div class="total-row"><span>Tổng VAT</span><b>${formatVnd(model.totals.vat)}</b></div>
       <div class="total-row grand"><span>TỔNG THANH TOÁN</span><span>${formatVnd(model.totals.grandTotal)}</span></div>
     </section>
-    <section class="terms"><b>Điều khoản:</b><br/>• ${shipping}<br/>• ${htmlLines(model.terms.payment)}<br/>• ${htmlLines(model.terms.delivery)}<br/>• Báo giá có hiệu lực đến ${escapeHtml(model.validUntil)}.${model.terms.footerNotes ? `<br/>• ${htmlLines(model.terms.footerNotes)}` : ""}${model.terms.quotationNotes ? `<br/><b>Ghi chú báo giá:</b> ${htmlLines(model.terms.quotationNotes)}` : ""}</section>
-    <section class="signatures"><div><b>ĐẠI DIỆN KHÁCH HÀNG</b><span>(Ký, ghi rõ họ tên)</span></div><div><b>ĐẠI DIỆN CÔNG TY</b><span>(Ký, ghi rõ họ tên, đóng dấu)</span></div></section>`
+    <section class="terms"><b>Điều khoản:</b><br/>${quotationTermLines(model).map(line => `• ${htmlLines(line)}`).join("<br/>")}</section>
+    <section class="signatures">${quotationSignatures.map(signature => `<div><b>${escapeHtml(signature.title)}</b><span>${escapeHtml(signature.caption)}</span></div>`).join("")}</section>`
 
   const singlePage = model.items.length <= 4
   const detailPages = singlePage
@@ -236,8 +290,9 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
     orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
     margins: { left: 0.25, right: 0.25, top: 0.3, bottom: 0.3, header: 0.1, footer: 0.1 },
   } })
-  sheet.columns = [18, 22, 28, 24, 10, 9, 18, 18, 10, 15, 18, 22].map(width => ({ width }))
+  sheet.columns = quotationColumns.map(column => ({ width: column.excelWidth }))
   const border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } } as const
+  const companyDetails = quotationCompanyDetails(model)
   const logo = model.company.logoUrl || fallbackLogoUrl
   if (logo) {
     try {
@@ -246,30 +301,27 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
       sheet.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 95, height: 58 } })
     } catch { /* A missing logo must not block a quotation export. */ }
   }
-  sheet.mergeCells("B1:H1"); sheet.getCell("B1").value = model.company.name
+  sheet.mergeCells("B1:H1"); sheet.getCell("B1").value = companyDetails.identity[0]
   sheet.getCell("B1").font = { bold: true, size: 14, color: { argb: "FF1D4ED8" } }
-  sheet.mergeCells("B2:H2"); sheet.getCell("B2").value = model.company.englishName
-  sheet.mergeCells("B3:H3"); sheet.getCell("B3").value = model.company.address
-  sheet.mergeCells("I1:L1"); sheet.getCell("I1").value = `Tài khoản: ${model.company.bankAccountName}`
-  sheet.mergeCells("I2:L2"); sheet.getCell("I2").value = `Số TK: ${model.company.bankAccountNumber} · ${model.company.bankName}`
-  sheet.mergeCells("I3:L3"); sheet.getCell("I3").value = model.company.bankBranch
-  sheet.mergeCells("A5:L6"); sheet.getCell("A5").value = model.title
-  sheet.getCell("A5").font = { bold: true, size: 18, color: { argb: "FFB91C1C" } }
-  sheet.getCell("A5").alignment = { horizontal: "center", vertical: "middle" }
-  const meta = [
-    ["Khách hàng", model.customer.name, "Báo giá số", model.quotationNumber],
-    ["Địa chỉ", model.customer.address, "Ngày", model.date],
-    ["Điện thoại", model.customer.phone, "Hiệu lực đến", model.validUntil],
-    ["Email", model.customer.email, "Nhân viên báo giá", model.salesperson],
-    ["Dự án", model.project, "SĐT nhân viên", model.salespersonPhone],
-  ]
+  sheet.mergeCells("B2:H2"); sheet.getCell("B2").value = companyDetails.identity[1]
+  sheet.mergeCells("B3:H3"); sheet.getCell("B3").value = companyDetails.identity[2]
+  sheet.mergeCells("B4:H4"); sheet.getCell("B4").value = companyDetails.identity[3]
+  companyDetails.banking.forEach(([label, value], index) => {
+    const row = index + 1
+    sheet.mergeCells(row, 9, row, 12)
+    sheet.getCell(row, 9).value = `${label}: ${value}`
+  })
+  sheet.mergeCells("A6:L7"); sheet.getCell("A6").value = model.title
+  sheet.getCell("A6").font = { bold: true, size: 18, color: { argb: "FFB91C1C" } }
+  sheet.getCell("A6").alignment = { horizontal: "center", vertical: "middle" }
+  const meta = quotationMetaRows(model)
   meta.forEach((values, index) => {
-    const row = 7 + index
+    const row = 8 + index
     sheet.getCell(row, 1).value = values[0]; sheet.mergeCells(row, 2, row, 6); sheet.getCell(row, 2).value = values[1]
     sheet.getCell(row, 7).value = values[2]; sheet.mergeCells(row, 8, row, 12); sheet.getCell(row, 8).value = values[3]
     sheet.getCell(row, 1).font = { bold: true }; sheet.getCell(row, 7).font = { bold: true }
   })
-  const headerRow = sheet.addRow(["STT", "Hàng hóa đề xuất", "Hàng hóa cung cấp", "Quy cách / Nhãn hiệu", "Đơn vị", "KL", "Đơn giá", "Thành tiền trước thuế", "VAT (%)", "Tiền thuế", "Thành tiền sau thuế", "Ghi chú"])
+  const headerRow = sheet.addRow(quotationColumns.map(column => column.label))
   headerRow.height = 34
   headerRow.eachCell(cell => { cell.font = { bold: true }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; cell.border = border })
   model.items.forEach(item => {
@@ -282,24 +334,24 @@ export async function exportQuotationExcel(model: QuotationRenderModel, fallback
   summaries.forEach(([label, value], index) => {
     const row = sheet.addRow([]); sheet.mergeCells(row.number, 8, row.number, 10); row.getCell(8).value = label; row.getCell(11).value = value; row.getCell(11).numFmt = "#,##0"; row.getCell(8).font = { bold: true }; row.getCell(11).font = { bold: true, color: { argb: index === summaries.length - 1 ? "FFB91C1C" : "FF111827" } }
   })
-  const termsRow = sheet.addRow([`Điều khoản:\n• ${model.terms.includeShipping ? "Báo giá đã bao gồm" : "Báo giá chưa bao gồm"} chi phí vận chuyển.\n• ${model.terms.payment}\n• ${model.terms.delivery}\n• Báo giá có hiệu lực đến ${model.validUntil}.\n${model.terms.footerNotes}\n${model.terms.quotationNotes}`])
-  sheet.mergeCells(termsRow.number, 1, termsRow.number, 12); termsRow.height = 82; termsRow.getCell(1).alignment = { wrapText: true, vertical: "top" }
+  const termsRow = sheet.addRow([`Điều khoản:\n${quotationTermLines(model).map(line => `• ${line}`).join("\n")}`])
+  sheet.mergeCells(termsRow.number, 1, termsRow.number, 12); termsRow.height = Math.max(82, 18 + quotationTermLines(model).length * 15); termsRow.getCell(1).alignment = { wrapText: true, vertical: "top" }
   const signatureTitleRow = sheet.addRow([])
   sheet.mergeCells(signatureTitleRow.number, 1, signatureTitleRow.number, 6)
   sheet.mergeCells(signatureTitleRow.number, 7, signatureTitleRow.number, 12)
-  signatureTitleRow.getCell(1).value = "ĐẠI DIỆN KHÁCH HÀNG"
-  signatureTitleRow.getCell(7).value = "ĐẠI DIỆN CÔNG TY"
+  signatureTitleRow.getCell(1).value = quotationSignatures[0].title
+  signatureTitleRow.getCell(7).value = quotationSignatures[1].title
   signatureTitleRow.getCell(1).alignment = signatureTitleRow.getCell(7).alignment = { horizontal: "center" }
   signatureTitleRow.getCell(1).font = signatureTitleRow.getCell(7).font = { bold: true }
   const signatureSpaceRow = sheet.addRow([]); signatureSpaceRow.height = 86
   const signatureCaptionRow = sheet.addRow([])
   sheet.mergeCells(signatureCaptionRow.number, 1, signatureCaptionRow.number, 6)
   sheet.mergeCells(signatureCaptionRow.number, 7, signatureCaptionRow.number, 12)
-  signatureCaptionRow.getCell(1).value = "(Ký, ghi rõ họ tên)"
-  signatureCaptionRow.getCell(7).value = "(Ký, ghi rõ họ tên, đóng dấu)"
+  signatureCaptionRow.getCell(1).value = quotationSignatures[0].caption
+  signatureCaptionRow.getCell(7).value = quotationSignatures[1].caption
   signatureCaptionRow.getCell(1).alignment = signatureCaptionRow.getCell(7).alignment = { horizontal: "center" }
   signatureCaptionRow.getCell(1).font = signatureCaptionRow.getCell(7).font = { italic: true, color: { argb: "FF64748B" } }
-  sheet.views = [{ state: "frozen", ySplit: 12 }]
+  sheet.views = [{ state: "frozen", ySplit: headerRow.number }]
   await saveExcelWorkbook(workbook, quotationFileName(model, "xlsx"))
 }
 
