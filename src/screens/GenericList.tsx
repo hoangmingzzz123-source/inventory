@@ -1,4 +1,4 @@
-import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers } from "lucide-react"
+import { Edit, Plus, Search, Download, RefreshCw, MoreHorizontal, X, Check, Printer, ArrowRight, AlertTriangle, TrendingUp, TrendingDown, BarChart2, Package, Truck, CreditCard, DollarSign, BookOpen, ArrowLeftRight, Upload, FileDown, FileSpreadsheet, ShoppingCart, Layers, Trash2 } from "lucide-react"
 import { useState, useRef, useEffect, useCallback } from "react"
 import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
@@ -24,6 +24,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts"
 import AsyncPaginatedSelect, { type AsyncSelectOption } from "../components/AsyncPaginatedSelect"
+import OrganizationDataResetDialog from "../components/OrganizationDataResetDialog"
 
 const fmt = formatQuantity
 const money = formatVnd
@@ -2952,6 +2953,7 @@ export function Settings() {
   const [quotationSettings, setQuotationSettings] = useState<QuotationSettings>(defaultQuotationSettings)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [demoTabHidden, setDemoTabHidden] = useState(() => isDemoFeatureHidden(user?.id))
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
 
   useEffect(() => {
     const syncDemoVisibility = () => setDemoTabHidden(isDemoFeatureHidden(user?.id))
@@ -3099,7 +3101,40 @@ export function Settings() {
             </button>
           </div>
         </section>
+        {!isDemo && profile?.role?.toLowerCase() === "admin" && profile.org_id && (
+          <section className="mt-4 rounded-2xl border border-red-200 bg-white p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="max-w-xl">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-red-800">
+                  <Trash2 size={16} />
+                  {vi ? "Xóa toàn bộ dữ liệu" : "Clear all organization data"}
+                </h2>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {vi
+                    ? "Xóa dữ liệu tổ chức sau 3 bước xác nhận, bao gồm mã cố định. Hồ sơ người dùng được giữ lại; vai trò và quyền cần thiết lập lại."
+                    : "Clear organization data after three confirmation steps, including a fixed confirmation code. User profiles remain; roles and permissions must be configured again."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetDialogOpen(true)}
+                className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 px-4 text-xs font-semibold text-red-700 hover:bg-red-50"
+              >
+                <Trash2 size={14} />
+                {vi ? "Xóa dữ liệu" : "Clear data"}
+              </button>
+            </div>
+          </section>
+        )}
       </div>
+      {resetDialogOpen && user && profile?.org_id && (
+        <OrganizationDataResetDialog
+          orgId={profile.org_id}
+          organizationName={company.name}
+          lang={lang}
+          onClose={() => setResetDialogOpen(false)}
+        />
+      )}
     </div>
   )
 }
