@@ -164,6 +164,6 @@ export async function downloadTemplate(headers: string[], filename: string) {
   await exportRowsToExcel(
     [headers, headers.map(() => "")],
     `${filename}_Template`,
-    "Template",
+    "Mẫu nhập",
   )
 }

@@ -30,10 +30,78 @@ function downloadCsvTemplate(filename: string, cols: string[]) {
 }
 
 async function downloadXlsxTemplate(filename: string, cols: string[]) {
-  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Template")
+  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Mẫu nhập")
 }
 
 const PRODUCT_TEMPLATE_COLS = ["sku","barcode","product_name","category","brand","unit","purchase_price","selling_price","tax_pct","qty","min_stock","max_stock","description","status"]
+const PRODUCT_TEMPLATE_HEADERS: Record<string, string> = {
+  sku: "SKU",
+  barcode: "Mã vạch",
+  product_name: "Tên sản phẩm",
+  category: "Danh mục",
+  brand: "Thương hiệu",
+  unit: "Đơn vị tính",
+  purchase_price: "Giá nhập",
+  selling_price: "Giá bán",
+  tax_pct: "Thuế suất VAT (%)",
+  qty: "Tồn kho đầu kỳ",
+  min_stock: "Tồn kho tối thiểu",
+  max_stock: "Tồn kho tối đa",
+  description: "Mô tả",
+  status: "Trạng thái",
+}
+const PRODUCT_IMPORT_ALIASES: Record<string, string[]> = {
+  sku: ["Mã SKU", "Mã sản phẩm", "Mã hàng"],
+  barcode: ["Barcode"],
+  product_name: ["Tên", "Tên hàng", "Sản phẩm", "name", "product"],
+  category: ["Nhóm hàng", "category_name"],
+  brand: ["Nhãn hiệu"],
+  unit: ["ĐVT", "Đơn vị"],
+  purchase_price: ["Giá mua", "Đơn giá nhập", "cost"],
+  selling_price: ["Giá bán lẻ", "Đơn giá bán", "price"],
+  tax_pct: ["VAT (%)", "Thuế VAT", "tax"],
+  qty: ["Số lượng tồn", "SL tồn", "Số lượng", "quantity"],
+  min_stock: ["Tồn tối thiểu", "min_qty"],
+  max_stock: ["Tồn tối đa", "max_qty"],
+  description: ["Ghi chú", "Mô tả sản phẩm"],
+  status: ["Tình trạng"],
+}
+
+function normalizeProductImportHeader(value: unknown) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-z0-9]+/gi, " ").trim().toLowerCase()
+}
+
+function mapProductImportRow(raw: Record<string, any>) {
+  const keysByNormalizedHeader = Object.keys(raw).reduce<Record<string, string>>((result, key) => {
+    result[normalizeProductImportHeader(key)] = key
+    return result
+  }, {})
+  return Object.fromEntries(PRODUCT_TEMPLATE_COLS.map(column => {
+    const candidates = [PRODUCT_TEMPLATE_HEADERS[column], column, ...(PRODUCT_IMPORT_ALIASES[column] ?? [])]
+    const sourceKey = candidates.map(candidate => keysByNormalizedHeader[normalizeProductImportHeader(candidate)]).find(Boolean)
+    return [column, sourceKey ? raw[sourceKey] : ""]
+  }))
+}
+
+function parseProductImportNumber(value: unknown) {
+  if (typeof value === "number") return value
+  let text = String(value ?? "").trim().replace(/\s/g, "").replace(/₫|vnd|%/gi, "")
+  if (!text) return 0
+  const comma = text.lastIndexOf(",")
+  const dot = text.lastIndexOf(".")
+  if (comma >= 0 && dot >= 0) {
+    const decimal = comma > dot ? "," : "."
+    text = text.split(decimal === "," ? "." : ",").join("")
+    if (decimal === ",") text = text.replace(",", ".")
+  } else if (comma >= 0) {
+    const parts = text.split(",")
+    text = parts.length > 2 || parts.at(-1)?.length === 3 ? parts.join("") : text.replace(",", ".")
+  } else if (dot >= 0) {
+    const parts = text.split(".")
+    if (parts.length > 2 || parts.at(-1)?.length === 3) text = parts.join("")
+  }
+  return Number(text)
+}
 
 type MasterOptionLoader = (search: string, offset: number, limit: number) => Promise<AsyncSelectPage<MasterOption>>
 
@@ -67,14 +135,14 @@ function ProductImportModal({ onClose, lang, onImport, loadWarehouses, warehouse
                 <div className="text-xs font-semibold text-slate-800 mb-0.5">{lang === "vi" ? "Bước 1: Tải file mẫu" : "Step 1: Download Template"}</div>
                 <div className="text-[11px] text-slate-500 mb-2.5">{lang === "vi" ? "Tải file mẫu, điền dữ liệu đúng định dạng rồi upload lên." : "Download a template, fill in your data, then upload."}</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => downloadCsvTemplate("products", PRODUCT_TEMPLATE_COLS)} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700">
+                  <button onClick={() => downloadCsvTemplate("products", PRODUCT_TEMPLATE_COLS.map(column => PRODUCT_TEMPLATE_HEADERS[column]))} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700">
                     <FileDown size={12} /> {lang === "vi" ? "Mẫu CSV" : "CSV Template"}
                   </button>
-                  <button onClick={() => void downloadXlsxTemplate("products", PRODUCT_TEMPLATE_COLS)} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700">
+                  <button onClick={() => void downloadXlsxTemplate("products", PRODUCT_TEMPLATE_COLS.map(column => PRODUCT_TEMPLATE_HEADERS[column]))} className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700">
                     <FileSpreadsheet size={12} /> {lang === "vi" ? "Mẫu Excel" : "Excel Template"}
                   </button>
                 </div>
-                <div className="mt-2 text-[10px] text-slate-400 font-mono bg-slate-50 rounded-lg px-2 py-1.5 truncate">{PRODUCT_TEMPLATE_COLS.slice(0, 6).join(", ")} +{PRODUCT_TEMPLATE_COLS.length - 6} more</div>
+                <div className="mt-2 text-[10px] text-slate-400 font-mono bg-slate-50 rounded-lg px-2 py-1.5 truncate">{PRODUCT_TEMPLATE_COLS.slice(0, 6).map(column => PRODUCT_TEMPLATE_HEADERS[column]).join(", ")} +{PRODUCT_TEMPLATE_COLS.length - 6} more</div>
               </div>
             </div>
           </div>
@@ -575,26 +643,40 @@ export default function Products() {
     }
     const importWarehouse = importWarehouseOption
     try {
-      const rows = await importFromExcel(file)
+      const expectedHeaders = PRODUCT_TEMPLATE_COLS.flatMap(column => [
+        column,
+        PRODUCT_TEMPLATE_HEADERS[column],
+        ...(PRODUCT_IMPORT_ALIASES[column] ?? []),
+      ])
+      const rows = await importFromExcel(file, expectedHeaders)
       let imported = 0
-      for (const row of rows) {
+      for (const rawRow of rows) {
+        const row = mapProductImportRow(rawRow)
+        const normalizedStatus = normalizeProductImportHeader(row.status)
+        const status = ["ngung hoat dong", "khong hoat dong", "inactive"].includes(normalizedStatus)
+          ? "Inactive"
+          : ["nhap", "draft"].includes(normalizedStatus)
+            ? "Draft"
+            : ["", "active", "hoat dong", "dang hoat dong"].includes(normalizedStatus)
+              ? "Active"
+              : String(row.status).trim()
         const payload = {
-          sku: row.sku,
-          barcode: row.barcode,
-          name: row.product_name ?? row.name,
-          category: row.category,
-          brand: row.brand,
-          unit: row.unit,
-          cost: Number(row.purchase_price ?? row.cost ?? 0),
-          price: Number(row.selling_price ?? row.price ?? 0),
-          qty: Number(row.qty ?? 0),
+          sku: String(row.sku ?? "").trim(),
+          barcode: String(row.barcode ?? "").trim(),
+          name: String(row.product_name ?? "").trim(),
+          category: String(row.category ?? "").trim(),
+          brand: String(row.brand ?? "").trim(),
+          unit: String(row.unit ?? "").trim(),
+          cost: parseProductImportNumber(row.purchase_price),
+          price: parseProductImportNumber(row.selling_price),
+          qty: parseProductImportNumber(row.qty),
           warehouse_id: importWarehouseId,
           warehouse_name: importWarehouse?.label,
-          status: row.status || "Active",
-          tax_pct: Number(row.tax_pct ?? 0),
-          min_qty: Number(row.min_stock ?? row.min_qty ?? 0),
-          max_qty: Number(row.max_stock ?? row.max_qty ?? 0),
-          description: row.description ?? null,
+          status,
+          tax_pct: parseProductImportNumber(row.tax_pct),
+          min_qty: parseProductImportNumber(row.min_stock),
+          max_qty: parseProductImportNumber(row.max_stock),
+          description: String(row.description ?? "").trim() || null,
         }
         if (!payload.sku || !payload.name) continue
         const result = await upsertProduct(payload, { isDemo, orgId: profile?.org_id })

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from "react"
+import { lazy, Suspense, useState, useEffect, useRef, type SyntheticEvent } from "react"
 import Sidebar from "./components/Sidebar"
 import Topbar from "./components/Topbar"
 import DemoBanner from "./components/DemoBanner"
@@ -116,12 +116,25 @@ function ScreenLoading() {
   )
 }
 
+function selectEditableText(event: SyntheticEvent<HTMLElement>) {
+  const field = event.target
+  if (field instanceof HTMLTextAreaElement && !field.readOnly && !field.disabled) {
+    field.select()
+    return
+  }
+  if (field instanceof HTMLInputElement && !field.readOnly && !field.disabled
+    && ["text", "search", "email", "tel", "url", "password"].includes(field.type)) {
+    field.select()
+  }
+}
+
 function AppInner() {
   const { t, lang } = useLang()
   const { user, profile, signOut, can } = useAuth()
   const { isDemo, setDemo } = useDemo()
   const initialScreen = new URLSearchParams(window.location.search).get("screen") || "dashboard"
   const [active, setActive] = useState(initialScreen)
+  const navigationHistory = useRef<string[]>([initialScreen])
   const [visitedScreens, setVisitedScreens] = useState<string[]>([initialScreen])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
   const [toast, setToast] = useState<ToastPayload | null>(null)
@@ -141,6 +154,22 @@ function AppInner() {
 
   const role = String(profile?.role ?? "staff").toLowerCase()
   const showSystemDemo = Boolean(user && role === "admin" && demoFeatureEnabled && !demoFeatureHidden)
+
+  const navigateTo = (screen: string) => {
+    if (!screen || screen === active) return
+    navigationHistory.current = [...navigationHistory.current, screen]
+    setActive(screen)
+  }
+
+  const navigateBack = () => {
+    const previous = navigationHistory.current.length > 1
+      ? navigationHistory.current[navigationHistory.current.length - 2]
+      : "dashboard"
+    navigationHistory.current = navigationHistory.current.length > 1
+      ? navigationHistory.current.slice(0, -1)
+      : [previous]
+    setActive(previous)
+  }
 
   useEffect(() => {
     const handleToast = (event: Event) => {
@@ -220,6 +249,11 @@ function AppInner() {
   useEffect(() => {
     const allowed = canAccess(active)
     if (!allowed) {
+      const historyWithoutDeniedScreen = navigationHistory.current.slice(0, -1)
+      navigationHistory.current = historyWithoutDeniedScreen.length ? historyWithoutDeniedScreen : ["dashboard"]
+      if (navigationHistory.current[navigationHistory.current.length - 1] !== "dashboard") {
+        navigationHistory.current = [...navigationHistory.current, "dashboard"]
+      }
       setActive("dashboard")
       setToast({ msg: lang === "vi" ? "Chức năng đang tắt hoặc bạn không có quyền truy cập." : "This feature is disabled or you do not have access.", type: "error" })
     }
@@ -287,10 +321,10 @@ function AppInner() {
       case "customer-receipt": return canAccess("customer-receipt") ? <CustomerReceipts /> : null
       case "payable":          return canAccess("payable") ? <Payables /> : null
       case "cashbook":         return canAccess("cashbook") ? <CashBook /> : null
-      case "notifications":    return canAccess("notifications") ? <NotificationCenter onNavigate={setActive} /> : null
-      case "system-demo":      return canAccess("system-demo") ? <SystemDemo onNavigate={setActive} onHide={() => {
+      case "notifications":    return canAccess("notifications") ? <NotificationCenter onNavigate={navigateTo} /> : null
+      case "system-demo":      return canAccess("system-demo") ? <SystemDemo onNavigate={navigateTo} onHide={() => {
         setDemoFeatureHidden(true, user?.id)
-        setActive("dashboard")
+        navigateTo("dashboard")
       }} /> : null
       default:                 return <PlaceholderScreen id={active} />
     }
@@ -302,13 +336,14 @@ function AppInner() {
       {isDemo && <DemoBanner onGoLive={() => window.location.search = "?auth"} />}
 
       <div className="flex flex-1 overflow-hidden min-h-0">
-        <Sidebar active={active} onNavigate={setActive} collapsed={sidebarCollapsed} showSystemDemo={showSystemDemo} />
+        <Sidebar active={active} onNavigate={navigateTo} collapsed={sidebarCollapsed} showSystemDemo={showSystemDemo} />
 
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
           <Topbar
             breadcrumbs={breadcrumbs}
             onToggleSidebar={() => setSidebarCollapsed(c => !c)}
-            onNavigate={setActive}
+            onNavigate={navigateTo}
+            onNavigateBack={navigateBack}
             userMenu={
               user ? (
                 <div className="flex items-center gap-2">
@@ -330,7 +365,7 @@ function AppInner() {
               ) : null
             }
           />
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-auto" onFocusCapture={selectEditableText} onClickCapture={selectEditableText}>
             <AppErrorBoundary scope="page">
               <Suspense fallback={<ScreenLoading />}>
                 {visitedScreens.map(screen => (

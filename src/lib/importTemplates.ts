@@ -1,0 +1,55 @@
+const VIETNAMESE_IMPORT_HEADERS: Record<string, string> = {
+  code: "Mã",
+  name: "Tên",
+  representative: "Người liên hệ",
+  phone: "Điện thoại",
+  email: "Email",
+  tax_code: "Mã số thuế",
+  credit_limit: "Hạn mức tín dụng",
+  status: "Trạng thái",
+  address: "Địa chỉ",
+  manager: "Người quản lý",
+  product: "Sản phẩm",
+  sku: "SKU",
+  warehouse: "Kho",
+  available: "Tồn khả dụng",
+  reserved: "Đã giữ chỗ",
+  incoming: "Sắp nhập",
+  outgoing: "Sắp xuất",
+  avgCost: "Giá vốn bình quân",
+  value: "Giá trị tồn",
+  date: "Ngày",
+  doc_no: "Số chứng từ",
+  type: "Loại",
+  qty: "Số lượng",
+  balance: "Tồn cuối",
+  default_unit: "Đơn vị tính mặc định",
+  default_purchase_price: "Giá nhập mặc định",
+  default_sale_price: "Giá bán mặc định",
+  has_vat: "Có VAT",
+  default_vat_rate: "Thuế suất VAT (%)",
+  po_no: "Số PO",
+  supplier: "Nhà cung cấp",
+  batch_summary: "Tóm tắt lô hàng",
+  receipt_value: "Giá trị nhập",
+  amount: "Số tiền",
+  barcode: "Mã vạch",
+  product_name: "Tên sản phẩm",
+  category: "Danh mục",
+  brand: "Thương hiệu",
+  unit: "Đơn vị tính",
+  purchase_price: "Giá nhập",
+  selling_price: "Giá bán",
+  tax_pct: "Thuế suất VAT (%)",
+  min_stock: "Tồn kho tối thiểu",
+  max_stock: "Tồn kho tối đa",
+  description: "Mô tả",
+}
+
+export function getVietnameseImportHeader(column: string) {
+  return VIETNAMESE_IMPORT_HEADERS[column] ?? column
+}
+
+export function getVietnameseImportHeaders(columns: string[]) {
+  return columns.map(getVietnameseImportHeader)
+}

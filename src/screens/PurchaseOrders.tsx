@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertCircle, Check, CheckCircle, Download, Plus, Printer, RefreshCw, Search, Trash2, X, XCircle } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AlertCircle, Check, CheckCircle, Download, FileDown, FileSpreadsheet, Plus, Printer, RefreshCw, Search, Trash2, Upload, X, XCircle } from "lucide-react"
 import StatusBadge from "../components/StatusBadge"
 import { useLang } from "../i18n/LangContext"
 import { formatDateTimeUtc7 } from "../lib/dateUtils"
@@ -9,11 +9,54 @@ import { useAuth } from "../contexts/AuthContext"
 import { deletePurchaseOrder, fetchProducts, fetchPurchaseOrders, fetchSuppliers, fetchWarehouses, receiveGoodsReceipt, upsertPurchaseOrder } from "../lib/dataService"
 import { confirmAppAction } from "../lib/appEvents"
 import { formatVnd } from "../lib/numberFormat"
+import { exportRowsToExcel, importFromExcel } from "../lib/excelUtils"
 
 const fmt = formatVnd
 
 function newLine() {
   return { product_id: "", product_name: "", sku: "", qty: 1, unit_cost: 0 }
+}
+
+const purchaseItemHeaders = ["SKU", "Tên sản phẩm", "Số lượng", "Đơn giá nhập"]
+const purchaseItemHeaderAliases: Record<string, string[]> = {
+  sku: ["Mã SKU", "Mã sản phẩm", "Mã hàng", "product_code"],
+  product_name: ["Sản phẩm", "Tên hàng", "Tên mặt hàng", "product", "product_name"],
+  qty: ["SL", "Số lượng đặt", "quantity"],
+  unit_cost: ["Đơn giá", "Giá nhập", "Đơn giá mua", "unit cost", "unit_price", "cost"],
+}
+
+function normalizePurchaseHeader(value: unknown) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").replace(/[^a-z0-9]+/gi, " ").trim().toLowerCase()
+}
+
+function parsePurchaseNumber(value: unknown) {
+  if (typeof value === "number") return value
+  let text = String(value ?? "").trim().replace(/\s/g, "").replace(/₫|vnd/gi, "")
+  if (!text) return NaN
+  const comma = text.lastIndexOf(",")
+  const dot = text.lastIndexOf(".")
+  if (comma >= 0 && dot >= 0) {
+    const decimal = comma > dot ? "," : "."
+    text = text.split(decimal === "," ? "." : ",").join("")
+    if (decimal === ",") text = text.replace(",", ".")
+  } else if (comma >= 0) {
+    const parts = text.split(",")
+    text = parts.length > 2 || parts.at(-1)?.length === 3 ? parts.join("") : text.replace(",", ".")
+  } else if (dot >= 0) {
+    const parts = text.split(".")
+    if (parts.length > 2 || parts.at(-1)?.length === 3) text = parts.join("")
+  }
+  return Number(text)
+}
+
+function downloadPurchaseItemCsvTemplate() {
+  const csv = [purchaseItemHeaders, ["", "", "", ""]].map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(",")).join("\r\n")
+  const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }))
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = "mau-chi-tiet-don-mua.csv"
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 type ReceiveLot = {
@@ -40,6 +83,7 @@ export default function PurchaseOrders() {
   const [showReceive, setShowReceive] = useState<any | null>(null)
   const [receiveLots, setReceiveLots] = useState<Record<string, ReceiveLot>>({})
   const [items, setItems] = useState<any[]>([newLine()])
+  const importFileRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -77,6 +121,73 @@ export default function PurchaseOrders() {
   }), [orders, filterStatus, search])
 
   const total = items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.unit_cost || 0), 0)
+
+  const importPurchaseItems = async (file: File) => {
+    const canonicalHeaders = ["sku", "product_name", "qty", "unit_cost"]
+    const expectedHeaders = canonicalHeaders.flatMap((key, index) => [
+      key,
+      purchaseItemHeaders[index],
+      ...(purchaseItemHeaderAliases[key] ?? []),
+    ])
+    try {
+      const rows = await importFromExcel(file, expectedHeaders)
+      if (!rows.length) return showToast(lang === "vi" ? "File chưa có dòng sản phẩm nào" : "The file contains no item rows", false)
+
+      const existingItems = items.filter(item => item.product_id && Number(item.qty) > 0)
+      const usedProducts = new Set(existingItems.map(item => String(item.product_id)))
+      const importedItems: any[] = []
+      const rowIssues: string[] = []
+
+      for (let index = 0; index < rows.length; index += 1) {
+        const raw = rows[index]
+        const normalizedKeys = Object.keys(raw).reduce<Record<string, string>>((result, key) => {
+          result[normalizePurchaseHeader(key)] = key
+          return result
+        }, {})
+        const readValue = (column: string, position: number) => {
+          const aliases = [column, purchaseItemHeaders[position], ...(purchaseItemHeaderAliases[column] ?? [])]
+          const source = aliases.map(alias => normalizedKeys[normalizePurchaseHeader(alias)]).find(Boolean)
+          return source ? raw[source] : ""
+        }
+        const sku = String(readValue("sku", 0) ?? "").trim()
+        const productName = String(readValue("product_name", 1) ?? "").trim()
+        const qty = parsePurchaseNumber(readValue("qty", 2))
+        const unitCost = parsePurchaseNumber(readValue("unit_cost", 3))
+        const product = sku
+          ? products.find(row => String(row.sku ?? "").trim().toLowerCase() === sku.toLowerCase())
+          : products.find(row => normalizePurchaseHeader(row.name) === normalizePurchaseHeader(productName))
+        const rowNumber = Number(raw.__rowNumber ?? index + 2)
+        const issues: string[] = []
+        if (!product) issues.push(lang === "vi" ? `không tìm thấy sản phẩm ${sku || productName || "(thiếu SKU/tên)"}` : `product not found: ${sku || productName || "missing SKU/name"}`)
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) issues.push(lang === "vi" ? "số lượng phải là số nguyên lớn hơn 0" : "quantity must be a positive whole number")
+        if (!Number.isFinite(unitCost) || unitCost < 0) issues.push(lang === "vi" ? "đơn giá nhập phải là số không âm" : "unit cost must be non-negative")
+        if (product && usedProducts.has(String(product.id))) issues.push(lang === "vi" ? `trùng sản phẩm ${product.sku}` : `duplicate product ${product.sku}`)
+        if (issues.length) {
+          rowIssues.push(`${lang === "vi" ? "Dòng" : "Row"} ${rowNumber}: ${issues.join("; ")}`)
+          continue
+        }
+        usedProducts.add(String(product.id))
+        importedItems.push({
+          product_id: product.id,
+          product_name: product.name,
+          sku: product.sku,
+          qty,
+          unit_cost: unitCost,
+        })
+      }
+
+      if (rowIssues.length) {
+        const summary = rowIssues.slice(0, 3).join(" · ")
+        const remaining = rowIssues.length > 3 ? (lang === "vi" ? ` · và ${rowIssues.length - 3} lỗi khác` : ` · and ${rowIssues.length - 3} more`) : ""
+        showToast(summary + remaining, false)
+        return
+      }
+      setItems([...existingItems, ...importedItems])
+      showToast(lang === "vi" ? `Đã thêm ${importedItems.length} sản phẩm vào đơn mua` : `Added ${importedItems.length} products to the PO`)
+    } catch (error: any) {
+      showToast(error?.message ?? (lang === "vi" ? "Không thể đọc file. Hãy dùng CSV hoặc XLSX." : "Could not read the file. Use CSV or XLSX."), false)
+    }
+  }
 
   const updateStatus = async (order: any, status: string) => {
     setSaving(true)
@@ -266,7 +377,21 @@ export default function PurchaseOrders() {
                 <label className="text-[11px] font-medium text-slate-600">{t("expectedDate")}<input name="expected_date" type="date" className="mt-1 h-8 w-full rounded-lg border px-2 text-xs" style={{ borderColor: "var(--border)" }} /></label>
                 <label className="text-[11px] font-medium text-slate-600 md:col-span-3">{t("note")}<input name="notes" className="mt-1 h-8 w-full rounded-lg border px-3 text-xs" style={{ borderColor: "var(--border)" }} /></label>
               </div>
-              <div className="flex items-center justify-between"><h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{lang === "vi" ? "Chi tiết sản phẩm" : "Order items"}</h3><button type="button" onClick={() => setItems(previous => [...previous, newLine()])} className="flex items-center gap-1 text-xs text-blue-600"><Plus size={12} /> {t("addItem")}</button></div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{lang === "vi" ? "Chi tiết sản phẩm" : "Order items"}</h3>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button type="button" onClick={() => setItems(previous => [...previous, newLine()])} className="flex h-7 items-center gap-1 rounded border px-2 text-[11px] text-blue-600" style={{ borderColor: "var(--border)" }}><Plus size={12} /> {t("addItem")}</button>
+                  <button type="button" onClick={() => importFileRef.current?.click()} className="flex h-7 items-center gap-1 rounded border px-2 text-[11px] text-emerald-700" style={{ borderColor: "var(--border)" }}><Upload size={12} /> {lang === "vi" ? "Nhập từ file" : "Import file"}</button>
+                  <button type="button" onClick={downloadPurchaseItemCsvTemplate} title={lang === "vi" ? "Tải file CSV mẫu" : "Download CSV template"} className="flex h-7 items-center gap-1 rounded border px-2 text-[11px] text-slate-600" style={{ borderColor: "var(--border)" }}><FileDown size={12} /> CSV</button>
+                  <button type="button" onClick={() => void exportRowsToExcel([purchaseItemHeaders, ["", "", "", ""]], "mau-chi-tiet-don-mua", "Chi tiết đơn mua")} title={lang === "vi" ? "Tải file Excel mẫu" : "Download Excel template"} className="flex h-7 items-center gap-1 rounded border px-2 text-[11px] text-slate-600" style={{ borderColor: "var(--border)" }}><FileSpreadsheet size={12} /> Excel</button>
+                  <input ref={importFileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={event => {
+                    const file = event.target.files?.[0]
+                    if (file) void importPurchaseItems(file)
+                    event.currentTarget.value = ""
+                  }} />
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400">{lang === "vi" ? "File gồm SKU (hoặc tên sản phẩm), số lượng và đơn giá nhập. Có thể copy nhiều dòng từ bảng tính vào file mẫu." : "Use SKU (or product name), quantity and purchase price. Copy multiple spreadsheet rows into the template."}</p>
               <div className="overflow-auto rounded-xl border" style={{ borderColor: "var(--border)" }}><table className="w-full min-w-[650px] text-xs"><thead><tr className="border-b bg-slate-50" style={{ borderColor: "var(--border)" }}>{[t("product"), "SKU", t("qty"), t("unitPrice"), t("lineTotal"), ""].map(header => <th key={header} className="px-3 py-2 text-left text-[10px] uppercase text-slate-500">{header}</th>)}</tr></thead><tbody>
                 {items.map((item, index) => <tr key={index} className="border-b last:border-0" style={{ borderColor: "var(--border)" }}>
                   <td className="px-3 py-1.5"><select required value={item.product_id} onChange={event => { const product = products.find(row => String(row.id) === event.target.value); setItems(previous => previous.map((line, lineIndex) => lineIndex === index ? { ...line, product_id: product?.id ?? "", product_name: product?.name ?? "", sku: product?.sku ?? "", unit_cost: Number(product?.cost ?? 0) } : line)) }} className="h-8 w-60 rounded border bg-white px-2" style={{ borderColor: "var(--border)" }}><option value="">-- {lang === "vi" ? "Chọn sản phẩm" : "Select product"} --</option>{products.map(product => <option key={product.id} value={product.id}>{product.name} ({product.sku})</option>)}</select></td>

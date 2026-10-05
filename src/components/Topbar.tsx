@@ -8,6 +8,7 @@ interface TopbarProps {
   breadcrumbs: string[]
   onToggleSidebar: () => void
   onNavigate?: (screen: string) => void
+  onNavigateBack?: () => void
   userMenu?: React.ReactNode
 }
 
@@ -99,7 +100,7 @@ function NotifRow({ n, lang, onRead, onDismiss, onNavigate }: { n: AppNotificati
   )
 }
 
-export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userMenu }: TopbarProps) {
+export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, onNavigateBack, userMenu }: TopbarProps) {
   const { lang, setLang, t } = useLang()
   const { notifications, unreadCount, markRead, markAllRead, dismiss, dismissAll } = useNotifications()
   const { theme, resolvedTheme, setTheme } = useTheme()
@@ -133,7 +134,13 @@ export default function Topbar({ breadcrumbs, onToggleSidebar, onNavigate, userM
         {breadcrumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1 min-w-0">
             {i > 0 && <ChevronRight size={13} className="text-slate-300 flex-shrink-0" />}
-            <span className={`truncate ${i === breadcrumbs.length - 1 ? "text-slate-900 font-medium" : "text-slate-400"}`}>{crumb}</span>
+            {i === 0 && onNavigateBack ? (
+              <button type="button" onClick={onNavigateBack} title={lang === "vi" ? "Quay lại tab trước" : "Back to previous tab"} aria-label={lang === "vi" ? "Quay lại tab trước" : "Back to previous tab"} className="truncate text-slate-400 transition-colors hover:text-blue-600">
+                {crumb}
+              </button>
+            ) : (
+              <span className={`truncate ${i === breadcrumbs.length - 1 ? "text-slate-900 font-medium" : "text-slate-400"}`}>{crumb}</span>
+            )}
           </span>
         ))}
       </nav>

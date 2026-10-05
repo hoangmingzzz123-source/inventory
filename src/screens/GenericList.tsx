@@ -4,9 +4,10 @@ import StatusBadge from "../components/StatusBadge"
 import { customers, suppliers, warehouses, salesOrders, inventoryBalance, auditLogs, stockLedger } from "../data/mockData"
 import { useDemo } from "../contexts/DemoContext"
 import { useAuth } from "../contexts/AuthContext"
-import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchQuotationSettings, fetchUsers, fetchPurchaseReturns, fetchLookup, fetchMasterDataPage, upsertCompanySettings, upsertQuotationSettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn, type LookupKind, type MasterDataEntity } from "../lib/dataService"
+import { fetchCategories, fetchBrands, fetchCustomers, fetchSuppliers, fetchUnits, fetchWarehouses, fetchGoodsReceipts, fetchInventoryBalance, fetchInventoryLedger, fetchInventoryAdjustments, fetchInventoryTransfers, fetchSalesOrders, fetchPurchaseOrders, fetchProducts, fetchDeliveryNotes, fetchSalesReturns, fetchInvoices, fetchCashBook, fetchFinanceTransactions, fetchAuditEvents, fetchRoles, fetchRolePermissions, fetchCompanySettings, fetchQuotationSettings, fetchUsers, fetchPurchaseReturns, fetchLookup, fetchMasterDataPage, fetchQuotations, deliverQuotationAllocation, upsertCompanySettings, upsertQuotationSettings, upsertCategory, deleteCategory, bulkUpsertCategories, upsertBrand, deleteBrand, bulkUpsertBrands, upsertUnit, deleteUnit, bulkUpsertUnits, recordFinanceTransaction, upsertCustomer, deleteCustomer, upsertSupplier, deleteSupplier, upsertWarehouse, deleteWarehouse, bulkUpsertCustomers, bulkUpsertSuppliers, bulkUpsertWarehouses, upsertRole, deleteRole, upsertRolePermission, updateUserRole, createOrganizationInvitation, createPurchaseReturn, reversePurchaseReturn, upsertInventoryAdjustment, upsertInventoryTransfer, reverseInventoryAdjustment, reverseInventoryTransfer, upsertSalesOrder, deliverSalesOrder, reverseDeliveryNote, createSalesReturn, reverseSalesReturn, type LookupKind, type MasterDataEntity } from "../lib/dataService"
 import { useLang } from "../i18n/LangContext"
 import { exportRowsToExcel, importFromExcel, sanitizeSpreadsheetCell, saveExcelWorkbook } from "../lib/excelUtils"
+import { getVietnameseImportHeader } from "../lib/importTemplates"
 import { defaultQuotationSettings, loadCompanySettings, saveCompanySettings, type CompanySettings, type QuotationSettings } from "../lib/companySettings"
 import { formatDateKeyUtc7, formatDateTimeUtc7 } from "../lib/dateUtils"
 import { buildAgingBuckets, calculateCashBalance, deriveLedgerBalance, filterReportRows } from "../lib/reportService"
@@ -51,13 +52,13 @@ function normalizeImportHeader(value: unknown) {
     .toLowerCase()
 }
 
-function mapRowToColumns(raw: Record<string, any>, cols: string[], aliases: ImportColumnAliases = {}) {
+function mapRowToColumns(raw: Record<string, any>, cols: string[], aliases: ImportColumnAliases = {}, templateHeaders: Record<string, string> = {}) {
   const lowerKeys = Object.keys(raw).reduce<Record<string, string>>((acc, k) => ({
     ...acc,
     [normalizeImportHeader(k)]: k.toString(),
   }), {})
   return cols.reduce<Record<string, any>>((obj, col) => {
-    const lookup = [col, ...(aliases[col] ?? [])]
+    const lookup = [col, templateHeaders[col] ?? getVietnameseImportHeader(col), ...(aliases[col] ?? [])]
       .map(normalizeImportHeader)
       .map(candidate => lowerKeys[candidate])
       .find(Boolean)
@@ -85,7 +86,7 @@ function downloadTemplate(filename: string, cols: string[]) {
 }
 
 async function downloadTemplateXlsx(filename: string, cols: string[]) {
-  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Template")
+  await exportRowsToExcel([cols, cols.map(() => "")], `${filename}_template`, "Mẫu nhập")
 }
 
 function formatCsvCell(value: string | number) {
@@ -127,26 +128,27 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
       setProcessing(true)
       const expectedHeaders = cols.flatMap(column => [
         column,
-        templateHeaders[column] ?? "",
+        templateHeaders[column] ?? getVietnameseImportHeader(column),
         ...(columnAliases[column] ?? []),
       ]).filter(Boolean)
       const parsed = await importFromExcel(file, expectedHeaders)
       const keyField = getImportKeyField(cols)
+      const keyLabel = templateHeaders[keyField] ?? getVietnameseImportHeader(keyField)
       const existingSet = new Set((existingKeys ?? []).map(k => String(k).trim().toLowerCase()))
       const seen = new Set<string>()
       const rows = parsed.map((rawRow: any, index: number) => {
         const rowIndex = Number(rawRow.__rowNumber ?? index + 2)
-        const mappedRow = mapRowToColumns(rawRow, cols, columnAliases)
+        const mappedRow = mapRowToColumns(rawRow, cols, columnAliases, templateHeaders)
         const row = normalizeRow ? normalizeRow(mappedRow) : mappedRow
         const keyValue = String(row[keyField] ?? "").trim()
         const issues = [] as string[]
         if (!keyValue) {
-          issues.push(lang === "vi" ? `Thiếu ${keyField}` : `${keyField} missing`)
+          issues.push(lang === "vi" ? `Thiếu ${keyLabel}` : `${keyField} missing`)
         }
         const keyValueLower = keyValue.toLowerCase()
         const isDuplicate = keyValue ? existingSet.has(keyValueLower) || seen.has(keyValueLower) : false
         if (isDuplicate) {
-          issues.push(lang === "vi" ? `Trùng ${keyField}` : `${keyField} duplicate`)
+          issues.push(lang === "vi" ? `Trùng ${keyLabel}` : `${keyField} duplicate`)
         }
         if (keyValue) seen.add(keyValueLower)
         issues.push(...(validateRow?.(row, rowIndex) ?? []))
@@ -225,14 +227,14 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => downloadTemplate(filename, cols.map(column => templateHeaders[column] ?? column))}
+                    onClick={() => downloadTemplate(filename, cols.map(column => templateHeaders[column] ?? getVietnameseImportHeader(column)))}
                     className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-medium hover:bg-blue-700"
                   >
                     <FileDown size={12} />
                     {lang === "vi" ? "Mẫu CSV" : "CSV Template"}
                   </button>
                   <button
-                    onClick={() => void downloadTemplateXlsx(filename, cols.map(column => templateHeaders[column] ?? column))}
+                    onClick={() => void downloadTemplateXlsx(filename, cols.map(column => templateHeaders[column] ?? getVietnameseImportHeader(column)))}
                     className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700"
                   >
                     <FileSpreadsheet size={12} />
@@ -240,7 +242,7 @@ export function ImportModal({ onClose, filename, cols, lang, existingKeys, onImp
                   </button>
                 </div>
                 <div className="mt-2 text-[10px] text-slate-400 font-mono bg-slate-50 rounded-lg px-2 py-1.5 truncate">
-                  {cols.slice(0, 5).join(", ")}{cols.length > 5 ? ` +${cols.length - 5} more` : ""}
+                  {cols.map(column => templateHeaders[column] ?? getVietnameseImportHeader(column)).slice(0, 5).join(", ")}{cols.length > 5 ? ` +${cols.length - 5} more` : ""}
                 </div>
               </div>
             </div>
@@ -927,20 +929,178 @@ export function SalesOrders() {
   return <><div className="flex h-full flex-col"><Toolbar search={search} onSearch={setSearch} onCreate={can("Sales", "create") ? () => setShowCreate(true) : undefined} createLabel={lang === "vi" ? "Tạo đơn bán" : "Create sales order"} onRefresh={() => void reload()} onExportCsv={can("Sales", "export") ? () => exportCsv("sales-orders", heads, data.map(row => [row.date, row.doc_no, row.customer, row.warehouse_name, row.total, row.status])) : undefined} /><div className="flex-1 overflow-auto"><table className="w-full text-xs"><thead><tr className="border-b bg-slate-50">{[...heads, ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase text-slate-500">{head}</th>)}</tr></thead><tbody>{filteredData.map(row => <tr key={row.id} className="border-b"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium text-blue-600">{row.doc_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5">{row.warehouse_name}</td><td className="px-4 py-2.5 text-right font-semibold mono">{money(row.total)}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5">{can("Sales", "approve") && ["Draft", "Pending Approval"].includes(row.status) && <button onClick={() => void approve(row)} className="h-7 rounded-lg bg-blue-600 px-2 text-[10px] font-medium text-white">{lang === "vi" ? "Duyệt" : "Approve"}</button>}</td></tr>)}{!filteredData.length && <tr><td colSpan={7} className="py-16 text-center text-slate-400">{lang === "vi" ? "Không có đơn bán phù hợp" : "No matching sales orders"}</td></tr>}</tbody></table></div></div>{showCreate && <SalesDocumentModal kind="order" salesOrders={data} deliveries={[]} onClose={() => setShowCreate(false)} onSaved={reload} />}</>;
 }
 
-function SalesDocumentModal({ kind, salesOrders, deliveries, initialDeliveryRef, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; initialDeliveryRef?: string; onClose: () => void; onSaved: () => Promise<void> }) {
-  const { lang } = useLang(); const { isDemo } = useDemo(); const { profile } = useAuth()
-  const [products, setProducts] = useState<any[]>([]); const [warehouses, setWarehouses] = useState<any[]>([]); const [customers, setCustomers] = useState<any[]>([]); const [form, setForm] = useState<any>({ ref: "", customer_id: "", customer_name: "", warehouse_id: "", warehouse_name: "", sales_order_id: "", sales_order_ref: "", delivery_ref: "", reason: "" }); const [items, setItems] = useState<any[]>([{ product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }]); const [saving, setSaving] = useState(false)
-  useEffect(() => { Promise.all([fetchProducts({ isDemo, orgId: profile?.org_id }), fetchWarehouses({ isDemo, orgId: profile?.org_id }), fetchCustomers({ isDemo, orgId: profile?.org_id })]).then(([p, w, c]) => { setProducts(p.data ?? []); setWarehouses(w.data ?? []); setCustomers(c.data ?? []) }) }, [isDemo, profile])
-  const title = kind === "order" ? (lang === "vi" ? "Tạo đơn bán" : "Create sales order") : kind === "delivery" ? (lang === "vi" ? "Tạo phiếu giao hàng" : "Create delivery") : (lang === "vi" ? "Tạo phiếu trả hàng" : "Create return")
+function makeQuotationDeliveryRef(quotation: any) {
+  return `DN-QT-${String(quotation.id).slice(-8)}-${Date.now().toString().slice(-6)}`
+}
+
+function SalesDocumentModal({ kind, salesOrders, deliveries, quotations = [], initialDeliveryRef, onClose, onSaved }: { kind: "order" | "delivery" | "return"; salesOrders: any[]; deliveries: any[]; quotations?: any[]; initialDeliveryRef?: string; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { lang } = useLang()
+  const { isDemo } = useDemo()
+  const { profile } = useAuth()
+  const [products, setProducts] = useState<any[]>([])
+  const [warehouses, setWarehouses] = useState<any[]>([])
+  const [customers, setCustomers] = useState<any[]>([])
+  const [form, setForm] = useState<any>({ ref: "", customer_id: "", customer_name: "", warehouse_id: "", warehouse_name: "", sales_order_id: "", sales_order_ref: "", quotation_number: "", delivery_ref: "", reason: "" })
+  const [items, setItems] = useState<any[]>([{ product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])
+  const [deliverySource, setDeliverySource] = useState<"quotation" | "sales-order">("quotation")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      fetchProducts({ isDemo, orgId: profile?.org_id }),
+      fetchWarehouses({ isDemo, orgId: profile?.org_id }),
+      fetchCustomers({ isDemo, orgId: profile?.org_id }),
+    ]).then(([productResult, warehouseResult, customerResult]) => {
+      setProducts(productResult.data ?? [])
+      setWarehouses(warehouseResult.data ?? [])
+      setCustomers(customerResult.data ?? [])
+    })
+  }, [isDemo, profile])
+
+  const title = kind === "order"
+    ? (lang === "vi" ? "Tạo đơn bán" : "Create sales order")
+    : kind === "delivery"
+      ? (lang === "vi" ? "Tạo phiếu giao hàng" : "Create delivery")
+      : (lang === "vi" ? "Tạo phiếu trả hàng" : "Create return")
+  const selectedQuotation = quotations.find(row => String(row.quotation_number ?? "").trim().toLowerCase() === String(form.quotation_number ?? "").trim().toLowerCase())
+  const existingQuotationDelivery = selectedQuotation && deliveries.find(row => String(row.quotation_id ?? "") === String(selectedQuotation.id))
+  const quotationStatus = String(selectedQuotation?.status ?? "").toLowerCase()
+  const canDeliverQuotation = quotationStatus === "awaiting delivery" && !existingQuotationDelivery
+
   const setItem = (index: number, key: string, value: any) => setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item))
-  const chooseProduct = (index: number, id: string) => { const product = products.find(row => String(row.id) === String(id)); setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_id: id, product_name: product?.name ?? "", unit_cost: Number(product?.cost ?? 0), unit_price: Number(product?.price ?? 0) } : item)) }
-  const chooseWarehouse = (id: string) => { const warehouse = warehouses.find(row => String(row.id) === String(id)); setForm({ ...form, warehouse_id: id, warehouse_name: warehouse?.name ?? "" }) }
-  const chooseCustomer = (id: string) => { const customer = customers.find(row => String(row.id) === String(id)); setForm({ ...form, customer_id: id, customer_name: customer?.name ?? "" }) }
-  const chooseOrder = (id: string) => { const order = salesOrders.find(row => String(row.id) === String(id)); setForm({ ...form, sales_order_id: id, sales_order_ref: order?.ref ?? "", customer_id: order?.customer_id ?? "", customer_name: order?.customer_name ?? order?.customer ?? "", warehouse_id: order?.warehouse_id ?? "", warehouse_name: order?.warehouse_name ?? "" }); if (order?.items?.length) setItems(order.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: Number(item.remaining_qty ?? item.qty ?? 0), max_qty: Number(item.remaining_qty ?? item.qty ?? 0), unit_price: Number(item.unit_price ?? item.price ?? 0), unit_cost: Number(item.unit_cost ?? item.cost ?? 0) })).filter((item: any) => item.qty > 0)) }
-  const chooseDelivery = (ref: string) => { const delivery = deliveries.find(row => row.ref === ref); setForm({ ...form, delivery_ref: ref, customer_name: delivery?.customer_name ?? "", warehouse_id: delivery?.warehouse_id ?? "", warehouse_name: delivery?.warehouse_name ?? "" }); if (delivery?.items?.length) setItems(delivery.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: 0, max_qty: Number(item.qty ?? 0) }))) }
-  useEffect(() => { if (kind === "return" && initialDeliveryRef) chooseDelivery(initialDeliveryRef) }, [kind, initialDeliveryRef, deliveries])
-  async function submit(event: React.FormEvent) { event.preventDefault(); const validItems = items.filter(item => item.product_id && Number(item.qty) > 0); if (new Set(validItems.map(item => item.product_id)).size !== validItems.length) return showAppToast(lang === "vi" ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong chứng từ" : "Each product may only appear once in a document"); setSaving(true); const payload = { ...form, items: validItems }; const result = kind === "order" ? await upsertSalesOrder({ ...payload, subtotal: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0), total: validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0) }, { isDemo, orgId: profile?.org_id }) : kind === "delivery" ? await deliverSalesOrder(payload, { isDemo, orgId: profile?.org_id }) : await createSalesReturn(payload, { isDemo, orgId: profile?.org_id }); setSaving(false); if (result.error) return showAppToast(result.error.message ?? String(result.error)); await onSaved(); onClose() }
-  return <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}><form onSubmit={submit} onClick={event => event.stopPropagation()} className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"><div className="flex items-center justify-between px-5 py-3.5 border-b"><h2 className="text-sm font-semibold">{title}</h2><button type="button" onClick={onClose}><X size={14} /></button></div><div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto"><div className="grid grid-cols-2 gap-3"><label className="text-[11px] font-medium">{lang === "vi" ? "Số chứng từ" : "Reference"}<input required value={form.ref} onChange={event => setForm({ ...form, ref: event.target.value })} className="mt-1 w-full h-8 px-3 rounded-lg border text-xs" /></label>{kind === "order" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Khách hàng" : "Customer"}<select required value={form.customer_id} onChange={event => chooseCustomer(event.target.value)} className="mt-1 w-full h-8 rounded-lg border bg-white px-2 text-xs"><option value="">Select</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label> : kind === "delivery" ? <label className="text-[11px] font-medium">{lang === "vi" ? "Đơn bán" : "Sales order"}<select required value={form.sales_order_id} onChange={event => chooseOrder(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{salesOrders.filter(row => ["Approved", "Partial"].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.ref} · {row.customer_name ?? row.customer}</option>)}</select></label> : <label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu giao" : "Delivery"}<select required value={form.delivery_ref} onChange={event => chooseDelivery(event.target.value)} className="mt-1 w-full h-8 rounded-lg border text-xs"><option value="">Select</option>{deliveries.filter(row => row.status !== "Reversed").map(row => <option key={row.ref} value={row.ref}>{row.ref} · {row.customer_name}</option>)}</select></label>}<label className="text-[11px] font-medium">{lang === "vi" ? "Kho" : "Warehouse"}<select required disabled={kind !== "order"} value={form.warehouse_id} onChange={event => chooseWarehouse(event.target.value)} className="mt-1 w-full h-8 rounded-lg border bg-white text-xs disabled:bg-slate-50"><option value="">Select</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div><div className="border rounded-xl overflow-hidden"><div className="flex justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold"><span>{lang === "vi" ? "Sản phẩm" : "Items"}</span>{kind === "order" && <button type="button" onClick={() => setItems([...items, { product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])} className="text-blue-600">+ Add</button>}</div>{items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_100px_110px_28px] gap-2 p-3 border-t"><select required disabled={kind !== "order"} value={item.product_id ?? ""} onChange={event => chooseProduct(index, event.target.value)} className="h-8 rounded-lg border text-xs disabled:bg-slate-50"><option value="">Select product</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select><input required min="0.01" step="0.01" type="number" value={item.qty} onChange={event => setItem(index, "qty", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" />{kind === "order" ? <input min="0" type="number" value={item.unit_price} onChange={event => setItem(index, "unit_price", event.target.value)} className="h-8 px-2 rounded-lg border text-xs" /> : <span className="text-[11px] text-slate-500 self-center truncate">{item.product_name}</span>}{kind === "order" ? <button type="button" onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button> : <span />}</div>)}</div></div><div className="flex justify-end gap-2 px-5 py-3.5 border-t bg-slate-50"><button type="button" onClick={onClose} className="h-8 px-4 rounded-lg border text-xs">Cancel</button><button disabled={saving} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs">{saving ? "Saving..." : "Save"}</button></div></form></div>
+  const chooseProduct = (index: number, id: string) => {
+    const product = products.find(row => String(row.id) === String(id))
+    setItems(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, product_id: id, product_name: product?.name ?? "", unit_cost: Number(product?.cost ?? 0), unit_price: Number(product?.price ?? 0) } : item))
+  }
+  const chooseWarehouse = (id: string) => {
+    const warehouse = warehouses.find(row => String(row.id) === String(id))
+    setForm((current: any) => ({ ...current, warehouse_id: id, warehouse_name: warehouse?.name ?? "" }))
+  }
+  const chooseCustomer = (id: string) => {
+    const customer = customers.find(row => String(row.id) === String(id))
+    setForm((current: any) => ({ ...current, customer_id: id, customer_name: customer?.name ?? "" }))
+  }
+  const chooseOrder = (id: string) => {
+    const order = salesOrders.find(row => String(row.id) === String(id))
+    setForm((current: any) => ({ ...current, sales_order_id: id, sales_order_ref: order?.ref ?? "", customer_id: order?.customer_id ?? "", customer_name: order?.customer_name ?? order?.customer ?? "", warehouse_id: order?.warehouse_id ?? "", warehouse_name: order?.warehouse_name ?? "" }))
+    if (order?.items?.length) setItems(order.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: Number(item.remaining_qty ?? item.qty ?? 0), max_qty: Number(item.remaining_qty ?? item.qty ?? 0), unit_price: Number(item.unit_price ?? item.price ?? 0), unit_cost: Number(item.unit_cost ?? item.cost ?? 0) })).filter((item: any) => item.qty > 0))
+  }
+  const chooseQuotation = (value: string) => {
+    const match = quotations.find(row => String(row.quotation_number ?? "").trim().toLowerCase() === value.trim().toLowerCase())
+    setForm((current: any) => ({
+      ...current,
+      quotation_number: value,
+      ...(match ? {
+        ref: !current.ref || String(current.ref).startsWith("DN-QT-") ? makeQuotationDeliveryRef(match) : current.ref,
+        customer_id: match.customer_id ?? "",
+        customer_name: match.customer_name ?? "",
+        warehouse_id: match.warehouse_id ?? "",
+        warehouse_name: match.warehouse_name ?? "",
+      } : {}),
+    }))
+  }
+  const chooseDelivery = (ref: string) => {
+    const delivery = deliveries.find(row => row.ref === ref)
+    setForm((current: any) => ({ ...current, delivery_ref: ref, customer_name: delivery?.customer_name ?? "", warehouse_id: delivery?.warehouse_id ?? "", warehouse_name: delivery?.warehouse_name ?? "" }))
+    if (delivery?.items?.length) setItems(delivery.items.map((item: any) => ({ ...item, product_id: item.product_id, qty: 0, max_qty: Number(item.qty ?? 0) })))
+  }
+  useEffect(() => {
+    if (kind === "return" && initialDeliveryRef) chooseDelivery(initialDeliveryRef)
+  }, [kind, initialDeliveryRef, deliveries])
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (kind === "delivery" && deliverySource === "quotation") {
+      if (!selectedQuotation) return showAppToast(lang === "vi" ? "Chọn hoặc nhập chính xác số báo giá." : "Select or enter an exact quotation number.")
+      if (!canDeliverQuotation) return showAppToast(lang === "vi" ? "Báo giá cần ở trạng thái Chờ giao hàng và chưa có phiếu giao." : "The quotation must be awaiting delivery and have no existing delivery note.")
+      if (!await confirmAppAction(lang === "vi" ? `Tạo phiếu giao và xuất kho theo báo giá ${selectedQuotation.quotation_number}?` : `Create a delivery note and issue stock for quotation ${selectedQuotation.quotation_number}?`)) return
+      const ref = String(form.ref ?? "").trim() || makeQuotationDeliveryRef(selectedQuotation)
+      setSaving(true)
+      const result = await deliverQuotationAllocation(selectedQuotation.id, ref, { isDemo, orgId: profile?.org_id })
+      setSaving(false)
+      if (result.error) return showAppToast(result.error.message ?? String(result.error))
+      await onSaved()
+      showAppToast(lang === "vi" ? `Đã tạo phiếu giao ${ref} và xuất kho.` : `Delivery note ${ref} created and stock issued.`, "success")
+      onClose()
+      return
+    }
+
+    const validItems = items.filter(item => item.product_id && Number(item.qty) > 0)
+    if (new Set(validItems.map(item => item.product_id)).size !== validItems.length) return showAppToast(lang === "vi" ? "Mỗi sản phẩm chỉ được xuất hiện một lần trong chứng từ" : "Each product may only appear once in a document")
+    setSaving(true)
+    const payload = { ...form, items: validItems }
+    const subtotal = validItems.reduce((sum, item) => sum + Number(item.qty) * Number(item.unit_price), 0)
+    const result = kind === "order"
+      ? await upsertSalesOrder({ ...payload, subtotal, total: subtotal }, { isDemo, orgId: profile?.org_id })
+      : kind === "delivery"
+        ? await deliverSalesOrder(payload, { isDemo, orgId: profile?.org_id })
+        : await createSalesReturn(payload, { isDemo, orgId: profile?.org_id })
+    setSaving(false)
+    if (result.error) return showAppToast(result.error.message ?? String(result.error))
+    await onSaved()
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <form onSubmit={submit} onClick={event => event.stopPropagation()} className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-3.5"><h2 className="text-sm font-semibold">{title}</h2><button type="button" onClick={onClose}><X size={14} /></button></div>
+        <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
+          {kind === "delivery" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-[11px] font-medium text-slate-500">{lang === "vi" ? "Tạo từ" : "Create from"}</span>
+              <button type="button" onClick={() => setDeliverySource("quotation")} className={`h-7 rounded-lg border px-3 text-[11px] ${deliverySource === "quotation" ? "border-blue-300 bg-blue-50 font-semibold text-blue-700" : "text-slate-500"}`}>{lang === "vi" ? "Báo giá" : "Quotation"}</button>
+              <button type="button" onClick={() => setDeliverySource("sales-order")} className={`h-7 rounded-lg border px-3 text-[11px] ${deliverySource === "sales-order" ? "border-blue-300 bg-blue-50 font-semibold text-blue-700" : "text-slate-500"}`}>{lang === "vi" ? "Đơn bán hàng" : "Sales order"}</button>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-[11px] font-medium">{kind === "delivery" && deliverySource === "quotation" ? (lang === "vi" ? "Số phiếu giao" : "Delivery note number") : (lang === "vi" ? "Số chứng từ" : "Reference")}
+              <input required value={form.ref} onChange={event => setForm((current: any) => ({ ...current, ref: event.target.value }))} className="mt-1 h-8 w-full rounded-lg border px-3 text-xs" />
+            </label>
+            {kind === "order" ? (
+              <label className="text-[11px] font-medium">{lang === "vi" ? "Khách hàng" : "Customer"}<select required value={form.customer_id} onChange={event => chooseCustomer(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs"><option value="">{lang === "vi" ? "Chọn khách hàng" : "Select customer"}</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+            ) : kind === "delivery" && deliverySource === "quotation" ? (
+              <label className="text-[11px] font-medium">{lang === "vi" ? "Số báo giá" : "Quotation number"}
+                <input list="delivery-quotation-options" required value={form.quotation_number} onChange={event => chooseQuotation(event.target.value)} placeholder={lang === "vi" ? "Nhập hoặc chọn số báo giá" : "Type or select quotation number"} className="mt-1 h-8 w-full rounded-lg border px-3 text-xs" />
+                <datalist id="delivery-quotation-options">{quotations.filter(row => row.quotation_number).map(row => <option key={row.id} value={row.quotation_number}>{row.customer_name} · {row.status}</option>)}</datalist>
+              </label>
+            ) : kind === "delivery" ? (
+              <label className="text-[11px] font-medium">{lang === "vi" ? "Đơn bán" : "Sales order"}<select required value={form.sales_order_id} onChange={event => chooseOrder(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs"><option value="">{lang === "vi" ? "Chọn đơn bán" : "Select sales order"}</option>{salesOrders.filter(row => ["Approved", "Partial"].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.ref} · {row.customer_name ?? row.customer}</option>)}</select></label>
+            ) : (
+              <label className="text-[11px] font-medium">{lang === "vi" ? "Phiếu giao" : "Delivery"}<select required value={form.delivery_ref} onChange={event => chooseDelivery(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs"><option value="">{lang === "vi" ? "Chọn phiếu giao" : "Select delivery"}</option>{deliveries.filter(row => row.status !== "Reversed").map(row => <option key={row.ref} value={row.ref}>{row.ref} · {row.customer_name}</option>)}</select></label>
+            )}
+            {(kind === "order" || (kind === "delivery" && deliverySource === "sales-order")) && <label className="text-[11px] font-medium">{lang === "vi" ? "Kho" : "Warehouse"}<select required disabled={kind !== "order"} value={form.warehouse_id} onChange={event => chooseWarehouse(event.target.value)} className="mt-1 h-8 w-full rounded-lg border bg-white px-2 text-xs disabled:bg-slate-50"><option value="">{lang === "vi" ? "Chọn kho" : "Select warehouse"}</option>{warehouses.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>}
+          </div>
+
+          {kind === "delivery" && deliverySource === "quotation" && selectedQuotation && (
+            <div className={`rounded-xl border p-3 text-[11px] ${canDeliverQuotation ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              <div className="font-semibold">{selectedQuotation.customer_name || (lang === "vi" ? "Khách hàng" : "Customer")} · {selectedQuotation.status}</div>
+              {canDeliverQuotation
+                ? (lang === "vi" ? "Báo giá đã phân bổ hàng và sẵn sàng tạo phiếu giao." : "This quotation has allocated inventory and is ready for delivery.")
+                : existingQuotationDelivery
+                  ? (lang === "vi" ? `Đã có phiếu giao ${existingQuotationDelivery.ref}.` : `Delivery ${existingQuotationDelivery.ref} already exists.`)
+                  : quotationStatus === "accepted"
+                    ? (lang === "vi" ? "Báo giá đã chấp thuận. Hãy phân bổ SKU trong màn Báo giá trước khi tạo phiếu giao." : "The quotation is accepted. Allocate SKUs from Quotations before creating a delivery note.")
+                    : (lang === "vi" ? "Chỉ báo giá ở trạng thái Chờ giao hàng mới tạo được phiếu giao." : "Only quotations awaiting delivery can create a delivery note.")}
+            </div>
+          )}
+
+          {kind !== "delivery" || deliverySource === "sales-order" ? (
+            <div className="overflow-hidden rounded-xl border">
+              <div className="flex justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold"><span>{lang === "vi" ? "Sản phẩm" : "Items"}</span>{kind === "order" && <button type="button" onClick={() => setItems(current => [...current, { product_id: "", product_name: "", qty: 1, unit_price: 0, unit_cost: 0 }])} className="text-blue-600">+ {lang === "vi" ? "Thêm dòng" : "Add"}</button>}</div>
+              {items.map((item, index) => <div key={index} className="grid grid-cols-[1fr_100px_110px_28px] gap-2 border-t p-3">
+                <select required disabled={kind !== "order"} value={item.product_id ?? ""} onChange={event => chooseProduct(index, event.target.value)} className="h-8 rounded-lg border bg-white px-2 text-xs disabled:bg-slate-50"><option value="">{lang === "vi" ? "Chọn sản phẩm" : "Select product"}</option>{products.map(row => <option key={row.id} value={row.id}>{row.sku} · {row.name}</option>)}</select>
+                <input required min="0.01" step="0.01" type="number" value={item.qty} onChange={event => setItem(index, "qty", event.target.value)} className="h-8 rounded-lg border px-2 text-xs" />
+                {kind === "order" ? <input min="0" type="number" value={item.unit_price} onChange={event => setItem(index, "unit_price", event.target.value)} className="h-8 rounded-lg border px-2 text-xs" /> : <span className="self-center truncate text-[11px] text-slate-500">{item.product_name}</span>}
+                {kind === "order" ? <button type="button" onClick={() => setItems(current => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button> : <span />}
+              </div>)}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-3.5"><button type="button" onClick={onClose} className="h-8 rounded-lg border px-4 text-xs">{lang === "vi" ? "Hủy" : "Cancel"}</button><button disabled={saving || (kind === "delivery" && deliverySource === "quotation" && !canDeliverQuotation)} className="h-8 rounded-lg bg-blue-600 px-4 text-xs text-white disabled:opacity-50">{saving ? (lang === "vi" ? "Đang lưu..." : "Saving...") : (kind === "delivery" && deliverySource === "quotation" ? (lang === "vi" ? "Tạo phiếu giao" : "Create delivery") : (lang === "vi" ? "Lưu" : "Save"))}</button></div>
+      </form>
+    </div>
+  )
 }
 
 // --- NEXT ---
@@ -1018,25 +1178,46 @@ export function InventoryAdjustment() {
 
 // --- NEXT ---
 const categoryImportAliases: ImportColumnAliases = {
-  code: ["CODE", "Mã", "Mã danh mục"],
-  name: ["NAME", "Tên", "Tên danh mục"],
-  status: ["STATUS", "Trạng thái"],
-  default_unit: ["ĐVT", "DVT", "Đơn vị", "Đơn vị tính"],
-  default_purchase_price: ["giá nhập", "Giá mua", "DefaultPurchasePrice"],
-  default_sale_price: ["giá xuất", "giá bán", "DefaultSalePrice"],
-  has_vat: ["có vat hay không", "Có VAT", "HasVat"],
+  code: ["CODE", "Mã", "Mã danh mục", "Mã hàng"],
+  name: ["NAME", "Tên", "Tên danh mục", "Danh mục"],
+  status: ["STATUS", "Tình trạng", "Hoạt động"],
+  default_unit: ["ĐVT", "DVT", "Đơn vị", "Đơn vị tính", "Đơn vị mặc định"],
+  default_purchase_price: ["giá nhập", "Giá mua", "Giá nhập tham khảo", "DefaultPurchasePrice"],
+  default_sale_price: ["giá xuất", "giá bán", "Giá bán tham khảo", "DefaultSalePrice"],
+  has_vat: ["có vat hay không", "Có VAT không", "HasVat"],
   default_vat_rate: ["vat", "VAT (%)", "Thuế suất", "DefaultVatRate"],
 }
 
 const categoryTemplateHeaders: Record<string, string> = {
-  code: "CODE",
-  name: "NAME",
-  status: "STATUS",
-  default_unit: "ĐVT",
-  default_purchase_price: "giá nhập",
-  default_sale_price: "giá xuất",
-  has_vat: "có vat hay không",
-  default_vat_rate: "vat",
+  code: "Mã danh mục",
+  name: "Tên danh mục",
+  status: "Trạng thái",
+  default_unit: "Đơn vị tính mặc định",
+  default_purchase_price: "Giá nhập mặc định",
+  default_sale_price: "Giá bán mặc định",
+  has_vat: "Có VAT",
+  default_vat_rate: "Thuế suất VAT (%)",
+}
+
+function parseLocalizedNumber(value: unknown) {
+  if (typeof value === "number") return value
+  let normalized = String(value ?? "").trim().replace(/\s/g, "").replace(/₫|vnd|%/gi, "")
+  if (!normalized) return 0
+  const comma = normalized.lastIndexOf(",")
+  const dot = normalized.lastIndexOf(".")
+  if (comma >= 0 && dot >= 0) {
+    const decimalSeparator = comma > dot ? "," : "."
+    const groupingSeparator = decimalSeparator === "," ? "." : ","
+    normalized = normalized.split(groupingSeparator).join("")
+    if (decimalSeparator === ",") normalized = normalized.replace(",", ".")
+  } else if (comma >= 0) {
+    const parts = normalized.split(",")
+    normalized = parts.length > 2 || parts.at(-1)?.length === 3 ? parts.join("") : normalized.replace(",", ".")
+  } else if (dot >= 0) {
+    const parts = normalized.split(".")
+    normalized = parts.length > 2 || parts.at(-1)?.length === 3 ? parts.join("") : normalized
+  }
+  return Number(normalized)
 }
 
 function parseCategoryBoolean(value: unknown) {
@@ -1049,16 +1230,22 @@ function parseCategoryBoolean(value: unknown) {
 
 function normalizeCategoryImportRow(row: Record<string, any>) {
   const hasVat = parseCategoryBoolean(row.has_vat)
+  const statusValue = normalizeImportHeader(row.status)
+  const status = ["hoat dong", "dang hoat dong", "active"].includes(statusValue)
+    ? "Active"
+    : ["ngung hoat dong", "khong hoat dong", "inactive"].includes(statusValue)
+      ? "Inactive"
+      : String(row.status || "Active").trim()
   return {
     ...row,
     code: String(row.code ?? "").trim(),
     name: String(row.name ?? "").trim(),
-    status: String(row.status || "Active").trim(),
+    status,
     default_unit: String(row.default_unit ?? "").trim(),
-    default_purchase_price: row.default_purchase_price === "" ? 0 : Number(row.default_purchase_price),
-    default_sale_price: row.default_sale_price === "" ? 0 : Number(row.default_sale_price),
+    default_purchase_price: parseLocalizedNumber(row.default_purchase_price),
+    default_sale_price: parseLocalizedNumber(row.default_sale_price),
     has_vat: hasVat ?? row.has_vat,
-    default_vat_rate: hasVat === false || row.default_vat_rate === "" ? 0 : Number(row.default_vat_rate),
+    default_vat_rate: hasVat === false ? 0 : parseLocalizedNumber(row.default_vat_rate),
   }
 }
 
@@ -3081,6 +3268,7 @@ export function DeliveryNotes() {
   const { lang } = useLang()
   const [data, setData] = useState<any[]>([])
   const [returns, setReturns] = useState<any[]>([])
+  const [quotations, setQuotations] = useState<any[]>([])
   const { isDemo } = useDemo()
   const { profile, can } = useAuth()
   const [salesOrders, setSalesOrders] = useState<any[]>([])
@@ -3088,15 +3276,21 @@ export function DeliveryNotes() {
   const [returnDeliveryRef, setReturnDeliveryRef] = useState<string | null>(null)
   const [error, setError] = useState("")
   const reload = async () => {
-    const [deliveryResult, orderResult, returnResult] = await Promise.all([
+    const [deliveryResult, orderResult, returnResult, quotationResult] = await Promise.all([
       fetchDeliveryNotes({ isDemo, orgId: profile?.org_id }),
       fetchSalesOrders({ isDemo, orgId: profile?.org_id }),
       fetchSalesReturns({ isDemo, orgId: profile?.org_id }),
+      fetchQuotations({ isDemo, orgId: profile?.org_id }),
     ])
-    setData((deliveryResult.data ?? []).map((row: any) => ({ ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref ?? "", so_no: row.sales_order_ref ?? "", customer: row.customer_name ?? "" })))
+    const quotationRows = quotationResult.data ?? []
+    setData((deliveryResult.data ?? []).map((row: any) => {
+      const quotation = quotationRows.find((item: any) => String(item.id) === String(row.quotation_id))
+      return { ...row, date: row.created_at ? formatDateTimeUtc7(row.created_at) : "", doc_no: row.ref ?? "", so_no: quotation?.quotation_number ?? row.sales_order_ref ?? "", customer: row.customer_name ?? "" }
+    }))
     setSalesOrders(orderResult.data ?? [])
     setReturns(returnResult.data ?? [])
-    const firstError = deliveryResult.error ?? orderResult.error ?? returnResult.error
+    setQuotations(quotationRows)
+    const firstError = deliveryResult.error ?? orderResult.error ?? returnResult.error ?? quotationResult.error
     setError(firstError ? firstError.message ?? String(firstError) : "")
   }
   useEffect(() => { void reload() }, [isDemo, profile?.org_id])
@@ -3115,7 +3309,7 @@ export function DeliveryNotes() {
       <div className="flex-1 overflow-auto">
         <div className="border-b bg-slate-50 px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{lang === "vi" ? "Phiếu giao hàng" : "Delivery notes"}</div>
         <table className="w-full min-w-[900px] border-collapse text-xs">
-          <thead><tr className="border-b bg-slate-50">{["DATE", "DOC_NO", "SO_NO", "CUSTOMER", "STATUS", "INVOICE", ""].map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500">{head}</th>)}</tr></thead>
+          <thead><tr className="border-b bg-slate-50">{(lang === "vi" ? ["Ngày", "Số phiếu giao", "Số báo giá/đơn bán", "Khách hàng", "Trạng thái", "Hóa đơn", ""] : ["DATE", "DELIVERY NOTE", "QUOTATION/ORDER", "CUSTOMER", "STATUS", "INVOICE", ""]).map(head => <th key={head} className="px-4 py-2.5 text-left text-[10px] font-semibold text-slate-500">{head}</th>)}</tr></thead>
           <tbody>
             {data.map(row => <tr key={row.ref} className="border-b hover:bg-slate-50/60"><td className="px-4 py-2.5">{row.date}</td><td className="px-4 py-2.5 font-medium">{row.doc_no}</td><td className="px-4 py-2.5">{row.so_no}</td><td className="px-4 py-2.5">{row.customer}</td><td className="px-4 py-2.5"><StatusBadge status={row.status} /></td><td className="px-4 py-2.5 text-blue-600">{row.invoice_ref ?? "-"}</td><td className="flex gap-1 px-4 py-2.5">{can("Sales", "approve") && <button disabled={row.status === "Reversed"} onClick={() => void reverseDelivery(row.ref)} className="h-7 rounded border px-2 text-[10px] disabled:opacity-40">{lang === "vi" ? "Đảo" : "Reverse"}</button>}{can("Sales", "create") && <button disabled={row.status === "Reversed"} onClick={() => setReturnDeliveryRef(row.ref)} className="h-7 rounded border px-2 text-[10px] disabled:opacity-40">{lang === "vi" ? "Trả" : "Return"}</button>}</td></tr>)}
             {!data.length && <tr><td colSpan={7} className="py-12 text-center text-slate-400">{lang === "vi" ? "Chưa có phiếu giao" : "No delivery notes"}</td></tr>}
@@ -3130,7 +3324,7 @@ export function DeliveryNotes() {
           </tbody>
         </table>
       </div>
-      {showCreate && <SalesDocumentModal kind="delivery" salesOrders={salesOrders} deliveries={data} onClose={() => setShowCreate(false)} onSaved={reload} />}
+      {showCreate && <SalesDocumentModal kind="delivery" salesOrders={salesOrders} deliveries={data} quotations={quotations} onClose={() => setShowCreate(false)} onSaved={reload} />}
       {returnDeliveryRef && <SalesDocumentModal kind="return" salesOrders={salesOrders} deliveries={data} initialDeliveryRef={returnDeliveryRef} onClose={() => setReturnDeliveryRef(null)} onSaved={reload} />}
     </div>
   )
